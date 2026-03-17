@@ -133,7 +133,7 @@ export const BALANCE = {
     /** Maximum number of members per alliance (GAME_RULES.md §11) */
     maxMembers: 100,
 
-    /** Maximum mining royalty percentage a system owner may set (GAME_RULES.md §13) */
+    /** Maximum royalty percentage the governance holder may set (GAME_RULES.md §13) */
     royaltyCapPercent: 20,
   },
 
@@ -146,6 +146,98 @@ export const BALANCE = {
      * Each permit adds +1 colony slot. (GAME_RULES.md §14.2)
      */
     maxColonyPermitsPerAccount: 2,
+  },
+
+  // -------------------------------------------------------------------------
+  // System influence and majority control (GAME_RULES.md §4.3)
+  // -------------------------------------------------------------------------
+  influence: {
+    /**
+     * Influence contributed per active colony per population tier.
+     * A tier-3 colony contributes 30 influence (10 × 3).
+     */
+    colonyPerTierWeight: 10,
+
+    /** Influence per active non-extractor structure. */
+    structureWeight: 5,
+
+    /** Influence per active extractor (lower than other structures). */
+    extractorWeight: 3,
+
+    /**
+     * One-time bonus for owning the system's hyperspace gate.
+     * Applied to the gate owner's influence in that system.
+     */
+    gateOwnerBonus: 50,
+
+    /**
+     * Minimum number of bodies with active colonies required for the majority
+     * control threshold to become active in a system.
+     */
+    majorityThresholdMinColonies: 3,
+
+    /**
+     * Hours after majority control becomes contested before governance reverts
+     * to the steward (if no new majority forms).
+     */
+    contestedRevertHours: 48,
+  },
+
+  // -------------------------------------------------------------------------
+  // Hyperspace gates (GAME_RULES.md §8.2)
+  // -------------------------------------------------------------------------
+  gates: {
+    /** Hours to build a new gate from scratch */
+    constructionHours: 24,
+
+    /** Hours to reclaim a neutral gate (reduced cost compared to new construction) */
+    reclaimHours: 6,
+  },
+
+  // -------------------------------------------------------------------------
+  // Inactivity and colony collapse (GAME_RULES.md §20)
+  // -------------------------------------------------------------------------
+  inactivity: {
+    /** Days without login before colonies enter abandoned state */
+    thresholdDays: 30,
+
+    /**
+     * Days in abandoned state before collapse (the resolution window).
+     * Player must log in during this period to reactivate colonies.
+     */
+    resolutionWindowDays: 7,
+  },
+
+  // -------------------------------------------------------------------------
+  // Emergency Universal Exchange (GAME_RULES.md §19)
+  // -------------------------------------------------------------------------
+  emergencyExchange: {
+    /**
+     * Multiplier applied to the floor price for EUX resource rates.
+     * Set above 5× to ensure player markets are always preferred.
+     */
+    markupMultiplier: 5,
+
+    /**
+     * Floor price (Credits per unit) for each EUX common resource.
+     * EUX price = floorPrice[resource] × markupMultiplier.
+     */
+    floorPricePerUnit: {
+      iron: 4,
+      carbon: 5,
+      ice: 3,
+    } as Record<string, number>,
+
+    /**
+     * Maximum total units a single player may purchase per day (across all EUX resources).
+     */
+    dailyLimitUnits: 500,
+
+    /**
+     * Flat transaction fee percentage added on top of the marked-up price (burned).
+     * Provides additional credit sink and discourages over-reliance.
+     */
+    transactionFeePercent: 10,
   },
 } as const;
 

@@ -17,7 +17,7 @@ import type { PlaceBidResult } from "@/lib/types/api";
 // ---------------------------------------------------------------------------
 
 const createAuctionSchema = z.object({
-  itemType: z.enum(["colony", "system", "ship", "item"]),
+  itemType: z.enum(["colony", "stewardship", "ship", "item"]),
   itemId: z.string().min(1),
   minBid: z.number().int().min(0),
   startsAt: z.string().datetime(),

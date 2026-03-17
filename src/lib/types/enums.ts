@@ -1,5 +1,5 @@
 /**
- * Game enums — mirror the Postgres enum types defined in 00001_enums.sql.
+ * Game enums — mirror the Postgres enum types defined in the migrations.
  * These are string union types (not TypeScript enums) for compatibility with Supabase.
  */
 
@@ -9,12 +9,25 @@ export type LaneAccess = "public" | "alliance_only" | "private";
 
 export type AllianceRole = "founder" | "officer" | "member";
 
+/** Colony-level structure types. Hyperspace gates are a separate system-level entity. */
 export type StructureType =
   | "extractor"
   | "warehouse"
-  | "shipyard"
+  | "shipyard" // post-alpha only
   | "trade_hub"
   | "relay_station";
+
+/** Colony lifecycle state (see GAME_RULES.md §20). */
+export type ColonyStatus =
+  | "active"    // operating normally
+  | "abandoned" // owner inactive; no production/influence; within resolution window
+  | "collapsed"; // resolution window expired; body is claimable again
+
+/** Hyperspace gate operational state (see GAME_RULES.md §8.2). */
+export type GateStatus =
+  | "inactive" // under construction
+  | "active"   // operational; governance holder controls access policy
+  | "neutral"; // governance changed; public access; no active owner managing it
 
 export type OrderSide = "sell" | "buy";
 
@@ -29,12 +42,22 @@ export type AuctionStatus = "active" | "resolved" | "cancelled";
 
 export type WorldEventType =
   | "system_discovered"
+  | "stewardship_registered"   // first discoverer becomes steward
+  | "stewardship_transferred"  // stewardship sold or voluntarily transferred
+  | "majority_control_gained"  // player/alliance crosses influence threshold
+  | "majority_control_lost"    // majority controller falls below threshold
   | "colony_founded"
+  | "colony_abandoned"         // player went inactive; colony enters abandoned state
+  | "colony_collapsed"         // resolution window expired; body is claimable
+  | "colony_reactivated"       // player returned during resolution window
   | "colony_sold"
-  | "system_sold"
+  | "system_sold"              // stewardship auctioned/transferred
+  | "gate_built"
+  | "gate_neutralized"         // gate control reset on governance transfer
+  | "gate_reclaimed"           // new governance holder reactivated a neutral gate
+  | "lane_built"
   | "alliance_formed"
-  | "alliance_dissolved"
-  | "lane_built";
+  | "alliance_dissolved";
 
 export type PremiumItemType =
   | "ship_skin"
@@ -49,18 +72,26 @@ export type PremiumItemType =
 
 /** Resource type codes used in inventory, market, and extraction. */
 export type ResourceType =
-  // Common
+  // Common (available via Emergency Universal Exchange)
   | "iron"
   | "carbon"
   | "ice"
-  // Refined (crafted from common resources)
+  // Refined (crafted from common resources; not on EUX)
   | "steel"
   | "fuel_cells"
   | "polymers"
-  // Rare
+  // Rare (deep survey only; not on EUX)
   | "exotic_matter"
   | "crystalline_core"
   | "void_dust";
+
+/** Common resources available through the Emergency Universal Exchange (GAME_RULES.md §19). */
+export const EUX_RESOURCE_TYPES: ReadonlyArray<ResourceType> = [
+  "iron",
+  "carbon",
+  "ice",
+] as const;
+export type EuxResourceType = (typeof EUX_RESOURCE_TYPES)[number];
 
 /** Star spectral classifications (used in world generation). */
 export type SpectralClass = "O" | "B" | "A" | "F" | "G" | "K" | "M";
@@ -75,8 +106,15 @@ export type BodyType =
   | "barren"
   | "frozen";
 
-/** Auction item categories. */
-export type AuctionItemType = "colony" | "system" | "ship" | "item";
+/**
+ * Auction item categories.
+ * 'stewardship' replaces the old 'system' value — the auction transfers governance rights
+ * only, not the permanent discovery credit recorded in system_discoveries.is_first.
+ */
+export type AuctionItemType = "colony" | "stewardship" | "ship" | "item";
 
 /** Resource inventory location discriminator. */
 export type InventoryLocationType = "colony" | "ship" | "alliance_storage";
+
+/** How stewardship was most recently acquired. */
+export type StewardshipMethod = "discovery" | "transfer" | "auction";

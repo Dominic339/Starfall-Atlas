@@ -8,6 +8,8 @@ import type {
   LaneAccess,
   AllianceRole,
   StructureType,
+  ColonyStatus,
+  GateStatus,
   OrderSide,
   OrderStatus,
   AuctionStatus,
@@ -15,21 +17,18 @@ import type {
   WorldEventType,
   PremiumItemType,
   InventoryLocationType,
+  StewardshipMethod,
 } from "./enums";
 
 // ---------------------------------------------------------------------------
 // Branded ID types for compile-time safety
 // ---------------------------------------------------------------------------
 
-/** Opaque UUID string for a player row */
 export type PlayerId = string & { readonly _brand: "PlayerId" };
-/** Opaque UUID string for a ship row */
 export type ShipId = string & { readonly _brand: "ShipId" };
-/** Opaque UUID string for a colony row */
 export type ColonyId = string & { readonly _brand: "ColonyId" };
-/** Opaque UUID string for a hyperspace lane row */
 export type LaneId = string & { readonly _brand: "LaneId" };
-/** Opaque UUID string for an alliance row */
+export type GateId = string & { readonly _brand: "GateId" };
 export type AllianceId = string & { readonly _brand: "AllianceId" };
 /** Catalog-derived system identifier (e.g. HYG id as string) */
 export type SystemId = string & { readonly _brand: "SystemId" };
@@ -67,7 +66,7 @@ export interface Ship {
 }
 
 // ---------------------------------------------------------------------------
-// World state
+// World state: discoveries and surveys
 // ---------------------------------------------------------------------------
 
 export interface SystemDiscovery {
@@ -110,27 +109,23 @@ export interface SurveyResult {
 }
 
 // ---------------------------------------------------------------------------
-// Colonies
+// Colonies and structures
 // ---------------------------------------------------------------------------
-
-export interface SystemOwnership {
-  id: string;
-  system_id: SystemId;
-  owner_id: PlayerId;
-  royalty_rate: number;
-  acquired_at: string;
-  updated_at: string;
-}
 
 export interface Colony {
   id: ColonyId;
   owner_id: PlayerId;
   system_id: SystemId;
   body_id: BodyId;
+  status: ColonyStatus;
   population_tier: number;
   next_growth_at: string | null;
   last_tax_collected_at: string;
   storage_cap: number;
+  /** Set when status transitions to 'abandoned' */
+  abandoned_at: string | null;
+  /** Set when status transitions to 'collapsed' */
+  collapsed_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -160,6 +155,87 @@ export interface ConstructionJob {
 }
 
 // ---------------------------------------------------------------------------
+// System governance
+// ---------------------------------------------------------------------------
+
+/**
+ * System stewardship — records first-discoverer governance rights.
+ * Replaces the former `SystemOwnership` interface.
+ * Discovery credit is separate (SystemDiscovery.is_first).
+ */
+export interface SystemStewardship {
+  id: string;
+  system_id: SystemId;
+  steward_id: PlayerId;
+  method: StewardshipMethod;
+  /** TRUE when the steward is the active governance holder (no majority controller). */
+  has_governance: boolean;
+  /** Royalty rate effective only when has_governance = true */
+  royalty_rate: number;
+  acquired_at: string;
+  updated_at: string;
+}
+
+/**
+ * System majority control — set when a player or alliance crosses the influence threshold.
+ * When this exists and is_confirmed=true, the majority controller holds governance,
+ * not the steward.
+ */
+export interface SystemMajorityControl {
+  id: string;
+  system_id: SystemId;
+  controller_id: PlayerId;
+  /** Non-null when the majority is held collectively by an alliance. */
+  alliance_id: AllianceId | null;
+  /** Influence share (0.5–1.0) at the time control was last confirmed. */
+  influence_share: number;
+  /** FALSE when controller has fallen below threshold (contested state). */
+  is_confirmed: boolean;
+  control_since: string;
+  updated_at: string;
+}
+
+/**
+ * Denormalized cache of per-player influence in a system.
+ * Recomputed on colony tier changes, structure changes, and gate events.
+ */
+export interface SystemInfluenceCache {
+  id: string;
+  system_id: SystemId;
+  player_id: PlayerId;
+  influence: number;
+  colony_count: number;
+  computed_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hyperspace gates (system-level infrastructure)
+// ---------------------------------------------------------------------------
+
+export interface HyperspaceGate {
+  id: GateId;
+  system_id: SystemId;
+  owner_id: PlayerId;
+  status: GateStatus;
+  tier: number;
+  built_at: string | null;
+  neutralized_at: string | null;
+  reclaimed_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface GateConstructionJob {
+  id: string;
+  gate_id: GateId;
+  player_id: PlayerId;
+  started_at: string;
+  complete_at: string;
+  status: JobStatus;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Hyperspace lanes
 // ---------------------------------------------------------------------------
 
@@ -168,6 +244,10 @@ export interface HyperspaceLane {
   owner_id: PlayerId;
   from_system_id: SystemId;
   to_system_id: SystemId;
+  /** Gate at the source endpoint. Null for premium Stabilized Wormhole (far end). */
+  from_gate_id: GateId | null;
+  /** Gate at the destination endpoint. */
+  to_gate_id: GateId | null;
   access_level: LaneAccess;
   transit_tax_rate: number;
   is_active: boolean;
@@ -219,7 +299,7 @@ export interface ResourceInventoryRow {
 }
 
 // ---------------------------------------------------------------------------
-// Economy
+// Economy: markets and auctions
 // ---------------------------------------------------------------------------
 
 export interface MarketListing {
@@ -264,6 +344,16 @@ export interface ClaimTicket {
   claimed_at: string | null;
   expires_at: string;
   created_at: string;
+}
+
+export interface UniversalExchangePurchase {
+  id: string;
+  player_id: PlayerId;
+  resource_type: string;
+  quantity: number;
+  credits_paid: number;
+  colony_id: ColonyId;
+  purchased_at: string;
 }
 
 export interface Auction {
@@ -368,4 +458,33 @@ export interface WorldEvent {
   body_id: BodyId | null;
   metadata: Record<string, unknown>;
   occurred_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Computed / derived types (not direct DB rows)
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolved governance state for a system — combines stewardship and majority control
+ * into a single view for server-side logic.
+ */
+export interface SystemGovernance {
+  systemId: SystemId;
+  /** Player credited with first discovery (permanent). */
+  firstDiscovererId: PlayerId;
+  /** Current steward (may differ from first discoverer after transfer). */
+  stewardId: PlayerId;
+  /** TRUE when steward holds governance (no active majority controller). */
+  stewardHasGovernance: boolean;
+  /** Player/alliance holding majority control, or null if none. */
+  majorityController: {
+    playerId: PlayerId;
+    allianceId: AllianceId | null;
+    influenceShare: number;
+    isConfirmed: boolean;
+  } | null;
+  /** Who currently holds governance: 'steward' | 'majority' | 'ungoverned' */
+  governanceHolder: "steward" | "majority" | "ungoverned";
+  /** Active royalty rate from the current governance holder. */
+  royaltyRate: number;
 }

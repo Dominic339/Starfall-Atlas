@@ -161,7 +161,7 @@ export interface PostListingResult {
 // ---------------------------------------------------------------------------
 
 export interface CreateAuctionInput {
-  itemType: "colony" | "system" | "ship" | "item";
+  itemType: "colony" | "stewardship" | "ship" | "item";
   itemId: string;
   minBid: number;
   startsAt: string;
