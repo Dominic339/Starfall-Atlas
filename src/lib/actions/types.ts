@@ -34,7 +34,7 @@ export function fail(
   code: GameErrorCode,
   message: string,
   details?: Record<string, unknown>,
-): ActionResult<never> {
+): { ok: false; error: ApiError } {
   return { ok: false, error: { code, message, ...(details ? { details } : {}) } };
 }
 
