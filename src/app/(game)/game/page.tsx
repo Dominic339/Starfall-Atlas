@@ -18,11 +18,19 @@
  *   - ShipModeSelector dropdown per ship
  *   - Colony inventory fetched to support auto target-selection
  *
+ * Phase 9 additions:
+ *   - Colony upkeep: iron consumed from station inventory each 24h period
+ *   - Health status (well_supplied / struggling / neglected) shown per colony
+ *   - Growth blocked when struggling or neglected
+ *   - Extraction and tax multipliers applied at collection time
+ *   - Tier loss after 5 consecutive missed periods
+ *
  * Fetch order:
  *   1. player (auth gate)
  *   2. ships, ALL travel jobs, colonies, station (parallel after player)
  *   3. surveys, station inv, ship cargo, colony inv totals (parallel)
  *   4. lazy growth resolution (DB writes for due colonies)
+ *   4.5. lazy upkeep resolution (DB writes per colony; mutates stationIron)
  *   5. lazy auto-ship resolution (DB writes for each automated ship)
  */
 
@@ -37,6 +45,15 @@ import { calculateAccumulatedTax } from "@/lib/game/taxes";
 import { applyGrowthResolution } from "@/lib/game/taxes";
 import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
 import { rankColonyCandidates, autoStateLabel } from "@/lib/game/shipAutomation";
+import {
+  colonyHealthStatus,
+  extractionMultiplier,
+  taxMultiplier,
+  isGrowthBlocked,
+  upkeepPeriodsToResolve,
+  resolveColonyUpkeep,
+} from "@/lib/game/colonyUpkeep";
+import type { ColonyHealthStatus } from "@/lib/game/colonyUpkeep";
 import { BALANCE } from "@/lib/config/balance";
 import type {
   Player,
@@ -193,8 +210,11 @@ export default async function GameDashboard() {
   const requestTime = new Date();
   const growthUpdates: { id: string; tier: number; next_growth_at: string | null }[] = [];
 
+  // colonyList is mutable — upkeep resolution in Step 4.5 may lower tier.
   const colonyList: Colony[] = rawColonies.map((colony) => {
+    // Growth is blocked when the colony is struggling or neglected (missed ≥ 1).
     if (colony.status !== "active" || !colony.next_growth_at) return colony;
+    if (isGrowthBlocked(colony.upkeep_missed_periods)) return colony;
     const { colony: resolved, resolution } = applyGrowthResolution(colony, requestTime);
     if (resolution.tiersGained > 0) {
       growthUpdates.push({
@@ -216,6 +236,95 @@ export default async function GameDashboard() {
           .eq("id", id),
       ),
     );
+  }
+
+  // ── Step 4.5: lazy upkeep resolution ─────────────────────────────────────
+  // For each active colony, advance overdue upkeep periods by drawing iron
+  // from the station inventory. Processing is sequential per colony so that
+  // iron drawn for one colony reduces what is available to the next.
+  //
+  // stationIron is tracked in memory and updated after each colony so that
+  // the rendered station inventory reflects what actually remains.
+  //
+  // DB updates: colonies (tier, missed_periods, last_upkeep_at, next_growth_at)
+  //             resource_inventory (station iron quantity or deletion)
+
+  // Find current station iron from the already-fetched stationInventory.
+  let stationIron = stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
+  let totalIronDrawn = 0;
+
+  for (let ci = 0; ci < colonyList.length; ci++) {
+    const colony = colonyList[ci];
+    if (colony.status !== "active") continue;
+
+    const periods = upkeepPeriodsToResolve(colony.last_upkeep_at, requestTime);
+    if (periods === 0) continue;
+
+    const result = resolveColonyUpkeep(colony, periods, stationIron, requestTime);
+
+    if (result.ironConsumed > 0) {
+      stationIron -= result.ironConsumed;
+      totalIronDrawn += result.ironConsumed;
+    }
+
+    // Build the colony update payload.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upkeepPatch: Record<string, any> = {
+      last_upkeep_at: result.newLastUpkeepAt,
+      upkeep_missed_periods: result.newMissedPeriods,
+    };
+    if (result.newTier !== colony.population_tier) {
+      upkeepPatch.population_tier = result.newTier;
+      upkeepPatch.next_growth_at = result.newNextGrowthAt;
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("colonies")
+      .update(upkeepPatch)
+      .eq("id", colony.id);
+
+    // Update in-memory colony for rendering.
+    colonyList[ci] = {
+      ...colony,
+      last_upkeep_at: result.newLastUpkeepAt,
+      upkeep_missed_periods: result.newMissedPeriods,
+      population_tier: result.newTier,
+      next_growth_at: result.newTier !== colony.population_tier
+        ? result.newNextGrowthAt
+        : colony.next_growth_at,
+    };
+  }
+
+  // Update in-memory station iron so the rendered inventory is correct.
+  if (totalIronDrawn > 0) {
+    const newIron = stationIron; // already decremented above
+    if (newIron <= 0) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from("resource_inventory")
+        .delete()
+        .eq("location_type", "station")
+        .eq("location_id", station?.id)
+        .eq("resource_type", "iron");
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from("resource_inventory")
+        .upsert(
+          [{ location_type: "station", location_id: station?.id, resource_type: "iron", quantity: newIron }],
+          { onConflict: "location_type,location_id,resource_type" },
+        );
+    }
+    // Reflect the updated iron in the rendered station inventory.
+    const ironIdx = stationInventory.findIndex((r) => r.resource_type === "iron");
+    if (ironIdx >= 0) {
+      if (newIron <= 0) {
+        stationInventory.splice(ironIdx, 1);
+      } else {
+        stationInventory[ironIdx] = { resource_type: "iron", quantity: newIron };
+      }
+    }
   }
 
   // ── Step 5: lazy auto-ship resolution ─────────────────────────────────────
@@ -614,7 +723,9 @@ export default async function GameDashboard() {
 
   // ── Per-colony display data ───────────────────────────────────────────────
   const colonyDisplayData = colonyList.map((colony) => {
-    const accrued =
+    const health = colonyHealthStatus(colony.upkeep_missed_periods);
+
+    const rawAccrued =
       colony.status === "active"
         ? calculateAccumulatedTax(
             colony.last_tax_collected_at,
@@ -622,9 +733,11 @@ export default async function GameDashboard() {
             requestTime,
           )
         : 0;
+    // Apply health tax multiplier for display (matches what collect will give).
+    const accrued = Math.floor(rawAccrued * taxMultiplier(colony.upkeep_missed_periods));
 
     const survey = surveyByBodyId.get(colony.body_id) ?? null;
-    const accruedExtraction: ExtractionAmount[] =
+    const rawExtraction: ExtractionAmount[] =
       survey && colony.last_extract_at && colony.status === "active"
         ? calculateAccumulatedExtraction(
             survey.resource_nodes,
@@ -633,8 +746,13 @@ export default async function GameDashboard() {
             requestTime,
           )
         : [];
+    // Apply health extraction multiplier for display (matches what extract will give).
+    const extMult = extractionMultiplier(colony.upkeep_missed_periods);
+    const accruedExtraction: ExtractionAmount[] = rawExtraction
+      .map((item) => ({ ...item, quantity: Math.floor(item.quantity * extMult) }))
+      .filter((item) => item.quantity > 0);
 
-    return { colony, accrued, accruedExtraction };
+    return { colony, accrued, accruedExtraction, health };
   });
 
   const totalAccrued = colonyDisplayData.reduce((s, d) => s + d.accrued, 0);
@@ -815,12 +933,13 @@ export default async function GameDashboard() {
             Colonies
           </h2>
           <div className="space-y-2">
-            {colonyDisplayData.map(({ colony, accrued, accruedExtraction }) => (
+            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health }) => (
               <ColonyRow
                 key={colony.id}
                 colony={colony}
                 accrued={accrued}
                 accruedExtraction={accruedExtraction}
+                health={health}
               />
             ))}
           </div>
@@ -993,10 +1112,12 @@ function ColonyRow({
   colony,
   accrued,
   accruedExtraction,
+  health,
 }: {
   colony: Colony;
   accrued: number;
   accruedExtraction: ExtractionAmount[];
+  health: ColonyHealthStatus;
 }) {
   const systemName = systemDisplayName(colony.system_id);
   const bodyIndex = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
@@ -1011,6 +1132,8 @@ function ColonyRow({
   if (colony.status === "active") {
     if (!colony.next_growth_at) {
       growthLabel = "Max tier";
+    } else if (colony.upkeep_missed_periods >= 1) {
+      growthLabel = "growth paused";
     } else {
       const growthDate = new Date(colony.next_growth_at);
       growthLabel = `grows ${growthDate > new Date() ? growthDate.toLocaleDateString() : "soon"}`;
@@ -1019,28 +1142,57 @@ function ColonyRow({
 
   const extractSummary = formatExtractionSummary(accruedExtraction);
 
+  const healthBadge: Record<ColonyHealthStatus, { label: string; classes: string }> = {
+    well_supplied: { label: "Supplied", classes: "bg-emerald-900/50 text-emerald-400" },
+    struggling: { label: "Struggling", classes: "bg-amber-900/50 text-amber-400" },
+    neglected: { label: "Neglected", classes: "bg-red-900/50 text-red-400" },
+  };
+  const badge = healthBadge[health];
+
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+    <div className={`rounded-lg border bg-zinc-900 px-4 py-3 ${
+      health === "neglected"
+        ? "border-red-900"
+        : health === "struggling"
+          ? "border-amber-900"
+          : "border-zinc-800"
+    }`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-200 truncate">
-            <Link
-              href={`/game/system/${encodeURIComponent(colony.system_id)}`}
-              className="hover:text-zinc-100 transition-colors"
-            >
-              {systemName}
-            </Link>
-            <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
-          </p>
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="text-sm font-medium text-zinc-200 truncate">
+              <Link
+                href={`/game/system/${encodeURIComponent(colony.system_id)}`}
+                className="hover:text-zinc-100 transition-colors"
+              >
+                {systemName}
+              </Link>
+              <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
+            </p>
+            {colony.status === "active" && health !== "well_supplied" && (
+              <span className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${badge.classes}`}>
+                {badge.label}
+              </span>
+            )}
+          </div>
           <p className="mt-0.5 text-xs text-zinc-500">
             Tier {colony.population_tier}{" "}
             <span className={`font-medium ${statusColor[colony.status]}`}>
               {colony.status}
             </span>
             {growthLabel && (
-              <span className="ml-2 text-zinc-600">· {growthLabel}</span>
+              <span className={`ml-2 ${colony.upkeep_missed_periods >= 1 ? "text-amber-600" : "text-zinc-600"}`}>
+                · {growthLabel}
+              </span>
             )}
           </p>
+          {colony.status === "active" && health !== "well_supplied" && (
+            <p className="mt-0.5 text-xs text-red-500">
+              {health === "neglected"
+                ? `Neglected ${colony.upkeep_missed_periods} periods — send iron to station!`
+                : "Low iron supply — yields reduced · send iron to station"}
+            </p>
+          )}
         </div>
 
         <div className="shrink-0 text-right space-y-1.5">

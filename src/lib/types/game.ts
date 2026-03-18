@@ -173,6 +173,17 @@ export interface Colony {
   abandoned_at: string | null;
   /** Set when status transitions to 'collapsed' */
   collapsed_at: string | null;
+  /**
+   * Timestamp of the last period iron upkeep was fully paid.
+   * NULL only for very old rows before migration 00019 (back-filled by migration).
+   */
+  last_upkeep_at: string | null;
+  /**
+   * Consecutive upkeep periods that were not fully supplied.
+   * 0 = well-supplied. ≥1 = struggling. ≥3 = neglected.
+   * Every BALANCE.upkeep.tierLossMissedPeriods consecutive misses → tier loss.
+   */
+  upkeep_missed_periods: number;
   created_at: string;
   updated_at: string;
 }

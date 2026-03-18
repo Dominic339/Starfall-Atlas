@@ -240,6 +240,8 @@ export async function POST(request: NextRequest) {
         next_growth_at: growthAt?.toISOString() ?? null,
         last_tax_collected_at: now.toISOString(),
         last_extract_at: now.toISOString(),
+        last_upkeep_at: now.toISOString(),
+        upkeep_missed_periods: 0,
         storage_cap: BALANCE.colony.defaultStorageCap,
       })
       .select("*")
