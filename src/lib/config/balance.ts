@@ -239,6 +239,36 @@ export const BALANCE = {
      */
     transactionFeePercent: 10,
   },
+
+  // -------------------------------------------------------------------------
+  // Sol safety stipend (GAME_RULES.md §22)
+  // -------------------------------------------------------------------------
+  solStipend: {
+    /**
+     * Credits granted per 24-hour period when the player qualifies.
+     * Intentionally small — this is an anti-softlock floor, not an income source.
+     * A single Tier 1 colony produces 10 ¢/hr = 240 ¢/day, dwarfing this amount.
+     */
+    dailyCredits: 25,
+
+    /**
+     * The stipend is only granted when the player's credit balance is at or below
+     * this value. Once the player has a real income stream, the stipend never fires.
+     */
+    creditThreshold: 50,
+  },
+
+  // -------------------------------------------------------------------------
+  // Core player station (GAME_RULES.md §21)
+  // -------------------------------------------------------------------------
+  station: {
+    /**
+     * Station movement speed in light-years per hour.
+     * Stations move much more slowly than ships — relocation is a strategic
+     * long-horizon decision. Full station movement is a future feature.
+     */
+    baseSpeedLyPerHr: 0.1,
+  },
 } as const;
 
 // Derived types for callers who want to type-check against balance values

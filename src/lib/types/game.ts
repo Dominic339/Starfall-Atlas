@@ -18,6 +18,7 @@ import type {
   PremiumItemType,
   InventoryLocationType,
   StewardshipMethod,
+  ShipDispatchMode,
 } from "./enums";
 
 // ---------------------------------------------------------------------------
@@ -26,6 +27,7 @@ import type {
 
 export type PlayerId = string & { readonly _brand: "PlayerId" };
 export type ShipId = string & { readonly _brand: "ShipId" };
+export type StationId = string & { readonly _brand: "StationId" };
 export type ColonyId = string & { readonly _brand: "ColonyId" };
 export type LaneId = string & { readonly _brand: "LaneId" };
 export type GateId = string & { readonly _brand: "GateId" };
@@ -47,6 +49,8 @@ export interface Player {
   colony_slots: number;
   colony_permits_used: number;
   first_colony_placed: boolean;
+  /** NULL = stipend never granted. Used for Sol safety stipend lazy check. */
+  sol_stipend_last_at: string | null;
   last_active_at: string;
   created_at: string;
   updated_at: string;
@@ -60,6 +64,34 @@ export interface Ship {
   cargo_cap: number;
   current_system_id: SystemId | null;
   current_body_id: BodyId | null;
+  /**
+   * How this ship is assigned work.
+   * 'manual' = explicit player dispatch (default).
+   * Auto modes are scaffolded; full behavior is post-alpha.
+   */
+  dispatch_mode: ShipDispatchMode;
+  skin_entitlement_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Core player station
+// ---------------------------------------------------------------------------
+
+/**
+ * Every player has exactly one core station — their central hub.
+ * Created automatically at Sol during player bootstrap.
+ * Resources flow: colonies (extraction) → ships (transport) → station (hub).
+ *
+ * Station inventory is stored in resource_inventory with location_type='station'.
+ */
+export interface PlayerStation {
+  id: StationId;
+  owner_id: PlayerId;
+  name: string;
+  /** Current system. NULL while in transit (station movement is future). */
+  current_system_id: SystemId;
   skin_entitlement_id: string | null;
   created_at: string;
   updated_at: string;

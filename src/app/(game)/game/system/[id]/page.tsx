@@ -286,7 +286,7 @@ export default async function SystemPage({
           </p>
           {isSol ? (
             <p className="mt-1 text-sm text-amber-300">
-              No steward — Sol is unclaimable
+              No steward — Sol is a protected shared system
             </p>
           ) : stewardship && stewardHandle ? (
             <div>
@@ -393,8 +393,10 @@ export default async function SystemPage({
             // Per-body action conditions
             const canSurveyThis =
               canActOnBodies && survey === null;
+            // Sol bodies can never be colonized (GAME_RULES.md §1.1).
             const canFoundColonyHere =
               canActOnBodies &&
+              !isSol &&
               survey !== null &&
               body.canHostColony &&
               !bodyIsOccupied;
@@ -490,6 +492,13 @@ export default async function SystemPage({
                       />
                     )}
                   </div>
+                )}
+
+                {/* Sol: surveying is allowed, colonizing is not */}
+                {isSol && body.canHostColony && (
+                  <p className="mt-2 text-xs text-zinc-600">
+                    Sol bodies cannot be colonized — Sol is a protected shared starter system.
+                  </p>
                 )}
 
                 {/* Ship here but no discovery yet (non-Sol) */}

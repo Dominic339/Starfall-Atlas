@@ -81,6 +81,19 @@ export async function POST(request: NextRequest) {
   }
   const { systemId, bodyIndex } = parsed;
 
+  // ── Sol protection (GAME_RULES.md §1.1 and §4.1) ─────────────────────────
+  // Sol is a protected shared starter system. Its bodies are never colonizable.
+  // This is an absolute server-side invariant — no premium item or governance
+  // status can override it.
+  if (systemId === SOL_SYSTEM_ID) {
+    return toErrorResponse(
+      fail(
+        "forbidden",
+        "Sol is a protected shared starter system. Its bodies cannot be colonized.",
+      ).error,
+    );
+  }
+
   // ── Catalog check ─────────────────────────────────────────────────────────
   const catalogEntry = getCatalogEntry(systemId);
   if (!catalogEntry) {
