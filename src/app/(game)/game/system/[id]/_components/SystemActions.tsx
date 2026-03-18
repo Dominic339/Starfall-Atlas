@@ -1,0 +1,231 @@
+"use client";
+
+/**
+ * Client-side actions for the system detail page.
+ *
+ * Handles:
+ *   - Travel: POST /api/game/travel
+ *   - Discover: POST /api/game/discover
+ *   - Travel resolve: POST /api/game/travel/resolve (for in-transit state)
+ *
+ * Each action refreshes the page after completion so the server component
+ * re-fetches and shows updated state.
+ */
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+// ---------------------------------------------------------------------------
+// Travel button
+// ---------------------------------------------------------------------------
+
+interface TravelButtonProps {
+  destinationSystemId: string;
+  destinationName: string;
+  distanceLy: number;
+  travelHours: number;
+}
+
+export function TravelButton({
+  destinationSystemId,
+  destinationName,
+  distanceLy,
+  travelHours,
+}: TravelButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleTravel() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/travel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ destinationSystemId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Travel failed.");
+        return;
+      }
+
+      // Navigate back to dashboard to see in-transit status.
+      router.push("/game");
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const eta =
+    travelHours < 1
+      ? `${Math.round(travelHours * 60)} min`
+      : `${travelHours.toFixed(1)} hr`;
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={handleTravel}
+        disabled={loading}
+        className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading
+          ? "Departing…"
+          : `Travel to ${destinationName} · ${distanceLy.toFixed(2)} ly · ETA ${eta}`}
+      </button>
+      {error && (
+        <p className="text-xs text-red-400">{error}</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Discover button
+// ---------------------------------------------------------------------------
+
+interface DiscoverButtonProps {
+  systemId: string;
+  systemName: string;
+}
+
+export function DiscoverButton({ systemId, systemName }: DiscoverButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleDiscover() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/discover", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ systemId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Discovery failed.");
+        return;
+      }
+
+      // Refresh page to show updated discovery/stewardship state.
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={handleDiscover}
+        disabled={loading}
+        className="w-full rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Registering discovery…" : `Discover ${systemName}`}
+      </button>
+      <p className="text-xs text-zinc-600">
+        First discoverer automatically becomes steward.
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Arrival countdown + resolve button (shown on system page if in transit here)
+// ---------------------------------------------------------------------------
+
+interface ArriveButtonProps {
+  jobId: string;
+  arriveAt: string; // ISO string
+  systemName: string;
+}
+
+export function ArriveButton({ jobId, arriveAt, systemName }: ArriveButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [canArrive, setCanArrive] = useState(
+    new Date() >= new Date(arriveAt),
+  );
+  const router = useRouter();
+
+  useEffect(() => {
+    if (canArrive) return;
+
+    const interval = setInterval(() => {
+      if (new Date() >= new Date(arriveAt)) {
+        setCanArrive(true);
+        clearInterval(interval);
+      }
+    }, 5_000); // poll every 5 seconds
+
+    return () => clearInterval(interval);
+  }, [arriveAt, canArrive]);
+
+  async function handleArrive() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/travel/resolve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ jobId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Arrival failed.");
+        return;
+      }
+
+      router.push(`/game/system/${encodeURIComponent(json.data.ship.current_system_id)}`);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const eta = new Date(arriveAt);
+  const remainingMs = Math.max(0, eta.getTime() - Date.now());
+  const remainingMin = Math.ceil(remainingMs / 60_000);
+
+  return (
+    <div className="space-y-2">
+      {!canArrive && (
+        <p className="text-sm text-zinc-400">
+          Arriving in{" "}
+          <span className="font-mono text-indigo-300">
+            ~{remainingMin} min
+          </span>
+          {" "}at {systemName}.
+        </p>
+      )}
+      <button
+        onClick={handleArrive}
+        disabled={!canArrive || loading}
+        className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Arriving…" : canArrive ? `Arrive at ${systemName}` : "Awaiting arrival…"}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
