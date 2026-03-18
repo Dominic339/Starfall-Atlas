@@ -67,9 +67,18 @@ export interface Ship {
   /**
    * How this ship is assigned work.
    * 'manual' = explicit player dispatch (default).
-   * Auto modes are scaffolded; full behavior is post-alpha.
+   * Auto modes loop: find colony → travel → load → return → unload → repeat.
    */
   dispatch_mode: ShipDispatchMode;
+  /**
+   * Current step in the automation cycle. NULL when dispatch_mode is 'manual'.
+   * 'idle'                = waiting for a target colony.
+   * 'traveling_to_colony' = en route to collect from auto_target_colony.
+   * 'traveling_to_station'= returning to station to unload cargo.
+   */
+  auto_state: "idle" | "traveling_to_colony" | "traveling_to_station" | null;
+  /** The colony being targeted in the current automation cycle. NULL when idle or manual. */
+  auto_target_colony_id: ColonyId | null;
   skin_entitlement_id: string | null;
   created_at: string;
   updated_at: string;

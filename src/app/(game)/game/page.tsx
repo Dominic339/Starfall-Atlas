@@ -6,25 +6,37 @@
  *   - Both starter ships displayed (Phase 5.5 introduced 2 ships)
  *   - Colony growth auto-resolved lazily on page load
  *   - Resource extraction accrual shown per colony with ExtractButton
- *   - Station inventory totals reflect extracted resources
+ *
+ * Phase 7 additions:
+ *   - Extraction writes to colony inventory (not station directly)
+ *   - Ship cargo displayed with unload action when at station
+ *
+ * Phase 8 additions:
+ *   - Ship dispatch modes: manual / auto_collect_nearest / auto_collect_highest
+ *   - Lazy automation loop resolved on every dashboard load:
+ *       auto-resolve travel → load colony → travel to station → unload → repeat
+ *   - ShipModeSelector dropdown per ship
+ *   - Colony inventory fetched to support auto target-selection
  *
  * Fetch order:
  *   1. player (auth gate)
- *   2. ships, travel jobs, colonies, station (parallel after player)
- *   3. survey results for colony bodies, station inventory (parallel)
- *   4. Growth resolution (DB writes for any due colonies)
+ *   2. ships, ALL travel jobs, colonies, station (parallel after player)
+ *   3. surveys, station inv, ship cargo, colony inv totals (parallel)
+ *   4. lazy growth resolution (DB writes for due colonies)
+ *   5. lazy auto-ship resolution (DB writes for each automated ship)
  */
 
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { systemDisplayName, getNearbySystems } from "@/lib/catalog";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { getCatalogEntry, systemDisplayName, getNearbySystems } from "@/lib/catalog";
+import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
 import { applyGrowthResolution } from "@/lib/game/taxes";
 import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
-import type { ExtractionAmount } from "@/lib/game/extraction";
+import { rankColonyCandidates, autoStateLabel } from "@/lib/game/shipAutomation";
 import { BALANCE } from "@/lib/config/balance";
 import type {
   Player,
@@ -34,8 +46,12 @@ import type {
   PlayerStation,
   ResourceInventoryRow,
   SurveyResult,
+  SystemId,
+  ColonyId,
 } from "@/lib/types/game";
+import type { ExtractionAmount } from "@/lib/game/extraction";
 import { CollectButton, ExtractButton, UnloadButton } from "./_components/ColonyActions";
+import { ShipModeSelector } from "./_components/ShipModeSelector";
 
 export const dynamic = "force-dynamic";
 
@@ -50,12 +66,12 @@ export default async function GameDashboard() {
   const admin = createAdminClient();
 
   // ── Step 1: player ────────────────────────────────────────────────────────
-  const { data: player } = singleResult<Player>(
+  const { data: player } = maybeSingleResult<Player>(
     await admin
       .from("players")
       .select("*")
       .eq("auth_id", user.id)
-      .single(),
+      .maybeSingle(),
   );
 
   if (!player) redirect("/login");
@@ -63,13 +79,13 @@ export default async function GameDashboard() {
   // ── Step 2: parallel fetches that only need player.id ─────────────────────
   const [shipsRes, jobsRes, coloniesRes, stationRes] = await Promise.all([
     admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
+    // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
     admin
       .from("travel_jobs")
       .select("*")
       .eq("player_id", player.id)
       .eq("status", "pending")
-      .order("created_at", { ascending: false })
-      .limit(1),
+      .order("created_at", { ascending: false }),
     admin
       .from("colonies")
       .select("*")
@@ -83,17 +99,24 @@ export default async function GameDashboard() {
       .maybeSingle(),
   ]);
 
-  const shipList = (listResult<Ship>(shipsRes).data ?? []);
-  const activeTravelJob = (listResult<TravelJob>(jobsRes).data ?? [])[0] ?? null;
-  const rawColonies = (listResult<Colony>(coloniesRes).data ?? []);
+  const shipList = listResult<Ship>(shipsRes).data ?? [];
+  const allTravelJobs = listResult<TravelJob>(jobsRes).data ?? [];
+  // Per-ship travel job index (used by automation resolver and ShipRow).
+  const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
+  // Keep a single "active" job for the in-transit banner (first pending job).
+  const activeTravelJob = allTravelJobs[0] ?? null;
+
+  const rawColonies = listResult<Colony>(coloniesRes).data ?? [];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
 
   // ── Step 3: parallel fetches that need colony bodies / station.id ──────────
   const colonyBodyIds = rawColonies.map((c) => c.body_id);
-
   const shipIds = shipList.map((s) => s.id);
+  const activeColonyIds = rawColonies
+    .filter((c) => c.status === "active")
+    .map((c) => c.id);
 
-  const [surveyRes, invRes, cargoRes] = await Promise.all([
+  const [surveyRes, invRes, cargoRes, colonyInvRes] = await Promise.all([
     colonyBodyIds.length > 0
       ? admin
           .from("survey_results")
@@ -115,6 +138,14 @@ export default async function GameDashboard() {
           .eq("location_type", "ship")
           .in("location_id", shipIds)
       : Promise.resolve({ data: [] }),
+    // Colony inventory: needed for auto-ship target selection and loading.
+    activeColonyIds.length > 0
+      ? admin
+          .from("resource_inventory")
+          .select("location_id, resource_type, quantity")
+          .eq("location_type", "colony")
+          .in("location_id", activeColonyIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const surveyByBodyId = new Map(
@@ -128,15 +159,34 @@ export default async function GameDashboard() {
     "resource_type" | "quantity"
   >[];
 
-  // Build per-ship cargo map: shipId → sorted resource rows
+  // Per-ship cargo map (mutable — updated by auto-resolution in Step 5).
   type CargoRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
     location_id: string;
   };
   const cargoByShipId = new Map<string, { resource_type: string; quantity: number }[]>();
   for (const row of (cargoRes.data ?? []) as CargoRow[]) {
-    const existing = cargoByShipId.get(row.location_id) ?? [];
-    existing.push({ resource_type: row.resource_type, quantity: row.quantity });
-    cargoByShipId.set(row.location_id, existing);
+    const list = cargoByShipId.get(row.location_id) ?? [];
+    list.push({ resource_type: row.resource_type, quantity: row.quantity });
+    cargoByShipId.set(row.location_id, list);
+  }
+
+  // Colony inventory maps (mutable — updated by auto-loading in Step 5).
+  type ColonyInvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
+    location_id: string;
+  };
+  const colonyInvByColonyId = new Map<
+    string,
+    { resource_type: string; quantity: number }[]
+  >();
+  const colonyInvTotals = new Map<string, number>();
+  for (const row of (colonyInvRes.data ?? []) as ColonyInvRow[]) {
+    const list = colonyInvByColonyId.get(row.location_id) ?? [];
+    list.push({ resource_type: row.resource_type, quantity: row.quantity });
+    colonyInvByColonyId.set(row.location_id, list);
+    colonyInvTotals.set(
+      row.location_id,
+      (colonyInvTotals.get(row.location_id) ?? 0) + row.quantity,
+    );
   }
 
   // ── Step 4: lazy growth resolution ──────────────────────────────────────
@@ -156,7 +206,6 @@ export default async function GameDashboard() {
     return resolved;
   });
 
-  // Persist growth updates in parallel (fire before render — user sees resolved state)
   if (growthUpdates.length > 0) {
     await Promise.all(
       growthUpdates.map(({ id, tier, next_growth_at }) =>
@@ -169,21 +218,373 @@ export default async function GameDashboard() {
     );
   }
 
-  const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
+  // ── Step 5: lazy auto-ship resolution ─────────────────────────────────────
+  // For each ship in an auto mode, advance its state machine by one meaningful
+  // step. Loading and unloading are instantaneous; travel is time-gated.
+  //
+  // State transitions on a single page load:
+  //   pending job arrived  → resolve travel → then advance state
+  //   traveling_to_colony  → arrived → load → start return travel
+  //   traveling_to_station → arrived → unload → find next colony / idle
+  //   idle                 → find colony → start travel (or stay idle)
+  //
+  // All DB writes update the mutable maps so ShipRow renders current state.
+
+  const resolvedShipList: Ship[] = [...shipList];
+
+  if (station) {
+    // Non-null capture for closures — TypeScript can't narrow `station` through inner async fns.
+    const st = station;
+    for (let si = 0; si < resolvedShipList.length; si++) {
+      let ship = resolvedShipList[si];
+      if (ship.dispatch_mode === "manual") continue;
+
+      const mode = ship.dispatch_mode as
+        | "auto_collect_nearest"
+        | "auto_collect_highest";
+
+      // ── 5a: auto-resolve travel if the ship has arrived ──────────────────
+      const pendingJob = travelJobByShipId.get(ship.id);
+      if (pendingJob) {
+        if (new Date(pendingJob.arrive_at) <= requestTime) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("travel_jobs")
+            .update({ status: "complete" })
+            .eq("id", pendingJob.id);
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("ships")
+            .update({ current_system_id: pendingJob.to_system_id, current_body_id: null })
+            .eq("id", ship.id);
+          ship = {
+            ...ship,
+            current_system_id: pendingJob.to_system_id as SystemId,
+            current_body_id: null,
+          };
+          travelJobByShipId.delete(ship.id);
+        } else {
+          // Still in transit — nothing further to advance this cycle.
+          resolvedShipList[si] = ship;
+          continue;
+        }
+      }
+
+      // ── 5b: advance state machine based on current position ──────────────
+
+      // Helper: load all available colony inventory into ship cargo (up to cap).
+      // Mutates colonyInvByColonyId, colonyInvTotals, cargoByShipId in place.
+      // Returns the quantity loaded.
+      async function doLoad(colonyId: string): Promise<number> {
+        const colonyInv = colonyInvByColonyId.get(colonyId) ?? [];
+        const currentCargo = cargoByShipId.get(ship.id) ?? [];
+        const cargoUsed = currentCargo.reduce((s, r) => s + r.quantity, 0);
+        let remaining = ship.cargo_cap - cargoUsed;
+        if (remaining <= 0 || colonyInv.length === 0) return 0;
+
+        const toLoad: { resource_type: string; quantity: number }[] = [];
+        const leftoverInv: { resource_type: string; quantity: number }[] = [];
+
+        for (const item of colonyInv) {
+          const load = Math.min(item.quantity, remaining);
+          if (load > 0) {
+            toLoad.push({ resource_type: item.resource_type, quantity: load });
+            if (item.quantity > load) {
+              leftoverInv.push({ resource_type: item.resource_type, quantity: item.quantity - load });
+            }
+            remaining -= load;
+          } else {
+            leftoverInv.push(item);
+          }
+        }
+
+        if (toLoad.length === 0) return 0;
+
+        // Update colony inventory in DB.
+        for (const item of toLoad) {
+          const leftover = leftoverInv.find((r) => r.resource_type === item.resource_type);
+          if (!leftover) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("resource_inventory")
+              .delete()
+              .eq("location_type", "colony")
+              .eq("location_id", colonyId)
+              .eq("resource_type", item.resource_type);
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("resource_inventory")
+              .update({ quantity: leftover.quantity })
+              .eq("location_type", "colony")
+              .eq("location_id", colonyId)
+              .eq("resource_type", item.resource_type);
+          }
+        }
+
+        // Update colony inventory in memory.
+        colonyInvByColonyId.set(colonyId, leftoverInv);
+        const newTotal = leftoverInv.reduce((s, r) => s + r.quantity, 0);
+        colonyInvTotals.set(colonyId, newTotal);
+
+        // Upsert ship cargo in DB.
+        const existingMap = new Map(currentCargo.map((r) => [r.resource_type, r.quantity]));
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("resource_inventory")
+          .upsert(
+            toLoad.map((item) => ({
+              location_type: "ship",
+              location_id: ship.id,
+              resource_type: item.resource_type,
+              quantity: (existingMap.get(item.resource_type) ?? 0) + item.quantity,
+            })),
+            { onConflict: "location_type,location_id,resource_type" },
+          );
+
+        // Update cargo in memory.
+        const newCargo = [...currentCargo];
+        for (const loaded of toLoad) {
+          const ex = newCargo.find((r) => r.resource_type === loaded.resource_type);
+          if (ex) ex.quantity += loaded.quantity;
+          else newCargo.push({ resource_type: loaded.resource_type, quantity: loaded.quantity });
+        }
+        cargoByShipId.set(ship.id, newCargo);
+
+        return toLoad.reduce((s, r) => s + r.quantity, 0);
+      }
+
+      // Helper: start travel from ship's current system to targetSystemId.
+      // Mutates travelJobByShipId. Returns true on success.
+      async function startTravel(targetSystemId: string): Promise<boolean> {
+        if (!ship.current_system_id) return false;
+        const fromEntry = getCatalogEntry(ship.current_system_id);
+        const toEntry = getCatalogEntry(targetSystemId);
+        if (!fromEntry || !toEntry) return false;
+
+        const dist = distanceBetween(
+          { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
+          { x: toEntry.x, y: toEntry.y, z: toEntry.z },
+        );
+        if (dist > BALANCE.lanes.baseRangeLy) return false;
+
+        const arriveAt = computeArrivalTime(requestTime, dist, ship.speed_ly_per_hr);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("ships")
+          .update({ current_system_id: null, current_body_id: null })
+          .eq("id", ship.id);
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: newJob } = await (admin as any)
+          .from("travel_jobs")
+          .insert({
+            ship_id: ship.id,
+            player_id: player!.id,
+            from_system_id: ship.current_system_id,
+            to_system_id: targetSystemId,
+            depart_at: requestTime.toISOString(),
+            arrive_at: arriveAt.toISOString(),
+            transit_tax_paid: 0,
+            status: "pending",
+          })
+          .select("*")
+          .maybeSingle();
+
+        if (newJob) {
+          travelJobByShipId.set(ship.id, newJob as TravelJob);
+        }
+        ship = { ...ship, current_system_id: null, current_body_id: null };
+        return true;
+      }
+
+      // Helper: find best target colony and dispatch; set auto_state.
+      // Returns the updated ship.
+      async function dispatchToNextColony(): Promise<Ship> {
+        const candidates = rankColonyCandidates(
+          ship,
+          colonyList.filter((c) => c.status === "active"),
+          colonyInvTotals,
+          mode,
+        );
+
+        if (candidates.length === 0) {
+          // No colony has inventory — stay idle.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("ships")
+            .update({ auto_state: "idle", auto_target_colony_id: null })
+            .eq("id", ship.id);
+          return { ...ship, auto_state: "idle", auto_target_colony_id: null };
+        }
+
+        const target = candidates[0];
+
+        if (target.distanceLy === 0) {
+          // Colony in same system: load immediately, then depart to station.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("ships")
+            .update({ auto_state: "traveling_to_colony", auto_target_colony_id: target.colonyId })
+            .eq("id", ship.id);
+          ship = {
+            ...ship,
+            auto_state: "traveling_to_colony",
+            auto_target_colony_id: target.colonyId as ColonyId,
+          };
+
+          // Immediately load (same system = no travel needed).
+          const loaded = await doLoad(target.colonyId);
+
+          if (loaded > 0 || (cargoByShipId.get(ship.id) ?? []).length > 0) {
+            const departed = await startTravel(st.current_system_id); // st is non-null (outer guard)
+            const nextState = departed ? "traveling_to_station" : "idle";
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("ships")
+              .update({ auto_state: nextState, auto_target_colony_id: target.colonyId })
+              .eq("id", ship.id);
+            return { ...ship, auto_state: nextState, auto_target_colony_id: target.colonyId as ColonyId };
+          } else {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("ships")
+              .update({ auto_state: "idle", auto_target_colony_id: null })
+              .eq("id", ship.id);
+            return { ...ship, auto_state: "idle", auto_target_colony_id: null };
+          }
+        }
+
+        // Colony in a different system: start travel.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("ships")
+          .update({ auto_state: "traveling_to_colony", auto_target_colony_id: target.colonyId })
+          .eq("id", ship.id);
+        ship = {
+          ...ship,
+          auto_state: "traveling_to_colony",
+          auto_target_colony_id: target.colonyId as ColonyId,
+        };
+
+        const departed = await startTravel(target.systemId);
+        if (!departed) {
+          // Travel blocked (e.g. catalog miss) — reset to idle.
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("ships")
+            .update({ auto_state: "idle", auto_target_colony_id: null })
+            .eq("id", ship.id);
+          return { ...ship, current_system_id: ship.current_system_id, auto_state: "idle", auto_target_colony_id: null };
+        }
+
+        return { ...ship, auto_state: "traveling_to_colony", auto_target_colony_id: target.colonyId as ColonyId };
+      }
+
+      // ── State machine ─────────────────────────────────────────────────────
+
+      if (ship.auto_state === "traveling_to_colony") {
+        const targetColony = colonyList.find((c) => c.id === ship.auto_target_colony_id);
+
+        if (targetColony && ship.current_system_id === targetColony.system_id) {
+          const loaded = await doLoad(targetColony.id);
+
+          if (loaded > 0 || (cargoByShipId.get(ship.id) ?? []).length > 0) {
+            const departed = await startTravel(st.current_system_id);
+            const nextState = departed ? "traveling_to_station" : "idle";
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("ships")
+              .update({ auto_state: nextState })
+              .eq("id", ship.id);
+            ship = { ...ship, auto_state: nextState };
+          } else {
+            // Nothing to load and no existing cargo — go idle.
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("ships")
+              .update({ auto_state: "idle", auto_target_colony_id: null })
+              .eq("id", ship.id);
+            ship = { ...ship, auto_state: "idle", auto_target_colony_id: null };
+          }
+        }
+        // else: travel wasn't resolved yet (arrived at wrong system?), leave as-is.
+      } else if (ship.auto_state === "traveling_to_station") {
+        if (ship.current_system_id === st.current_system_id) {
+          // Unload cargo to station.
+          const cargo = cargoByShipId.get(ship.id) ?? [];
+          if (cargo.length > 0) {
+            const rtypes = cargo.map((r) => r.resource_type);
+            const { data: stRows } = await admin
+              .from("resource_inventory")
+              .select("resource_type, quantity")
+              .eq("location_type", "station")
+              .eq("location_id", st.id)
+              .in("resource_type", rtypes);
+
+            const stMap = new Map(
+              (stRows ?? []).map((r) => [
+                (r as { resource_type: string }).resource_type,
+                (r as { quantity: number }).quantity,
+              ]),
+            );
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("resource_inventory")
+              .upsert(
+                cargo.map((item) => ({
+                  location_type: "station",
+                  location_id: st.id,
+                  resource_type: item.resource_type,
+                  quantity: (stMap.get(item.resource_type) ?? 0) + item.quantity,
+                })),
+                { onConflict: "location_type,location_id,resource_type" },
+              );
+
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (admin as any)
+              .from("resource_inventory")
+              .delete()
+              .eq("location_type", "ship")
+              .eq("location_id", ship.id);
+
+            cargoByShipId.set(ship.id, []);
+          }
+
+          // Find next colony.
+          ship = { ...ship, auto_state: "idle", auto_target_colony_id: null };
+          ship = await dispatchToNextColony();
+        }
+        // else: travel wasn't resolved, leave as-is.
+      } else {
+        // idle (or null) — find and dispatch.
+        ship = await dispatchToNextColony();
+      }
+
+      resolvedShipList[si] = ship;
+    }
+  }
 
   // ── Derived state ─────────────────────────────────────────────────────────
-  const inTransitShipId = activeTravelJob?.ship_id ?? null;
+  const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
+
   const currentSystemId =
-    shipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
+    resolvedShipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
 
-  const isInTransit =
-    activeTravelJob !== null &&
-    shipList.some((s) => !s.current_system_id && s.id === inTransitShipId);
+  const isAnyInTransit = resolvedShipList.some(
+    (s) => !s.current_system_id && travelJobByShipId.has(s.id),
+  );
 
-  // ETA display for in-transit state
+  // ETA for the dashboard banner (show for the first in-transit ship's job).
+  const bannerJob =
+    allTravelJobs.find((j) =>
+      resolvedShipList.some((s) => !s.current_system_id && s.id === j.ship_id),
+    ) ?? null;
   let etaDisplay: string | null = null;
-  if (isInTransit && activeTravelJob) {
-    const arriveAt = new Date(activeTravelJob.arrive_at);
+  if (bannerJob) {
+    const arriveAt = new Date(bannerJob.arrive_at);
     const remainingMs = Math.max(0, arriveAt.getTime() - requestTime.getTime());
     const remainingMin = Math.ceil(remainingMs / 60_000);
     etaDisplay =
@@ -194,13 +595,22 @@ export default async function GameDashboard() {
           : `~${(remainingMin / 60).toFixed(1)} hr remaining`;
   }
 
-  // Nearby systems from a docked ship's location
   const dockedSystemId =
-    shipList.find((s) => s.current_system_id != null && !isInTransit)
-      ?.current_system_id ?? null;
+    resolvedShipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
   const nearbySystems = dockedSystemId
     ? getNearbySystems(dockedSystemId, BALANCE.lanes.baseRangeLy).slice(0, 4)
     : [];
+
+  // Pre-compute auto-ship target system names for ShipRow display.
+  const autoTargetNameByShipId = new Map<string, string>();
+  for (const ship of resolvedShipList) {
+    if (ship.dispatch_mode !== "manual" && ship.auto_target_colony_id) {
+      const colony = colonyList.find((c) => c.id === ship.auto_target_colony_id);
+      if (colony) {
+        autoTargetNameByShipId.set(ship.id, systemDisplayName(colony.system_id));
+      }
+    }
+  }
 
   // ── Per-colony display data ───────────────────────────────────────────────
   const colonyDisplayData = colonyList.map((colony) => {
@@ -247,14 +657,14 @@ export default async function GameDashboard() {
             Current location
           </p>
           <p className="mt-1 font-mono text-2xl font-semibold text-indigo-300 truncate">
-            {isInTransit
-              ? systemDisplayName(activeTravelJob!.to_system_id)
+            {isAnyInTransit && bannerJob
+              ? systemDisplayName(bannerJob.to_system_id)
               : currentSystemId
                 ? systemDisplayName(currentSystemId)
                 : "Unknown"}
           </p>
           <p className="mt-1 text-xs text-zinc-600">
-            {isInTransit && etaDisplay ? (
+            {isAnyInTransit && etaDisplay ? (
               etaDisplay
             ) : currentSystemId ? (
               <Link
@@ -301,17 +711,18 @@ export default async function GameDashboard() {
         </div>
       </div>
 
-      {/* In-transit banner */}
-      {isInTransit && activeTravelJob && (
+      {/* In-transit banner (manual ships only; auto ships show state in ShipRow) */}
+      {isAnyInTransit && bannerJob && activeTravelJob?.ship_id &&
+        resolvedShipList.find((s) => s.id === activeTravelJob.ship_id)?.dispatch_mode === "manual" && (
         <div className="rounded-lg border border-zinc-700 bg-zinc-900/70 px-4 py-3 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-zinc-300">
               <span className="text-zinc-500">In transit →</span>{" "}
               <Link
-                href={`/game/system/${encodeURIComponent(activeTravelJob.to_system_id)}`}
+                href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
                 className="text-indigo-400 hover:text-indigo-300 font-medium"
               >
-                {systemDisplayName(activeTravelJob.to_system_id)}
+                {systemDisplayName(bannerJob.to_system_id)}
               </Link>
             </p>
             {etaDisplay && (
@@ -319,7 +730,7 @@ export default async function GameDashboard() {
             )}
           </div>
           <Link
-            href={`/game/system/${encodeURIComponent(activeTravelJob.to_system_id)}`}
+            href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
             className="shrink-0 rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-600 transition-colors"
           >
             Go to system
@@ -349,7 +760,6 @@ export default async function GameDashboard() {
               </span>
             </div>
 
-            {/* Station resource inventory */}
             {stationInventory.length > 0 ? (
               <div className="mt-3 border-t border-zinc-800 pt-3">
                 <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
@@ -368,7 +778,7 @@ export default async function GameDashboard() {
               </div>
             ) : (
               <p className="mt-2 text-xs text-zinc-600">
-                Inventory empty — extract resources from colonies to fill it.
+                Inventory empty — extract and haul resources to fill it.
               </p>
             )}
           </div>
@@ -380,17 +790,18 @@ export default async function GameDashboard() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Ships
         </h2>
-        {shipList.length === 0 ? (
+        {resolvedShipList.length === 0 ? (
           <EmptyState message="No ships found. Try refreshing or signing out and back in." />
         ) : (
           <div className="space-y-2">
-            {shipList.map((ship) => (
+            {resolvedShipList.map((ship) => (
               <ShipRow
                 key={ship.id}
                 ship={ship}
-                activeTravelJob={activeTravelJob}
+                job={travelJobByShipId.get(ship.id) ?? null}
                 cargo={cargoByShipId.get(ship.id) ?? []}
                 stationSystemId={station?.current_system_id ?? null}
+                autoTargetSystemName={autoTargetNameByShipId.get(ship.id) ?? null}
               />
             ))}
           </div>
@@ -458,12 +869,12 @@ export default async function GameDashboard() {
             habitable world — your first colony is free.
           </li>
           <li>
-            <span className="text-zinc-400">4.</span> Collect taxes and extract
-            resources from colonies into colony inventory.
+            <span className="text-zinc-400">4.</span> Extract resources from
+            colonies into colony inventory.
           </li>
           <li>
-            <span className="text-zinc-400">5.</span> Load ship cargo from a colony, then
-            return to Sol to unload into your station.
+            <span className="text-zinc-400">5.</span> Load ship cargo and return
+            to Sol to unload into your station — or set a ship to auto mode.
           </li>
         </ol>
       </section>
@@ -477,21 +888,23 @@ export default async function GameDashboard() {
 
 function ShipRow({
   ship,
-  activeTravelJob,
+  job,
   cargo,
   stationSystemId,
+  autoTargetSystemName,
 }: {
   ship: Ship;
-  activeTravelJob: TravelJob | null;
+  job: TravelJob | null;
   cargo: { resource_type: string; quantity: number }[];
   stationSystemId: string | null;
+  autoTargetSystemName: string | null;
 }) {
-  const isThisShipInTransit =
-    !ship.current_system_id && activeTravelJob?.ship_id === ship.id;
+  const isThisShipInTransit = !ship.current_system_id && job !== null;
+  const isAuto = ship.dispatch_mode !== "manual";
 
   let locationDisplay: string;
-  if (isThisShipInTransit && activeTravelJob) {
-    locationDisplay = `En route → ${systemDisplayName(activeTravelJob.to_system_id)}`;
+  if (isThisShipInTransit && job) {
+    locationDisplay = `En route → ${systemDisplayName(job.to_system_id)}`;
   } else if (ship.current_system_id) {
     locationDisplay = systemDisplayName(ship.current_system_id);
   } else {
@@ -499,26 +912,39 @@ function ShipRow({
   }
 
   const systemHref =
-    isThisShipInTransit && activeTravelJob
-      ? `/game/system/${encodeURIComponent(activeTravelJob.to_system_id)}`
+    isThisShipInTransit && job
+      ? `/game/system/${encodeURIComponent(job.to_system_id)}`
       : ship.current_system_id
         ? `/game/system/${encodeURIComponent(ship.current_system_id)}`
         : null;
 
   const cargoUsed = cargo.reduce((s, r) => s + r.quantity, 0);
-  const cargoSummary = cargo
-    .map((r) => `${r.quantity} ${r.resource_type}`)
-    .join(", ");
+  const cargoSummary = cargo.map((r) => `${r.quantity} ${r.resource_type}`).join(", ");
+
   const canUnload =
+    ship.dispatch_mode === "manual" &&
     !!ship.current_system_id &&
     stationSystemId !== null &&
     ship.current_system_id === stationSystemId &&
     cargo.length > 0;
 
+  // ETA from job
+  let etaText: string | null = null;
+  if (isThisShipInTransit && job) {
+    const remainingMs = Math.max(0, new Date(job.arrive_at).getTime() - Date.now());
+    const remainingMin = Math.ceil(remainingMs / 60_000);
+    etaText =
+      remainingMin <= 0
+        ? "Arriving…"
+        : remainingMin < 60
+          ? `~${remainingMin} min`
+          : `~${(remainingMin / 60).toFixed(1)} hr`;
+  }
+
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
       <div className="flex items-start justify-between gap-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
           <p className="text-xs text-zinc-500">
             {systemHref ? (
@@ -528,13 +954,23 @@ function ShipRow({
             ) : (
               locationDisplay
             )}
+            {etaText && (
+              <span className="ml-2 text-zinc-600">{etaText}</span>
+            )}
           </p>
+          {/* Auto-ship task label */}
+          {isAuto && (
+            <p className="mt-0.5 text-xs text-indigo-400">
+              {autoStateLabel(ship.auto_state, autoTargetSystemName ?? undefined)}
+            </p>
+          )}
         </div>
-        <div className="text-right shrink-0">
+        <div className="text-right shrink-0 space-y-1">
           <p className="text-xs text-zinc-500">
             {ship.speed_ly_per_hr} ly/hr · {cargoUsed}/{ship.cargo_cap} cargo
           </p>
-          <p className="text-xs text-zinc-700 capitalize">{ship.dispatch_mode}</p>
+          {/* Mode selector */}
+          <ShipModeSelector shipId={ship.id} currentMode={ship.dispatch_mode} />
         </div>
       </div>
 
@@ -542,8 +978,7 @@ function ShipRow({
       {cargo.length > 0 && (
         <div className="mt-2 border-t border-zinc-800 pt-2">
           <p className="text-xs text-zinc-500 mb-1">
-            Cargo:{" "}
-            <span className="text-zinc-400">{cargoSummary}</span>
+            Cargo: <span className="text-zinc-400">{cargoSummary}</span>
           </p>
           {canUnload && (
             <UnloadButton shipId={ship.id} summary={cargoSummary} />
@@ -572,7 +1007,6 @@ function ColonyRow({
     collapsed: "text-zinc-600",
   };
 
-  // Growth label
   let growthLabel: string | null = null;
   if (colony.status === "active") {
     if (!colony.next_growth_at) {
@@ -609,7 +1043,6 @@ function ColonyRow({
           </p>
         </div>
 
-        {/* Right-side actions */}
         <div className="shrink-0 text-right space-y-1.5">
           {/* Tax */}
           {colony.status === "active" && (
@@ -649,4 +1082,3 @@ function EmptyState({ message }: { message: string }) {
     </div>
   );
 }
-
