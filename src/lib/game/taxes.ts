@@ -8,6 +8,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { Colony } from "@/lib/types/game";
 
 // ---------------------------------------------------------------------------
 // Tax rate lookup
@@ -69,4 +70,83 @@ export function nextGrowthAt(
 
   const durationMs = growthHours * 60 * 60 * 1000;
   return new Date(from.getTime() + durationMs);
+}
+
+// ---------------------------------------------------------------------------
+// Growth resolution (lazy-resolve pattern)
+// ---------------------------------------------------------------------------
+
+export interface GrowthResolution {
+  newTier: number;
+  newNextGrowthAt: string | null;
+  /** Number of tiers actually advanced. 0 if no growth was due. */
+  tiersGained: number;
+}
+
+/**
+ * Compute how many population tiers a colony has earned since its
+ * last recorded next_growth_at. Pure function — no DB side effects.
+ * The caller is responsible for persisting the resolved values.
+ *
+ * Each tier is timestamped from when the previous tier was reached,
+ * preserving real growth timing regardless of when the page loads.
+ *
+ * @param currentTier     - Colony's current population_tier
+ * @param colonyNextGrowthAt - ISO timestamp from colony.next_growth_at, or null
+ * @param now             - Evaluation time (defaults to Date.now())
+ */
+export function resolveGrowth(
+  currentTier: number,
+  colonyNextGrowthAt: string | null,
+  now: Date = new Date(),
+): GrowthResolution {
+  if (colonyNextGrowthAt == null) {
+    return { newTier: currentTier, newNextGrowthAt: null, tiersGained: 0 };
+  }
+
+  // Max tier is the last index in the growthHoursByTier array.
+  const maxTier = BALANCE.colony.growthHoursByTier.length - 1; // 10
+
+  let tier = currentTier;
+  let nextAt: Date | null = new Date(colonyNextGrowthAt);
+  let tiersGained = 0;
+
+  while (nextAt !== null && nextAt <= now && tier < maxTier) {
+    // Record the timestamp when this tier was earned.
+    const tierEarnedAt = nextAt;
+    tier += 1;
+    tiersGained += 1;
+    // Next growth is relative to when THIS tier was earned.
+    nextAt = nextGrowthAt(tier, tierEarnedAt);
+  }
+
+  return {
+    newTier: tier,
+    newNextGrowthAt: nextAt?.toISOString() ?? null,
+    tiersGained,
+  };
+}
+
+/**
+ * Apply growth resolution to a Colony object (returns a new object).
+ * Does NOT write to the database.
+ */
+export function applyGrowthResolution(
+  colony: Colony,
+  now: Date = new Date(),
+): { colony: Colony; resolution: GrowthResolution } {
+  const resolution = resolveGrowth(
+    colony.population_tier,
+    colony.next_growth_at,
+    now,
+  );
+  if (resolution.tiersGained === 0) return { colony, resolution };
+  return {
+    colony: {
+      ...colony,
+      population_tier: resolution.newTier,
+      next_growth_at: resolution.newNextGrowthAt,
+    },
+    resolution,
+  };
 }

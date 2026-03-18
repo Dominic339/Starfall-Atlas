@@ -39,7 +39,7 @@ import { z } from "zod";
 import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, singleResult } from "@/lib/supabase/utils";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import type { Ship, SystemDiscovery, SystemStewardship } from "@/lib/types/game";
@@ -81,20 +81,20 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
 
   // ── Presence check ───────────────────────────────────────────────────────
-  // Player's ship must be at this system (not in transit).
-  const { data: ship } = singleResult<Ship>(
+  // At least one of the player's ships must be docked at this system.
+  // Players have 2 starter ships; either ship being present suffices.
+  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
     await admin
       .from("ships")
       .select("current_system_id")
-      .eq("owner_id", player.id)
-      .single(),
+      .eq("owner_id", player.id),
   );
 
-  if (!ship) {
-    return toErrorResponse(fail("not_found", "Ship not found.").error);
-  }
+  const shipPresent = (allShips ?? []).some(
+    (s) => s.current_system_id === systemId,
+  );
 
-  if (!ship.current_system_id || ship.current_system_id !== systemId) {
+  if (!shipPresent) {
     return toErrorResponse(
       fail(
         "invalid_target",

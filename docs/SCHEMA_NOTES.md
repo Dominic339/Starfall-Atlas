@@ -1,7 +1,7 @@
 # Starfall Atlas — Schema Notes
 
-> Version: 0.2 (Alpha Design)
-> Last updated: 2026-03-17
+> Version: 0.3 (Alignment update — player stations, Sol stipend, ship dispatch mode)
+> Last updated: 2026-03-18
 
 This document describes the Supabase/Postgres data model for Starfall Atlas. It is a design reference for writing migrations. All entity names and column names here should be used consistently across migrations, application code, and type definitions.
 
@@ -12,7 +12,8 @@ This document describes the Supabase/Postgres data model for Starfall Atlas. It 
 1. [Conventions](#1-conventions)
 2. [Enums](#2-enums)
 3. [Players](#3-players)
-4. [World: Discoveries and Surveys](#4-world-discoveries-and-surveys)
+4. [Player Stations](#4-player-stations)
+5. [World: Discoveries and Surveys](#5-world-discoveries-and-surveys)
 5. [Colonies and Structures](#5-colonies-and-structures)
 6. [System Governance](#6-system-governance)
 7. [Hyperspace Gates](#7-hyperspace-gates)
@@ -149,6 +150,8 @@ CREATE TABLE players (
   colony_slots         SMALLINT NOT NULL DEFAULT 1,      -- max active colonies allowed
   colony_permits_used  SMALLINT NOT NULL DEFAULT 0,      -- premium Colony Permit usage (max 2)
   first_colony_placed  BOOLEAN NOT NULL DEFAULT FALSE,   -- gates pre-colony free travel
+  -- NULL = stipend never received; otherwise: last time the Sol safety stipend was granted.
+  sol_stipend_last_at  TIMESTAMPTZ,
   last_active_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -159,10 +162,38 @@ CREATE TABLE players (
 - `credits` is managed server-side only. Never expose a client write path.
 - `colony_slots` counts only `active` colonies. Abandoned or collapsed colonies do not consume a slot.
 - `first_colony_placed` is set to TRUE when the player's first colony claim resolves.
+- `sol_stipend_last_at` is used by the lazy Sol safety stipend check (GAME_RULES.md §22). Only updated when a stipend is actually granted.
 
 ---
 
-## 4. World: Discoveries and Surveys
+## 4. Player Stations
+
+Every player has exactly one core station (GAME_RULES.md §21). Created automatically on first login.
+
+### `player_stations`
+
+```sql
+CREATE TABLE player_stations (
+  id                  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  owner_id            UUID NOT NULL UNIQUE REFERENCES players(id) ON DELETE CASCADE,
+  name                TEXT NOT NULL CHECK (char_length(name) BETWEEN 1 AND 64),
+  -- Current location. NULL while in transit (future: station movement jobs).
+  current_system_id   TEXT NOT NULL DEFAULT 'sol',
+  skin_entitlement_id UUID,       -- FK to premium_entitlements (cosmetic; post-alpha)
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+```
+
+**Notes**:
+- `UNIQUE (owner_id)` enforces the one-station-per-player invariant.
+- Station inventory is stored in `resource_inventory` with `location_type = 'station'` and `location_id = player_stations.id`.
+- Station movement (future feature) will use a separate `station_travel_jobs` table following the same timestamp pattern as ship travel.
+- The station starts at `sol` for all new players and is created atomically with the player's initial ship(s) during bootstrap.
+
+---
+
+## 5. World: Discoveries and Surveys
 
 ### `system_discoveries`
 
@@ -223,7 +254,7 @@ CREATE TABLE survey_results (
 
 ---
 
-## 5. Colonies and Structures
+## 6. Colonies and Structures
 
 ### `colonies`
 
@@ -289,7 +320,7 @@ CREATE TABLE construction_jobs (
 
 ---
 
-## 6. System Governance
+## 7. System Governance
 
 These three tables together represent the full governance model. They are distinct and must not be conflated.
 
@@ -373,7 +404,7 @@ CREATE TABLE system_influence_cache (
 
 ---
 
-## 7. Hyperspace Gates
+## 8. Hyperspace Gates
 
 Gates are system-level infrastructure. There is at most one gate per system.
 
@@ -416,7 +447,7 @@ CREATE TABLE gate_construction_jobs (
 
 ---
 
-## 8. Travel Jobs
+## 9. Travel Jobs
 
 ### `ships`
 
@@ -429,6 +460,13 @@ CREATE TABLE ships (
   cargo_cap           INTEGER NOT NULL DEFAULT 100 CHECK (cargo_cap > 0),
   current_system_id   TEXT,       -- NULL while in transit
   current_body_id     TEXT,       -- NULL if not landed on a body
+  -- Dispatch mode controls how this ship is assigned work.
+  -- 'manual': player submits all actions explicitly.
+  -- 'auto_collect_nearest': ship auto-dispatches to collect from nearest colony with resources.
+  -- 'auto_collect_highest': ship auto-dispatches to colony with most accumulated resources.
+  -- Auto modes are scaffolded here; full automation behavior is post-alpha.
+  dispatch_mode       TEXT NOT NULL DEFAULT 'manual'
+                        CHECK (dispatch_mode IN ('manual', 'auto_collect_nearest', 'auto_collect_highest')),
   skin_entitlement_id UUID,       -- FK to premium_entitlements (cosmetic)
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -456,7 +494,7 @@ CREATE TABLE travel_jobs (
 
 ---
 
-## 9. Hyperspace Lanes
+## 10. Hyperspace Lanes
 
 ### `hyperspace_lanes`
 
@@ -502,7 +540,7 @@ CREATE TABLE lane_construction_jobs (
 
 ---
 
-## 10. Resources and Inventories
+## 11. Resources and Inventories
 
 ### `resource_inventory`
 
@@ -511,8 +549,12 @@ A single unified inventory table for colonies, ships, and alliance storage.
 ```sql
 CREATE TABLE resource_inventory (
   id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  location_type TEXT NOT NULL CHECK (location_type IN ('colony', 'ship', 'alliance_storage')),
-  location_id   UUID NOT NULL,
+  -- 'colony'           = body settlement storage
+  -- 'ship'             = ship cargo hold
+  -- 'alliance_storage' = alliance shared stockpile
+  -- 'station'          = player core station inventory (GAME_RULES.md §21)
+  location_type TEXT NOT NULL CHECK (location_type IN ('colony', 'ship', 'alliance_storage', 'station')),
+  location_id   UUID NOT NULL,  -- colony.id / ship.id / alliance.id / player_stations.id
   resource_type TEXT NOT NULL,
   quantity      INTEGER NOT NULL DEFAULT 0 CHECK (quantity >= 0),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -524,10 +566,11 @@ CREATE TABLE resource_inventory (
 - `quantity >= 0` prevents negative inventory at DB level.
 - When a colony collapses, its resource_inventory rows are deleted (resources are lost).
 - When a colony is abandoned (not yet collapsed), its inventory is retained.
+- Station inventory (`location_type = 'station'`) is never automatically deleted; the station persists even when the player is inactive.
 
 ---
 
-## 11. Markets
+## 12. Markets
 
 ### `market_listings`
 
@@ -612,7 +655,7 @@ CREATE TABLE universal_exchange_purchases (
 
 ---
 
-## 12. Auctions
+## 13. Auctions
 
 ### `auctions`
 
@@ -656,7 +699,7 @@ CREATE TABLE auction_bids (
 
 ---
 
-## 13. Alliances
+## 14. Alliances
 
 ### `alliances`
 
@@ -723,7 +766,7 @@ CREATE TABLE alliance_goal_contributions (
 
 ---
 
-## 14. Premium Entitlements
+## 15. Premium Entitlements
 
 ### `premium_entitlements`
 
@@ -748,7 +791,7 @@ CREATE TABLE premium_entitlements (
 
 ---
 
-## 15. Logs
+## 16. Logs
 
 ### `world_events`
 
@@ -775,11 +818,12 @@ CREATE TABLE world_events (
 
 ---
 
-## 16. Relationship Summary
+## 17. Relationship Summary
 
 ```
 players
-  ├── ships (owner_id)
+  ├── player_stations (owner_id)      ← one core station per player
+  ├── ships (owner_id)                ← two starter ships; more post-alpha
   ├── colonies (owner_id)
   ├── system_stewardship (steward_id)
   ├── system_majority_control (controller_id)
@@ -802,10 +846,16 @@ systems (logical, not a DB table — derived from star catalog)
   ├── hyperspace_gates        (one gate per system)
   └── colonies                (multiple per system, one per body)
 
+player_stations
+  └── resource_inventory (location_type='station', location_id=player_stations.id)
+
 colonies
   ├── structures (colony_id)
   ├── construction_jobs → structures
   └── resource_inventory (location_type='colony', location_id=colony.id)
+
+ships
+  └── resource_inventory (location_type='ship', location_id=ship.id)
 
 alliances
   ├── alliance_members (alliance_id)
@@ -818,7 +868,7 @@ hyperspace_gates
 
 ---
 
-## 17. Actions Requiring Transactions / Locking
+## 18. Actions Requiring Transactions / Locking
 
 | Action | Tables locked | Lock type | Notes |
 |--------|---------------|-----------|-------|

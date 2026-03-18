@@ -7,6 +7,9 @@
  *   - Travel: POST /api/game/travel
  *   - Discover: POST /api/game/discover
  *   - Travel resolve: POST /api/game/travel/resolve (for in-transit state)
+ *   - Survey: POST /api/game/survey
+ *   - Found colony: POST /api/game/colony/found
+ *   - Load cargo: POST /api/game/ship/load
  *
  * Each action refreshes the page after completion so the server component
  * re-fetches and shows updated state.
@@ -146,6 +149,134 @@ export function DiscoverButton({ systemId, systemName }: DiscoverButtonProps) {
 }
 
 // ---------------------------------------------------------------------------
+// Survey button (shown per-body when ship is present and body unsurveyed)
+// ---------------------------------------------------------------------------
+
+interface SurveyButtonProps {
+  bodyId: string;
+  bodyLabel: string;
+}
+
+export function SurveyButton({ bodyId, bodyLabel }: SurveyButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const router = useRouter();
+
+  async function handleSurvey() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/survey", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bodyId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Survey failed.");
+        return;
+      }
+
+      setDone(true);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (done) {
+    return <p className="text-xs text-teal-400">Survey complete — refreshing…</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleSurvey}
+        disabled={loading}
+        className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Surveying…" : `Survey ${bodyLabel}`}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Found colony button (shown per-body when eligible and conditions met)
+// ---------------------------------------------------------------------------
+
+interface FoundColonyButtonProps {
+  bodyId: string;
+  bodyLabel: string;
+  isFirstColony: boolean;
+}
+
+export function FoundColonyButton({
+  bodyId,
+  bodyLabel,
+  isFirstColony,
+}: FoundColonyButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
+  const router = useRouter();
+
+  async function handleFound() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/colony/found", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bodyId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Colony founding failed.");
+        return;
+      }
+
+      setDone(true);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (done) {
+    return <p className="text-xs text-emerald-400">Colony founded — refreshing…</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleFound}
+        disabled={loading}
+        className="rounded bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Founding…" : `Found Colony on ${bodyLabel}`}
+      </button>
+      {isFirstColony && (
+        <p className="text-xs text-zinc-500">Your first colony is free.</p>
+      )}
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Arrival countdown + resolve button (shown on system page if in transit here)
 // ---------------------------------------------------------------------------
 
@@ -224,6 +355,82 @@ export function ArriveButton({ jobId, arriveAt, systemName }: ArriveButtonProps)
         className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Arriving…" : canArrive ? `Arrive at ${systemName}` : "Awaiting arrival…"}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Load cargo button (shown per resource type in colony inventory when ship present)
+// ---------------------------------------------------------------------------
+
+interface LoadButtonProps {
+  shipId: string;
+  colonyId: string;
+  resourceType: string;
+  available: number;
+}
+
+export function LoadButton({
+  shipId,
+  colonyId,
+  resourceType,
+  available,
+}: LoadButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [loaded, setLoaded] = useState<number | null>(null);
+  const router = useRouter();
+
+  async function handleLoad() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/ship/load", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          shipId,
+          colonyId,
+          resourceType,
+          quantity: available,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Load failed.");
+        return;
+      }
+
+      setLoaded(json.data.loaded as number);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loaded !== null) {
+    return (
+      <span className="text-xs font-medium text-indigo-400">
+        +{loaded} loaded
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleLoad}
+        disabled={loading}
+        className="rounded bg-indigo-700 px-2 py-0.5 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Loading…" : `Load all`}
       </button>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

@@ -19,7 +19,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, singleResult } from "@/lib/supabase/utils";
 import {
   SOL_SYSTEM_ID,
-  STARTER_SHIP,
+  STARTER_SHIPS,
+  STARTER_STATION_NAME,
   HANDLE_MIN_LENGTH,
   HANDLE_MAX_LENGTH,
 } from "@/lib/config/constants";
@@ -71,7 +72,7 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
   );
 
   if (inserted) {
-    await createStarterShip(inserted.id);
+    await createStarterAssets(inserted.id);
     return inserted;
   }
 
@@ -107,7 +108,7 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
     );
   }
 
-  await createStarterShip(fallbackInserted.id);
+  await createStarterAssets(fallbackInserted.id);
   return fallbackInserted;
 }
 
@@ -115,16 +116,28 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-async function createStarterShip(playerId: string): Promise<void> {
+async function createStarterAssets(playerId: string): Promise<void> {
   const admin = createAdminClient();
-  await admin.from("ships").insert({
+
+  // Create 2 starter ships at Sol
+  await admin.from("ships").insert(
+    STARTER_SHIPS.map((ship) => ({
+      owner_id: playerId,
+      name: ship.name,
+      speed_ly_per_hr: ship.speedLyPerHr,
+      cargo_cap: ship.cargoCap,
+      current_system_id: SOL_SYSTEM_ID,
+      current_body_id: null,
+    })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+  );
+
+  // Create core station at Sol
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  await (admin as any).from("player_stations").insert({
     owner_id: playerId,
-    name: STARTER_SHIP.name,
-    speed_ly_per_hr: STARTER_SHIP.speedLyPerHr,
-    cargo_cap: STARTER_SHIP.cargoCap,
+    name: STARTER_STATION_NAME,
     current_system_id: SOL_SYSTEM_ID,
-    current_body_id: null,
-  } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
 }
 
 /**

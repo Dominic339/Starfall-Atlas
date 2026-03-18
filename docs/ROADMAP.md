@@ -1,6 +1,6 @@
 # Starfall Atlas — Roadmap
 
-> Version: 0.2 (Alpha Design)
+> Version: 0.3 (Alignment update)
 > Last updated: 2026-03-18
 
 This roadmap describes the planned implementation phases for Starfall Atlas. The goal is a fast alpha focused on the core economy and exploration loop, with no combat and no real-time simulation.
@@ -116,39 +116,61 @@ Each phase has a clear deliverable and exit criteria. Phases are sequential; lat
 
 ---
 
-## Phase 5 — Claims, Colony Basics, and Influence
+## Phase 5 — Claims, Colony Basics, and Influence ✅ Mostly Complete
 
 **Goal**: Players can claim a body, establish a colony, collect taxes, and begin building system influence.
 
 **Deliverables**:
-- [ ] `POST /api/game/claim` — claim a body (contention handling via DB transaction; steward and non-steward paths)
-- [ ] First colony is free; subsequent colonies require resources (from `balance.ts`)
-- [ ] Colony detail page: population tier, structures, tax status, influence contribution
-- [ ] `POST /api/game/colony/collect-taxes` — collect accumulated taxes
-- [ ] Tax calculation function (reads `last_tax_collected_at`, calculates yield, caps at 24h)
-- [ ] `src/lib/game/influence.ts` — influence formula: `10 × tier` per colony + structure bonuses
-- [ ] `system_influence_cache` updated on colony claim, tier change, abandonment, collapse
-- [ ] System influence panel: shows per-player/alliance influence breakdown for any discovered system
-- [ ] Activity indicators on colony and system pages
+- [x] `POST /api/game/survey` — instant basic survey (alpha simplification; timer deferred)
+- [x] `POST /api/game/colony/found` — found a colony (Sol blocked; free in alpha)
+- [x] `POST /api/game/colony/collect` — collect accumulated taxes (lazy calculation)
+- [x] Tax calculation function (reads `last_tax_collected_at`, calculates yield, caps at 24h)
+- [x] System detail page: per-body survey state, SurveyButton, FoundColonyButton, colony badges
+- [x] Game dashboard: colony list with accrued tax and CollectButton
+- [ ] `POST /api/game/claim` — full contention-safe colony claim with SELECT FOR UPDATE *(deferred — using UNIQUE conflict for now)*
+- [ ] `src/lib/game/influence.ts` — influence formula and cache update *(deferred to Phase 8)*
+- [ ] System influence panel *(deferred to Phase 8)*
+- [ ] Activity indicators on colony and system pages *(deferred)*
 
-**Exit criteria**: A player can claim a body, establish a colony, collect their first tax income, and the system influence panel shows their influence score.
+**Exit criteria**: A player can found a colony on a non-Sol system, collect taxes, and see their colony list on the dashboard. ✅
 
 ---
 
-## Phase 6 — Structures and Resource Extraction
+## Phase 5.5 — Model Alignment ✅ Complete
 
-**Goal**: Players can build structures and generate resources.
+**Goal**: Align docs, types, schema, and implementation to the confirmed core model before proceeding with resource extraction.
 
 **Deliverables**:
-- [ ] `POST /api/game/colony/build` — queue a construction job for a structure (resource cost from colony inventory)
-- [ ] Construction job resolution (lazy)
-- [ ] Extractor produces resources on tick (lazy calculation, same pattern as taxes)
-- [ ] Warehouse increases storage cap
-- [ ] Resource inventory views for colonies and ships
-- [ ] Resource transport (load/unload ship cargo via travel)
-- [ ] Gate influence bonus: gate owner gains `+50` influence in their system
+- [x] Sol explicitly non-colonizable: server-enforced in `POST /api/game/colony/found`; UI hides FoundColonyButton on Sol
+- [x] Sol stewardship/governance text updated in system detail page
+- [x] `player_stations` table added (migration 00016); one station per player anchored at Sol
+- [x] Starter assets updated to 2 ships + 1 core station; bootstrap creates all three
+- [x] `dispatch_mode` column added to ships (manual / auto_collect_nearest / auto_collect_highest); auto behavior scaffolded but not implemented
+- [x] `sol_stipend_last_at` column added to players; stipend config in balance.ts; implementation deferred
+- [x] `InventoryLocationType` extended to include `'station'`
+- [x] `ShipDispatchMode` type added to enums.ts
+- [x] `StationId` branded type and `PlayerStation` interface added to game.ts
+- [x] GAME_RULES.md §1, §4.1, §7.1, §21, §22 updated
+- [x] SCHEMA_NOTES.md renumbered and updated with new tables and columns
 
-**Exit criteria**: A player can build an Extractor, accumulate resources, and transport them via ship.
+---
+
+## Phase 6 — Colony Growth, Resource Inventory, and Basic Extraction
+
+**Goal**: Colony growth resolves, resources are produced and tracked, and ships move resources through the player's network.
+
+**Deliverables**:
+- [ ] Colony growth resolution: `POST /api/game/colony/grow` — checks `next_growth_at`, advances `population_tier`, sets next timer
+- [ ] `resource_inventory` reads and writes: typed helpers for colony/ship/station inventory
+- [ ] `POST /api/game/colony/extract` — lazy resource extraction tick (same pattern as taxes: reads `last_extract_at`, computes yield since then, caps to avoid idle stacking)
+- [ ] Resource inventory display on system detail page (per-colony) and dashboard
+- [ ] Ship cargo load (`POST /api/game/ship/load`) — transfer resources from a colony or station to a ship at the same system
+- [ ] Ship cargo unload (`POST /api/game/ship/unload`) — transfer ship cargo to a colony or station at the current system
+- [ ] Station inventory display on dashboard
+- [ ] Resource model is station-aware: load/unload targets include the player's station if it is in the same system
+- [ ] Gate influence bonus: gate owner gains `+50` influence in their system *(deferred to Phase 8)*
+
+**Exit criteria**: A player can found a colony with an Extractor, collect resources to their ship, transport them to their station, and view the station's inventory on the dashboard.
 
 ---
 

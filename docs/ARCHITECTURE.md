@@ -1,6 +1,6 @@
 # Starfall Atlas — Architecture
 
-> Version: 0.2 (Alpha Design)
+> Version: 0.3 (Alignment update — core station model)
 > Last updated: 2026-03-18
 
 This document describes the technical architecture for Starfall Atlas. It is intended as the authoritative reference for how the application is structured, how data flows, and how game-critical actions are handled safely.
@@ -66,6 +66,7 @@ These values represent irreversible or player-driven changes:
 - Survey results (revealed resource profiles)
 - Colony claims and ownership; colony lifecycle status (active, abandoned, collapsed)
 - Structures (type, tier, build timestamps)
+- **Player core stations** (one per player; current system location; resource inventory)
 - Travel jobs (depart/arrive timestamps)
 - Market listings, bids, auctions
 - **System governance**: stewardship (`system_stewardship`), majority control (`system_majority_control`), influence cache (`system_influence_cache`)
@@ -149,7 +150,7 @@ starfall-atlas/
 │   ├── SCHEMA_NOTES.md
 │   └── CLAUDE_WORKFLOW.md
 ├── supabase/
-│   └── migrations/             # SQL migration files (00001–00014)
+│   └── migrations/             # SQL migration files (00001–00016)
 └── README.md
 ```
 

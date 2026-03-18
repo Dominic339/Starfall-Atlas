@@ -1,7 +1,7 @@
 # Starfall Atlas — Game Rules
 
-> Version: 0.2 (Alpha Design)
-> Last updated: 2026-03-17
+> Version: 0.3 (Alignment update — core station model, Sol protection)
+> Last updated: 2026-03-18
 
 This document defines the authoritative game rules for Starfall Atlas. All server logic must conform to these rules. UI, API routes, and database constraints must be derived from and consistent with this document.
 
@@ -29,6 +29,8 @@ This document defines the authoritative game rules for Starfall Atlas. All serve
 18. [Pre-Colony Travel](#18-pre-colony-travel)
 19. [Emergency Universal Exchange](#19-emergency-universal-exchange)
 20. [Inactivity and Colony Collapse](#20-inactivity-and-colony-collapse)
+21. [Player Core Station](#21-player-core-station)
+22. [Sol Safety Stipend](#22-sol-safety-stipend)
 
 ---
 
@@ -39,6 +41,26 @@ This document defines the authoritative game rules for Starfall Atlas. All serve
 - System bodies and their base resource profiles are derived from the seed. Only **player actions** (claims, structures, depletion, market listings) are stored in the database.
 - All players share one persistent galaxy. There are no shards or private instances.
 - The game starts at **Sol** (Earth's solar system). All players begin there and expand outward.
+
+### 1.1 Sol — Protected Shared Starter System
+
+Sol is special and subject to rules that differ from all other systems:
+
+- **Sol cannot be colonized.** No body in Sol may be claimed or settled by any player.
+- **Sol has no steward.** It is not discoverable and does not participate in the stewardship or majority-control governance systems.
+- **Sol is always known.** Players do not need to travel to Sol or perform a discovery action — it is the universal starting point.
+- **Sol does not generate influence.** Since colonies cannot exist in Sol, it contributes no system influence to any player.
+- **Sol bodies can be surveyed.** Survey data is available to understand what Sol contains, but survey results grant no special rights to colonize.
+- These rules are permanent design invariants, enforced server-side. They cannot be bypassed by stewardship, majority control, or any premium item.
+
+### 1.2 Starter Assets
+
+Every newly registered player begins with:
+
+- **Two starter ships** placed at Sol, immediately available for exploration and resource transport.
+- **One core player station** anchored at Sol (see §21).
+
+Ships are the active layer of the player economy: exploration, resource collection, and transport. The core station is the player's permanent hub.
 
 ---
 
@@ -79,6 +101,7 @@ This section covers all five distinct layers of system control. They must not be
 ### 4.1 Claiming a Colony Site
 
 - A player may **claim** a habitable planet or suitable body as a colony site.
+- **Sol bodies can never be claimed.** Sol is a protected starter system and is not subject to colonization by any player under any circumstances (see §1.1).
 - Claiming requires:
   1. The target body has been surveyed (by any player — survey results are public).
   2. The player's ship is physically present (travel complete, timestamp resolved).
@@ -214,6 +237,8 @@ The economy has two distinct layers that must not be conflated:
 - **All buildings, upgrades, colonies, gates, and infrastructure are resource-built.** Credits are not spent on construction.
 - Resource costs are paid from the builder's colony inventory or ship cargo at job submission.
 - The resource economy is driven by extraction (Extractors), crafting (refined resources), and trading.
+
+**Resource logistics model**: Colonies produce resources via Extractors. Ships collect resources from colonies and transport them to other colonies, the player's core station, or market pickup points. The **core station** is the intended long-term hub of the player's resource economy — not a passive wallet, but an active node in the logistics network.
 
 ### 7.2 Credits: the market economy
 
@@ -538,3 +563,45 @@ When a player crosses the inactivity threshold, **all of their colonies** enter 
 
 - A player who returns after the resolution window has passed (colonies collapsed) may reclaim their former colony bodies as if they were new claims. No special treatment — same rules as any player claiming an unclaimed body.
 - There is no penalty for returning, but all prior colony progress is lost.
+
+---
+
+## 21. Player Core Station
+
+Every player has exactly one **core station** — their permanent hub in the galaxy.
+
+### 21.1 What the core station is
+
+- The core station is a first-class player-owned asset, distinct from ships and colonies.
+- It serves as the player's central logistics node: the destination resources flow toward and the point from which orders are dispatched.
+- Future cosmetic items (station skins) will apply to the station.
+
+### 21.2 Starting location and movement
+
+- All core stations begin at **Sol** (the shared starter system).
+- The station can be relocated, but movement is **significantly slower than ships**. Station movement is a strategic, long-horizon decision — not a frequent action.
+- Station movement is a timestamp-based job, like travel (start timestamp + calculated duration).
+- While the station is in transit, its logistics role is suspended until arrival resolves.
+
+### 21.3 Station inventory
+
+- The core station maintains a **resource inventory** (the same `resource_inventory` table used by colonies and ships, with `location_type = 'station'`).
+- Colonies are not the final destination of the resource economy. The long-term design is: **Extractors on colonies produce resources → ships transport resources → station stores and processes them** for construction, market listing, and alliance operations.
+
+### 21.4 What the station does not do (alpha scope)
+
+- The station does not produce taxes or resources directly.
+- The station does not have structures in alpha.
+- Full station automation (auto-dispatch queues, station-side processing) is a post-alpha feature.
+
+---
+
+## 22. Sol Safety Stipend
+
+To prevent new players from becoming completely softlocked before establishing their first colony economy:
+
+- Players who are **at or below a low credit threshold** (default: 50 credits) and have not received a stipend in the last 24 hours will receive a small daily credit grant (default: 25 credits) when they load the game.
+- This stipend is applied lazily (checked at login/page load) — no background job required.
+- The stipend is intentionally **very small**. It is a floor, not an income source. A single Tier 1 colony generates 10 credits/hour, making the stipend negligible within hours of founding a colony.
+- The stipend is only available while the player's balance is at or below the threshold. It stops the moment the player has meaningful income.
+- This is not an exploitable income source: the credit threshold ensures it only activates in genuine early-game hardship.

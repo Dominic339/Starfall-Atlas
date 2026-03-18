@@ -114,7 +114,30 @@ export type BodyType =
 export type AuctionItemType = "colony" | "stewardship" | "ship" | "item";
 
 /** Resource inventory location discriminator. */
-export type InventoryLocationType = "colony" | "ship" | "alliance_storage";
+export type InventoryLocationType =
+  | "colony"
+  | "ship"
+  | "alliance_storage"
+  /** Player core station inventory (GAME_RULES.md §21). */
+  | "station";
 
 /** How stewardship was most recently acquired. */
 export type StewardshipMethod = "discovery" | "transfer" | "auction";
+
+/**
+ * Ship dispatch mode — controls how a ship is assigned tasks.
+ *
+ * 'manual'                = player submits all travel and cargo actions explicitly.
+ * 'auto_collect_nearest'  = ship automatically dispatches to collect from the
+ *                           nearest colony that has accumulated resources (future).
+ * 'auto_collect_highest'  = ship automatically dispatches to the colony with the
+ *                           largest accumulated resource quantity (future).
+ *
+ * Auto modes are scaffolded in the schema and type system; full automation
+ * behavior is a post-alpha feature and is not yet implemented server-side.
+ * All ships default to 'manual'.
+ */
+export type ShipDispatchMode =
+  | "manual"
+  | "auto_collect_nearest"
+  | "auto_collect_highest";
