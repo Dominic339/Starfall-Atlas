@@ -2,7 +2,7 @@
 
 A shared-universe browser strategy and economy game built on real star data.
 
-> **Status**: Active development — Pre-alpha (Phase 0: Foundation)
+> **Status**: Active development — Pre-alpha (Phase 2: Application Foundation)
 
 ---
 
@@ -13,14 +13,16 @@ Starfall Atlas is a persistent, multiplayer browser game set in a galaxy built f
 There is no combat in the current alpha. The core loop is exploration, economy, and trade diplomacy.
 
 **Core gameplay:**
-- Discover star systems and survey their planets
+- Discover star systems — the first discoverer becomes the system's **steward**
+- Survey planets to reveal their resource profiles
 - Claim habitable bodies and establish colonies
 - Generate in-game currency (Credits) from colony taxes — the only currency source
-- Extract resources and transport them via hyperspace lanes
+- Build system influence through colonies and structures; claim **majority control** when your footprint dominates
+- Extract resources and transport them via hyperspace lanes (routed through gates)
 - Buy and sell resources on regional player-driven markets
-- Build and tax hyperspace lanes between owned systems
-- Form trade alliances (up to 100 members) with shared storage and internal credits
-- Auction or sell colonies and systems to other players
+- Build and tax hyperspace lanes between gate-equipped systems
+- Form trade alliances (up to 100 members) with shared storage, internal credits, and collective majority control
+- Auction or sell colonies and stewardship rights to other players
 - Access a premium shop for cosmetics and select single-use mobility items
 
 ---
@@ -128,10 +130,11 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Development Guidelines
 
 - **All game state writes go through the Next.js API layer.** The browser Supabase client is read-only for game data.
-- **Critical actions (claims, trades, bids) use Postgres transactions** with row-level locking to prevent race conditions.
+- **Critical actions (claims, trades, bids, gate construction, governance changes) use Postgres transactions** with row-level locking to prevent race conditions.
 - **The world is deterministic.** Star data, system bodies, and base resource profiles are generated from a seed and never stored in Supabase.
 - **No combat, no real-time simulation.** Travel and construction use timestamp-based completion, resolved lazily.
 - **First colony is free.** Pre-colony players have free lane transit so they can never be trapped.
+- **Governance is earned, not granted.** System stewards start with governance; majority controllers earn it through development.
 
 See [`docs/CLAUDE_WORKFLOW.md`](docs/CLAUDE_WORKFLOW.md) for the full contributor behavioral contract.
 
@@ -139,13 +142,12 @@ See [`docs/CLAUDE_WORKFLOW.md`](docs/CLAUDE_WORKFLOW.md) for the full contributo
 
 ## Current Roadmap Status
 
-We are in **Phase 0 (Foundation)**. The project scaffold exists and documentation is being established before any gameplay code is written.
+- **Phase 0 (Foundation)** ✅ — Docs complete, scaffold built
+- **Phase 1 (Schema and Migrations)** ✅ — All 14 migrations applied, including governance v2
+- **Phase 2 (Application Foundation)** 🔄 — Supabase helpers, shared types, config, and generation logic in place; real star catalog not yet wired in
+- **Phase 3 (Auth and Player Setup)** — Next up
 
-Next steps:
-1. Complete Phase 0 documentation
-2. Write Supabase migrations (Phase 1)
-3. Implement star catalog and world generation (Phase 2)
-4. Auth and player initialization (Phase 3)
+The immediate next step is Phase 3: register/login flows, player initialization at Sol, and the player profile page.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full plan.
 

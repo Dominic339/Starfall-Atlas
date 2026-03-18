@@ -1,7 +1,7 @@
 # Starfall Atlas — Claude Workflow
 
-> Version: 0.1
-> Last updated: 2026-03-16
+> Version: 0.2
+> Last updated: 2026-03-18
 
 This document defines how Claude (AI assistant) should operate in this repository. It serves as a behavioral contract for any AI-assisted development session. Refer to this file before making any changes to the codebase.
 
@@ -54,9 +54,16 @@ All of the following must happen server-side (Next.js Route Handler or Server Ac
 
 | Action | Required server-side steps |
 |--------|---------------------------|
-| Claim a body | Transaction + SELECT FOR UPDATE on body; check unclaimed |
+| Claim a body | Transaction + SELECT FOR UPDATE on body; check no active colony for body_id |
+| Stewardship registration | Atomic with first-discovery insert; SELECT FOR UPDATE on system_stewardship by system_id |
+| Gate construction | Verify governance; SELECT FOR UPDATE on hyperspace_gates by system_id; check no existing gate |
+| Gate reclaim | Verify caller is governance holder; verify gate status = 'neutral'; update atomically |
+| Majority control claim | Lock system_majority_control + system_stewardship + system_influence_cache; verify >50% influence and ≥3 active colonies |
+| Colony abandonment | Lock colonies by owner_id; deactivate structures; update influence cache; emit world event |
+| Colony collapse | Lock colonies + resource_inventory + system_influence_cache; clear inventory; reopen body |
 | Collect taxes | Calculate yield lazily from timestamps; credit atomically |
 | Market order post | Deduct listing fee; hold escrow; attempt match — all in one transaction |
+| EUX purchase | Check credits; check daily limit; burn credits; deliver to colony inventory atomically |
 | Bid placement | Lock auction row; check bid amount; manage escrow atomically |
 | Alliance storage withdrawal | Lock alliance_members + resource_inventory; check credits and stock |
 | Premium item use | Lock entitlement row; verify not consumed; apply effect; mark consumed |
@@ -117,7 +124,7 @@ When a feature is incomplete or deferred:
 
 - Do not add combat mechanics. Combat is explicitly excluded from alpha scope.
 - Do not add real-time ship animation or 3D rendering. The game is 2D and timestamp-based.
-- Do not add an NPC market. The economy is entirely player-driven.
+- Do not add NPC buy/sell orders to regional markets. The market is entirely player-driven. (The Emergency Universal Exchange in GAME_RULES.md §19 is the only NPC-backed mechanic and is already designed and migrated.)
 - Do not implement features that are not in the current roadmap phase without explicit instruction.
 - Do not add dependencies for features that don't exist yet (no pre-installing a WebSocket library "for later").
 - Do not modify Supabase Auth configuration in code. Auth setup is done in the Supabase dashboard.
