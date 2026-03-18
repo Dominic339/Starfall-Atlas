@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Client-side colony actions for the game dashboard.
+ * Client-side colony and ship actions for the game dashboard.
  *
  * CollectButton  — collect accrued taxes into player credit balance.
- * ExtractButton  — extract accrued resources into station inventory.
+ * ExtractButton  — extract accrued resources into colony inventory.
+ * UnloadButton   — unload ship cargo into station inventory.
  */
 
 import { useState } from "react";
@@ -142,6 +143,80 @@ export function ExtractButton({ colonyId, summary }: ExtractButtonProps) {
         className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Extracting…" : `Extract (${summary})`}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Unload ship cargo button
+// ---------------------------------------------------------------------------
+
+interface UnloadButtonProps {
+  shipId: string;
+  /** Pre-formatted cargo summary, e.g. "5 iron, 3 carbon" */
+  summary: string;
+}
+
+export function UnloadButton({ shipId, summary }: UnloadButtonProps) {
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [resultText, setResultText] = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleUnload() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      const res = await fetch("/api/game/ship/unload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipId }),
+      });
+
+      const json = await res.json();
+
+      if (!json.ok) {
+        setError(json.error?.message ?? "Unload failed.");
+        return;
+      }
+
+      const unloaded = json.data.unloaded as {
+        resource_type: string;
+        quantity: number;
+      }[];
+      const text =
+        unloaded.length > 0
+          ? unloaded.map((u) => `${u.quantity} ${u.resource_type}`).join(", ")
+          : "nothing to unload";
+
+      setResultText(text);
+      router.refresh();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (resultText !== null) {
+    return (
+      <span className="text-xs font-medium text-indigo-400">
+        Unloaded: {resultText}
+      </span>
+    );
+  }
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleUnload}
+        disabled={loading}
+        className="rounded bg-indigo-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+      >
+        {loading ? "Unloading…" : `Unload to Station (${summary})`}
       </button>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

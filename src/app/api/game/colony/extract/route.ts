@@ -1,12 +1,12 @@
 /**
  * POST /api/game/colony/extract
  *
- * Extracts accumulated resources from a colony into the player's core station
- * inventory (resource flow: colony → station, GAME_RULES.md §7.1).
+ * Extracts accumulated resources from a colony into the colony's own inventory
+ * (resource flow: colony production → colony inventory, GAME_RULES.md §7.1).
  *
- * In alpha, extraction resolves directly into station inventory without a ship
- * transport step. The resource_inventory model is already station-aware so
- * ship-hauling can be layered in later without breaking this foundation.
+ * Phase 7: Resources accumulate in colony inventory first. Players then use
+ * POST /api/game/ship/load to move resources to ship cargo, and
+ * POST /api/game/ship/unload to transfer from ship to station.
  *
  * Extraction is based on:
  *   - Survey result resource nodes for the colony's body (basic nodes only)
@@ -18,7 +18,7 @@
  * TODO(phase-7): wrap in a Postgres RPC for full transactional safety.
  *
  * Body: { colonyId: string }
- * Returns: { ok: true, data: { extracted: ExtractionAmount[], stationId: string } }
+ * Returns: { ok: true, data: { extracted: ExtractionAmount[], colonyId: string } }
  */
 
 import { type NextRequest } from "next/server";
@@ -30,7 +30,6 @@ import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/util
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
 import type {
   Colony,
-  PlayerStation,
   SurveyResult,
   ResourceInventoryRow,
 } from "@/lib/types/game";
@@ -101,26 +100,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch player's station ────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: station } = maybeSingleResult<Pick<PlayerStation, "id">>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-
-  if (!station) {
-    return toErrorResponse(
-      fail(
-        "not_found",
-        "Your station was not found. Sign out and back in to re-initialize it.",
-      ).error,
-    );
-  }
-
   // ── Calculate accumulated extraction ──────────────────────────────────────
   const now = new Date();
   // Fall back to now (= 0 yield) if last_extract_at is somehow null.
@@ -136,7 +115,7 @@ export async function POST(request: NextRequest) {
   if (extracted.length === 0) {
     return Response.json({
       ok: true,
-      data: { extracted: [], stationId: station.id },
+      data: { extracted: [], colonyId },
     });
   }
 
@@ -147,7 +126,7 @@ export async function POST(request: NextRequest) {
     .update({ last_extract_at: now.toISOString() })
     .eq("id", colonyId);
 
-  // ── Fetch current station inventory for the extracted resource types ────
+  // ── Fetch current colony inventory for the extracted resource types ────────
   const resourceTypes = extracted.map((e) => e.resource_type);
   const { data: existingRows } = listResult<
     Pick<ResourceInventoryRow, "resource_type" | "quantity">
@@ -155,8 +134,8 @@ export async function POST(request: NextRequest) {
     await admin
       .from("resource_inventory")
       .select("resource_type, quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
+      .eq("location_type", "colony")
+      .eq("location_id", colonyId)
       .in("resource_type", resourceTypes),
   );
 
@@ -164,14 +143,14 @@ export async function POST(request: NextRequest) {
     (existingRows ?? []).map((r) => [r.resource_type, r.quantity]),
   );
 
-  // ── Upsert incremented quantities into station inventory ──────────────────
+  // ── Upsert incremented quantities into colony inventory ───────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any)
     .from("resource_inventory")
     .upsert(
       extracted.map((item) => ({
-        location_type: "station",
-        location_id: station.id,
+        location_type: "colony",
+        location_id: colonyId,
         resource_type: item.resource_type,
         quantity: (existing.get(item.resource_type) ?? 0) + item.quantity,
       })),
@@ -180,6 +159,6 @@ export async function POST(request: NextRequest) {
 
   return Response.json({
     ok: true,
-    data: { extracted, stationId: station.id },
+    data: { extracted, colonyId },
   });
 }

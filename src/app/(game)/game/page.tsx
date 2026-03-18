@@ -35,7 +35,7 @@ import type {
   ResourceInventoryRow,
   SurveyResult,
 } from "@/lib/types/game";
-import { CollectButton, ExtractButton } from "./_components/ColonyActions";
+import { CollectButton, ExtractButton, UnloadButton } from "./_components/ColonyActions";
 
 export const dynamic = "force-dynamic";
 
@@ -91,7 +91,9 @@ export default async function GameDashboard() {
   // ── Step 3: parallel fetches that need colony bodies / station.id ──────────
   const colonyBodyIds = rawColonies.map((c) => c.body_id);
 
-  const [surveyRes, invRes] = await Promise.all([
+  const shipIds = shipList.map((s) => s.id);
+
+  const [surveyRes, invRes, cargoRes] = await Promise.all([
     colonyBodyIds.length > 0
       ? admin
           .from("survey_results")
@@ -106,6 +108,13 @@ export default async function GameDashboard() {
           .eq("location_id", station.id)
           .order("resource_type", { ascending: true })
       : Promise.resolve({ data: [] }),
+    shipIds.length > 0
+      ? admin
+          .from("resource_inventory")
+          .select("location_id, resource_type, quantity")
+          .eq("location_type", "ship")
+          .in("location_id", shipIds)
+      : Promise.resolve({ data: [] }),
   ]);
 
   const surveyByBodyId = new Map(
@@ -118,6 +127,17 @@ export default async function GameDashboard() {
     ResourceInventoryRow,
     "resource_type" | "quantity"
   >[];
+
+  // Build per-ship cargo map: shipId → sorted resource rows
+  type CargoRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
+    location_id: string;
+  };
+  const cargoByShipId = new Map<string, { resource_type: string; quantity: number }[]>();
+  for (const row of (cargoRes.data ?? []) as CargoRow[]) {
+    const existing = cargoByShipId.get(row.location_id) ?? [];
+    existing.push({ resource_type: row.resource_type, quantity: row.quantity });
+    cargoByShipId.set(row.location_id, existing);
+  }
 
   // ── Step 4: lazy growth resolution ──────────────────────────────────────
   const requestTime = new Date();
@@ -369,6 +389,8 @@ export default async function GameDashboard() {
                 key={ship.id}
                 ship={ship}
                 activeTravelJob={activeTravelJob}
+                cargo={cargoByShipId.get(ship.id) ?? []}
+                stationSystemId={station?.current_system_id ?? null}
               />
             ))}
           </div>
@@ -437,7 +459,11 @@ export default async function GameDashboard() {
           </li>
           <li>
             <span className="text-zinc-400">4.</span> Collect taxes and extract
-            resources from your colonies to build your empire.
+            resources from colonies into colony inventory.
+          </li>
+          <li>
+            <span className="text-zinc-400">5.</span> Load ship cargo from a colony, then
+            return to Sol to unload into your station.
           </li>
         </ol>
       </section>
@@ -452,9 +478,13 @@ export default async function GameDashboard() {
 function ShipRow({
   ship,
   activeTravelJob,
+  cargo,
+  stationSystemId,
 }: {
   ship: Ship;
   activeTravelJob: TravelJob | null;
+  cargo: { resource_type: string; quantity: number }[];
+  stationSystemId: string | null;
 }) {
   const isThisShipInTransit =
     !ship.current_system_id && activeTravelJob?.ship_id === ship.id;
@@ -475,26 +505,51 @@ function ShipRow({
         ? `/game/system/${encodeURIComponent(ship.current_system_id)}`
         : null;
 
+  const cargoUsed = cargo.reduce((s, r) => s + r.quantity, 0);
+  const cargoSummary = cargo
+    .map((r) => `${r.quantity} ${r.resource_type}`)
+    .join(", ");
+  const canUnload =
+    !!ship.current_system_id &&
+    stationSystemId !== null &&
+    ship.current_system_id === stationSystemId &&
+    cargo.length > 0;
+
   return (
-    <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-      <div>
-        <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
-        <p className="text-xs text-zinc-500">
-          {systemHref ? (
-            <Link href={systemHref} className="hover:text-zinc-300 transition-colors">
-              {locationDisplay}
-            </Link>
-          ) : (
-            locationDisplay
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
+          <p className="text-xs text-zinc-500">
+            {systemHref ? (
+              <Link href={systemHref} className="hover:text-zinc-300 transition-colors">
+                {locationDisplay}
+              </Link>
+            ) : (
+              locationDisplay
+            )}
+          </p>
+        </div>
+        <div className="text-right shrink-0">
+          <p className="text-xs text-zinc-500">
+            {ship.speed_ly_per_hr} ly/hr · {cargoUsed}/{ship.cargo_cap} cargo
+          </p>
+          <p className="text-xs text-zinc-700 capitalize">{ship.dispatch_mode}</p>
+        </div>
+      </div>
+
+      {/* Cargo contents */}
+      {cargo.length > 0 && (
+        <div className="mt-2 border-t border-zinc-800 pt-2">
+          <p className="text-xs text-zinc-500 mb-1">
+            Cargo:{" "}
+            <span className="text-zinc-400">{cargoSummary}</span>
+          </p>
+          {canUnload && (
+            <UnloadButton shipId={ship.id} summary={cargoSummary} />
           )}
-        </p>
-      </div>
-      <div className="text-right">
-        <p className="text-xs text-zinc-500">
-          {ship.speed_ly_per_hr} ly/hr · {ship.cargo_cap} cargo
-        </p>
-        <p className="text-xs text-zinc-700 capitalize">{ship.dispatch_mode}</p>
-      </div>
+        </div>
+      )}
     </div>
   );
 }

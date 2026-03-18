@@ -28,6 +28,7 @@ import type {
   TravelJob,
   SurveyResult,
   Colony,
+  ResourceInventoryRow,
 } from "@/lib/types/game";
 import {
   TravelButton,
@@ -35,6 +36,7 @@ import {
   ArriveButton,
   SurveyButton,
   FoundColonyButton,
+  LoadButton,
 } from "./_components/SystemActions";
 
 export const dynamic = "force-dynamic";
@@ -216,6 +218,39 @@ export default async function SystemPage({
   const colonyByBodyId = new Map(
     (systemColonies ?? []).map((c) => [c.body_id, c]),
   );
+
+  // ── Phase 7: Colony inventory for player's colonies in this system ─────────
+  // Used to display load actions when a ship is present.
+  const myColonyIds = (systemColonies ?? [])
+    .filter((c) => c.owner_id === player.id && c.status === "active")
+    .map((c) => c.id);
+
+  type InvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
+    location_id: string;
+  };
+  const colonyInvRows: InvRow[] =
+    myColonyIds.length > 0
+      ? (listResult<InvRow>(
+          await admin
+            .from("resource_inventory")
+            .select("location_id, resource_type, quantity")
+            .eq("location_type", "colony")
+            .in("location_id", myColonyIds)
+            .order("resource_type", { ascending: true }),
+        ).data ?? [])
+      : [];
+  const colonyInventoryById = new Map<
+    string,
+    { resource_type: string; quantity: number }[]
+  >();
+  for (const row of colonyInvRows) {
+    const existing = colonyInventoryById.get(row.location_id) ?? [];
+    existing.push({ resource_type: row.resource_type, quantity: row.quantity });
+    colonyInventoryById.set(row.location_id, existing);
+  }
+
+  // Ship present here for load actions (first docked ship in system)
+  const loadingShip = shipList.find((s) => s.current_system_id === systemId) ?? null;
 
   // ── Conditions for per-body actions ──────────────────────────────────────
   // Player can act on bodies if ship is here AND system is accessible.
@@ -505,6 +540,49 @@ export default async function SystemPage({
                     )}
                   </div>
                 )}
+
+                {/* Colony inventory + load actions (Phase 7) */}
+                {(() => {
+                  if (!myColonyHere || !colony) return null;
+                  const inv = colonyInventoryById.get(colony.id) ?? [];
+                  if (inv.length === 0 && !shipIsHere) return null;
+                  return (
+                    <div className="mt-2 border-t border-zinc-800 pt-2">
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                        Colony inventory
+                      </p>
+                      {inv.length === 0 ? (
+                        <p className="text-xs text-zinc-700">
+                          Empty — extract resources from the command centre.
+                        </p>
+                      ) : (
+                        <div className="space-y-1">
+                          {inv.map((row) => (
+                            <div
+                              key={row.resource_type}
+                              className="flex items-center gap-3"
+                            >
+                              <span className="text-xs text-zinc-400">
+                                {row.resource_type}{" "}
+                                <span className="font-mono text-zinc-300">
+                                  ×{row.quantity.toLocaleString()}
+                                </span>
+                              </span>
+                              {loadingShip && (
+                                <LoadButton
+                                  shipId={loadingShip.id}
+                                  colonyId={colony.id}
+                                  resourceType={row.resource_type}
+                                  available={row.quantity}
+                                />
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 {/* Per-body actions */}
                 {(canSurveyThis || canFoundColonyHere) && (
