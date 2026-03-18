@@ -1,10 +1,11 @@
 /**
  * System detail page — /game/system/[id]
  *
- * Read-only view of a star system for Phase 4.
+ * Read-only view of a star system for Phase 4/5.
  * Shows: name, star class, generated bodies, discovery status, stewardship.
- * Actions (Phase 4): Travel here, Discover (if present and undiscovered).
- * Actions deferred: Survey, Claim colony, Build gate.
+ *
+ * Phase 4 actions: Travel here, Discover (if present and undiscovered), Arrive.
+ * Phase 5 additions per body: Survey, Found Colony (when eligible and conditions met).
  *
  * Sol is handled as a special case: no discovery, no steward, canonical start.
  */
@@ -25,11 +26,15 @@ import type {
   SystemDiscovery,
   SystemStewardship,
   TravelJob,
+  SurveyResult,
+  Colony,
 } from "@/lib/types/game";
 import {
   TravelButton,
   DiscoverButton,
   ArriveButton,
+  SurveyButton,
+  FoundColonyButton,
 } from "./_components/SystemActions";
 
 export const dynamic = "force-dynamic";
@@ -70,7 +75,7 @@ export default async function SystemPage({
   const { data: player } = singleResult<Player>(
     await admin
       .from("players")
-      .select("id, handle, credits, first_colony_placed")
+      .select("id, handle, credits, first_colony_placed, colony_slots")
       .eq("auth_id", user.id)
       .single(),
   );
@@ -133,7 +138,6 @@ export default async function SystemPage({
   }
 
   // ── Travel reachability from current ship position ────────────────────────
-  // Can the player travel to this system right now?
   const maxRangeLy = BALANCE.lanes.baseRangeLy;
   let travelDistance: number | null = null;
   let canTravelHere = false;
@@ -158,6 +162,46 @@ export default async function SystemPage({
   const nearbySystems = isSol
     ? getNearbySystems(systemId, maxRangeLy)
     : getNearbySystems(systemId, maxRangeLy).slice(0, 6);
+
+  // ── Phase 5: Survey results for all bodies in this system ─────────────────
+  const { data: surveyResults } = listResult<SurveyResult>(
+    await admin
+      .from("survey_results")
+      .select("*")
+      .eq("system_id", systemId),
+  );
+  const surveyByBodyId = new Map(
+    (surveyResults ?? []).map((s) => [s.body_id, s]),
+  );
+
+  // ── Phase 5: Colonies in this system (any player) ─────────────────────────
+  type ColonyRow = Pick<Colony, "id" | "body_id" | "owner_id" | "status">;
+  const { data: systemColonies } = listResult<ColonyRow>(
+    await admin
+      .from("colonies")
+      .select("id, body_id, owner_id, status")
+      .eq("system_id", systemId),
+  );
+  const colonyByBodyId = new Map(
+    (systemColonies ?? []).map((c) => [c.body_id, c]),
+  );
+
+  // ── Conditions for per-body actions ──────────────────────────────────────
+  // Player can act on bodies if ship is here AND system is accessible.
+  // Sol is always accessible (no discovery required).
+  const hasSystemAccess = isSol || !!myDiscovery;
+  const canActOnBodies = shipIsHere && hasSystemAccess;
+
+  // Count player's active colonies (for first-colony detection display)
+  const { data: playerActiveColonies } = listResult<{ id: string }>(
+    await admin
+      .from("colonies")
+      .select("id")
+      .eq("owner_id", player.id)
+      .eq("status", "active"),
+  );
+  const activeColonyCount = playerActiveColonies?.length ?? 0;
+  const isFirstColony = !player.first_colony_placed && activeColonyCount === 0;
 
   return (
     <div className="space-y-6">
@@ -220,14 +264,18 @@ export default async function SystemPage({
           ) : myDiscovery ? (
             <div>
               <p className="mt-1 text-sm text-emerald-300">
-                {myDiscovery.is_first ? "You discovered this system first" : "Discovered by you"}
+                {myDiscovery.is_first
+                  ? "You discovered this system first"
+                  : "Discovered by you"}
               </p>
               <p className="mt-0.5 text-xs text-zinc-600">
                 {new Date(myDiscovery.discovered_at).toLocaleDateString()}
               </p>
             </div>
           ) : (
-            <p className="mt-1 text-sm text-zinc-400">Not yet discovered by you</p>
+            <p className="mt-1 text-sm text-zinc-400">
+              Not yet discovered by you
+            </p>
           )}
         </div>
 
@@ -264,7 +312,7 @@ export default async function SystemPage({
         </div>
       </div>
 
-      {/* Actions */}
+      {/* Travel / discover / arrive actions */}
       {!isSol && (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
           <h2 className="mb-3 text-sm font-semibold text-zinc-400">Actions</h2>
@@ -284,14 +332,19 @@ export default async function SystemPage({
             )}
 
             {/* Travel button — ship is elsewhere and system is reachable */}
-            {!shipIsHere && !inTransitHere && canTravelHere && travelDistance !== null && travelHours !== null && !activeTravelJob && (
-              <TravelButton
-                destinationSystemId={systemId}
-                destinationName={system.name}
-                distanceLy={travelDistance}
-                travelHours={travelHours}
-              />
-            )}
+            {!shipIsHere &&
+              !inTransitHere &&
+              canTravelHere &&
+              travelDistance !== null &&
+              travelHours !== null &&
+              !activeTravelJob && (
+                <TravelButton
+                  destinationSystemId={systemId}
+                  destinationName={system.name}
+                  distanceLy={travelDistance}
+                  travelHours={travelHours}
+                />
+              )}
 
             {/* Ship is in transit elsewhere */}
             {activeTravelJob && !inTransitHere && (
@@ -308,23 +361,17 @@ export default async function SystemPage({
             )}
 
             {/* Out of range */}
-            {!shipIsHere && !inTransitHere && !canTravelHere && !activeTravelJob && ship?.current_system_id && (
-              <p className="text-sm text-zinc-500">
-                {travelDistance !== null
-                  ? `${system.name} is ${travelDistance.toFixed(2)} ly away — beyond your current travel range (${maxRangeLy} ly). Build relay stations to extend your reach.`
-                  : "Your ship's current position is unknown."}
-              </p>
-            )}
-
-            {/* No actions available (already here + discovered, etc.) */}
-            {shipIsHere && myDiscovery && (
-              <p className="text-sm text-zinc-500">
-                You are present here.{" "}
-                <span className="text-zinc-600">
-                  Survey and colony actions coming soon.
-                </span>
-              </p>
-            )}
+            {!shipIsHere &&
+              !inTransitHere &&
+              !canTravelHere &&
+              !activeTravelJob &&
+              ship?.current_system_id && (
+                <p className="text-sm text-zinc-500">
+                  {travelDistance !== null
+                    ? `${system.name} is ${travelDistance.toFixed(2)} ly away — beyond your current travel range (${maxRangeLy} ly). Build relay stations to extend your reach.`
+                    : "Your ship's current position is unknown."}
+                </p>
+              )}
           </div>
         </div>
       )}
@@ -335,41 +382,131 @@ export default async function SystemPage({
           Bodies ({system.bodyCount})
         </h2>
         <div className="space-y-2">
-          {system.bodies.map((body) => (
-            <div
-              key={body.id}
-              className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
-            >
-              <div>
-                <p className="text-sm font-medium text-zinc-200">
-                  {bodyLabel(body.type)}
-                  {body.index === system.anchorBodyIndex && (
-                    <span className="ml-2 text-xs text-zinc-500">
-                      (anchor)
-                    </span>
-                  )}
-                </p>
-                <p className="text-xs capitalize text-zinc-600">
-                  {body.size} · index {body.index}
-                </p>
-              </div>
-              <div className="text-right">
-                {body.canHostColony ? (
-                  <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400">
-                    Habitable
-                  </span>
-                ) : (
-                  <span className="text-xs text-zinc-700">
-                    hab. {body.habitabilityScore}
-                  </span>
+          {system.bodies.map((body) => {
+            const survey = surveyByBodyId.get(body.id) ?? null;
+            const colony = colonyByBodyId.get(body.id) ?? null;
+            const bodyIsOccupied =
+              colony !== null && colony.status !== "collapsed";
+            const myColonyHere =
+              colony?.owner_id === player.id && bodyIsOccupied;
+
+            // Per-body action conditions
+            const canSurveyThis =
+              canActOnBodies && survey === null;
+            const canFoundColonyHere =
+              canActOnBodies &&
+              survey !== null &&
+              body.canHostColony &&
+              !bodyIsOccupied;
+
+            return (
+              <div
+                key={body.id}
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+              >
+                {/* Body header row */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-zinc-200">
+                      {bodyLabel(body.type)}
+                      {body.index === system.anchorBodyIndex && (
+                        <span className="ml-2 text-xs text-zinc-500">
+                          (anchor)
+                        </span>
+                      )}
+                    </p>
+                    <p className="text-xs capitalize text-zinc-600">
+                      {body.size} · index {body.index}
+                    </p>
+                  </div>
+
+                  {/* Right-side badges */}
+                  <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
+                    {body.canHostColony ? (
+                      <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400">
+                        Habitable
+                      </span>
+                    ) : (
+                      <span className="text-xs text-zinc-700">
+                        hab. {body.habitabilityScore}
+                      </span>
+                    )}
+                    {survey && (
+                      <span className="rounded-full bg-teal-900/40 px-2 py-0.5 text-xs text-teal-400">
+                        Surveyed
+                      </span>
+                    )}
+                    {myColonyHere && (
+                      <span className="rounded-full bg-indigo-900/40 px-2 py-0.5 text-xs text-indigo-300">
+                        Your colony
+                      </span>
+                    )}
+                    {bodyIsOccupied && !myColonyHere && (
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+                        Occupied
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Survey resource nodes */}
+                {survey && survey.resource_nodes.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
+                    {survey.resource_nodes.map(
+                      (node: { type: string; quantity: number; is_rare: boolean }) => (
+                        <span
+                          key={node.type}
+                          className="text-xs text-zinc-500"
+                        >
+                          {node.type}{" "}
+                          <span className="text-zinc-600">
+                            ×{node.quantity.toLocaleString()}
+                          </span>
+                        </span>
+                      ),
+                    )}
+                    {survey.has_deep_nodes && (
+                      <span className="text-xs text-zinc-600 italic">
+                        + rare nodes (deep survey required)
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Per-body actions */}
+                {(canSurveyThis || canFoundColonyHere) && (
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {canSurveyThis && (
+                      <SurveyButton
+                        bodyId={body.id}
+                        bodyLabel={bodyLabel(body.type)}
+                      />
+                    )}
+                    {canFoundColonyHere && (
+                      <FoundColonyButton
+                        bodyId={body.id}
+                        bodyLabel={bodyLabel(body.type)}
+                        isFirstColony={isFirstColony}
+                      />
+                    )}
+                  </div>
+                )}
+
+                {/* Ship here but no discovery yet (non-Sol) */}
+                {shipIsHere && !hasSystemAccess && !survey && (
+                  <p className="mt-2 text-xs text-zinc-600">
+                    Discover this system to survey its bodies.
+                  </p>
                 )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
-        {!myDiscovery && !isSol && (
+
+        {/* Contextual note when no actions possible */}
+        {!shipIsHere && !canActOnBodies && (
           <p className="mt-2 text-xs text-zinc-600">
-            Survey data available after discovery and survey.
+            Travel here to survey bodies and found colonies.
           </p>
         )}
       </section>
@@ -436,3 +573,4 @@ function bodyLabel(type: string): string {
   };
   return labels[type] ?? type;
 }
+
