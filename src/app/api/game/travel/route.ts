@@ -26,7 +26,7 @@ import { z } from "zod";
 import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { singleResult, maybeSingleResult } from "@/lib/supabase/utils";
+import { listResult, maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { BALANCE } from "@/lib/config/balance";
@@ -62,40 +62,55 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
 
   // ── Ship validation ──────────────────────────────────────────────────────
-  // Fetch the player's ship (one ship per player in Phase 4).
-  const { data: ship } = singleResult<Ship>(
+  // Fetch all player ships. Players start with 2 ships; pick the first one
+  // that is currently docked (current_system_id is not null) and is not at
+  // the destination. If multiple ships are docked, the earliest-created ship
+  // is chosen (implicit order by created_at via insert order).
+  const { data: allShips } = listResult<Ship>(
     await admin
       .from("ships")
       .select("*")
       .eq("owner_id", player.id)
-      .single(),
+      .order("created_at", { ascending: true }),
   );
 
+  const ship =
+    (allShips ?? []).find(
+      (s) =>
+        s.current_system_id != null &&
+        s.current_system_id !== destinationSystemId,
+    ) ?? null;
+
   if (!ship) {
-    return toErrorResponse(
-      fail("not_found", "No ship found. Please sign out and back in.").error,
+    // Either no ships exist, all are in transit, or all are already at dest.
+    const anyShip = (allShips ?? []).length > 0;
+    if (!anyShip) {
+      return toErrorResponse(
+        fail("not_found", "No ship found. Please sign out and back in.").error,
+      );
+    }
+    const atDest = (allShips ?? []).some(
+      (s) => s.current_system_id === destinationSystemId,
     );
-  }
-
-  if (!ship.current_system_id) {
+    if (atDest) {
+      return toErrorResponse(
+        fail("invalid_target", "A ship is already at this system.").error,
+      );
+    }
     return toErrorResponse(
-      fail("job_in_progress", "Your ship is already in transit.").error,
-    );
-  }
-
-  if (ship.current_system_id === destinationSystemId) {
-    return toErrorResponse(
-      fail("invalid_target", "Your ship is already at this system.").error,
+      fail("job_in_progress", "All your ships are currently in transit.").error,
     );
   }
 
   // ── Distance validation ──────────────────────────────────────────────────
-  const fromEntry = getCatalogEntry(ship.current_system_id);
+  // ship.current_system_id is guaranteed non-null by the find() condition above.
+  const fromSystemId = ship.current_system_id!;
+  const fromEntry = getCatalogEntry(fromSystemId);
   if (!fromEntry) {
     return toErrorResponse(
       fail(
         "not_found",
-        `Current system '${ship.current_system_id}' is not in the catalog.`,
+        `Current system '${fromSystemId}' is not in the catalog.`,
       ).error,
     );
   }
@@ -120,7 +135,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Create travel job ────────────────────────────────────────────────────
-  const fromSystemId = ship.current_system_id; // save before clearing
+  // fromSystemId is already defined above (guaranteed non-null from find())
   const now = new Date();
   const arriveAt = computeArrivalTime(now, distanceLy, ship.speed_ly_per_hr);
 

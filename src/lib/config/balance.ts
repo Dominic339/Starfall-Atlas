@@ -259,6 +259,25 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Resource extraction (GAME_RULES.md §7.1 — colony → station flow)
+  // -------------------------------------------------------------------------
+  extraction: {
+    /**
+     * Base resource units produced per hour per population tier,
+     * per basic resource node revealed by survey.
+     * At tier 1: 5 u/hr per node → 60 units per 12h cap period.
+     * At tier 2: 10 u/hr per node → 120 units per cap period.
+     */
+    baseUnitsPerHrPerTier: 5,
+
+    /**
+     * Maximum hours of extraction yield that can accumulate before
+     * the timer is considered saturated. Prevents idle overflow.
+     */
+    accumulationCapHours: 12,
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {

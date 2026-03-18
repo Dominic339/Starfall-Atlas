@@ -1,35 +1,42 @@
 /**
- * Game dashboard — the primary entry point after authentication.
+ * Game dashboard — Command Centre.
  *
- * Shows the player's current status:
- *   - Handle / identity
- *   - Current location (real ship state: at system, or in transit with ETA)
- *   - Credits balance
- *   - Active colonies count
- *   - Starter ship summary with link to current/destination system
- *   - Nearby systems quick-links (from current location)
- *   - Colony list with lazy tax accrual and collect action (Phase 5)
+ * Phase 6 additions:
+ *   - Core station summary (name, location, resource inventory)
+ *   - Both starter ships displayed (Phase 5.5 introduced 2 ships)
+ *   - Colony growth auto-resolved lazily on page load
+ *   - Resource extraction accrual shown per colony with ExtractButton
+ *   - Station inventory totals reflect extracted resources
  *
- * By the time this page renders, bootstrapPlayer() has already been called
- * by the game layout, so the player row and starter ship are guaranteed
- * to exist.
- *
- * TODO(phase-5): Show colony list with tax status. ✓ Done
- * TODO(phase-7): Show hyperspace lane network.
+ * Fetch order:
+ *   1. player (auth gate)
+ *   2. ships, travel jobs, colonies, station (parallel after player)
+ *   3. survey results for colony bodies, station inventory (parallel)
+ *   4. Growth resolution (DB writes for any due colonies)
  */
 
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { singleResult, listResult } from "@/lib/supabase/utils";
+import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { systemDisplayName, getNearbySystems } from "@/lib/catalog";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
+import { applyGrowthResolution } from "@/lib/game/taxes";
+import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
+import type { ExtractionAmount } from "@/lib/game/extraction";
 import { BALANCE } from "@/lib/config/balance";
-import type { Player, Ship, TravelJob, Colony } from "@/lib/types/game";
-import { CollectButton } from "./_components/ColonyActions";
+import type {
+  Player,
+  Ship,
+  TravelJob,
+  Colony,
+  PlayerStation,
+  ResourceInventoryRow,
+  SurveyResult,
+} from "@/lib/types/game";
+import { CollectButton, ExtractButton } from "./_components/ColonyActions";
 
-// force-dynamic: this page reads the authenticated user session at request time.
 export const dynamic = "force-dynamic";
 
 export const metadata = {
@@ -42,7 +49,7 @@ export default async function GameDashboard() {
 
   const admin = createAdminClient();
 
-  // Fetch player profile
+  // ── Step 1: player ────────────────────────────────────────────────────────
   const { data: player } = singleResult<Player>(
     await admin
       .from("players")
@@ -53,51 +60,111 @@ export default async function GameDashboard() {
 
   if (!player) redirect("/login");
 
-  // Fetch player's ships
-  const { data: ships } = listResult<Ship>(
-    await admin.from("ships").select("*").eq("owner_id", player.id),
-  );
-
-  // Fetch pending travel job (in transit?)
-  const { data: pendingJobs } = listResult<TravelJob>(
-    await admin
+  // ── Step 2: parallel fetches that only need player.id ─────────────────────
+  const [shipsRes, jobsRes, coloniesRes, stationRes] = await Promise.all([
+    admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
+    admin
       .from("travel_jobs")
       .select("*")
       .eq("player_id", player.id)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
       .limit(1),
-  );
-  const activeTravelJob = pendingJobs?.[0] ?? null;
-
-  // Fetch player's colonies
-  const { data: colonies } = listResult<Colony>(
-    await admin
+    admin
       .from("colonies")
       .select("*")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin as any)
+      .from("player_stations")
+      .select("*")
+      .eq("owner_id", player.id)
+      .maybeSingle(),
+  ]);
+
+  const shipList = (listResult<Ship>(shipsRes).data ?? []);
+  const activeTravelJob = (listResult<TravelJob>(jobsRes).data ?? [])[0] ?? null;
+  const rawColonies = (listResult<Colony>(coloniesRes).data ?? []);
+  const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
+
+  // ── Step 3: parallel fetches that need colony bodies / station.id ──────────
+  const colonyBodyIds = rawColonies.map((c) => c.body_id);
+
+  const [surveyRes, invRes] = await Promise.all([
+    colonyBodyIds.length > 0
+      ? admin
+          .from("survey_results")
+          .select("body_id, resource_nodes")
+          .in("body_id", colonyBodyIds)
+      : Promise.resolve({ data: [] }),
+    station
+      ? admin
+          .from("resource_inventory")
+          .select("resource_type, quantity")
+          .eq("location_type", "station")
+          .eq("location_id", station.id)
+          .order("resource_type", { ascending: true })
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const surveyByBodyId = new Map(
+    ((surveyRes.data ?? []) as Pick<SurveyResult, "body_id" | "resource_nodes">[]).map(
+      (s) => [s.body_id, s],
+    ),
   );
 
-  const colonyList = colonies ?? [];
+  const stationInventory = (invRes.data ?? []) as Pick<
+    ResourceInventoryRow,
+    "resource_type" | "quantity"
+  >[];
+
+  // ── Step 4: lazy growth resolution ──────────────────────────────────────
+  const requestTime = new Date();
+  const growthUpdates: { id: string; tier: number; next_growth_at: string | null }[] = [];
+
+  const colonyList: Colony[] = rawColonies.map((colony) => {
+    if (colony.status !== "active" || !colony.next_growth_at) return colony;
+    const { colony: resolved, resolution } = applyGrowthResolution(colony, requestTime);
+    if (resolution.tiersGained > 0) {
+      growthUpdates.push({
+        id: colony.id,
+        tier: resolved.population_tier,
+        next_growth_at: resolved.next_growth_at,
+      });
+    }
+    return resolved;
+  });
+
+  // Persist growth updates in parallel (fire before render — user sees resolved state)
+  if (growthUpdates.length > 0) {
+    await Promise.all(
+      growthUpdates.map(({ id, tier, next_growth_at }) =>
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (admin as any)
+          .from("colonies")
+          .update({ population_tier: tier, next_growth_at })
+          .eq("id", id),
+      ),
+    );
+  }
+
   const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
 
-  const shipList = ships ?? [];
-  const primaryShip = shipList[0] ?? null;
+  // ── Derived state ─────────────────────────────────────────────────────────
+  const inTransitShipId = activeTravelJob?.ship_id ?? null;
+  const currentSystemId =
+    shipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
 
-  // ── Location state ──────────────────────────────────────────────────────────
-  const isInTransit = activeTravelJob !== null && !primaryShip?.current_system_id;
-  const currentSystemId = primaryShip?.current_system_id ?? null;
-  const requestTime = new Date();
+  const isInTransit =
+    activeTravelJob !== null &&
+    shipList.some((s) => !s.current_system_id && s.id === inTransitShipId);
 
   // ETA display for in-transit state
   let etaDisplay: string | null = null;
   if (isInTransit && activeTravelJob) {
     const arriveAt = new Date(activeTravelJob.arrive_at);
-    const remainingMs = Math.max(
-      0,
-      arriveAt.getTime() - requestTime.getTime(),
-    );
+    const remainingMs = Math.max(0, arriveAt.getTime() - requestTime.getTime());
     const remainingMin = Math.ceil(remainingMs / 60_000);
     etaDisplay =
       remainingMin <= 0
@@ -107,14 +174,16 @@ export default async function GameDashboard() {
           : `~${(remainingMin / 60).toFixed(1)} hr remaining`;
   }
 
-  // ── Nearby systems (from current location, not in-transit) ─────────────────
-  const nearbySystems =
-    currentSystemId && !isInTransit
-      ? getNearbySystems(currentSystemId, BALANCE.lanes.baseRangeLy).slice(0, 4)
-      : [];
+  // Nearby systems from a docked ship's location
+  const dockedSystemId =
+    shipList.find((s) => s.current_system_id != null && !isInTransit)
+      ?.current_system_id ?? null;
+  const nearbySystems = dockedSystemId
+    ? getNearbySystems(dockedSystemId, BALANCE.lanes.baseRangeLy).slice(0, 4)
+    : [];
 
-  // ── Lazy tax accrual per colony ─────────────────────────────────────────────
-  const colonyTaxInfo = colonyList.map((colony) => {
+  // ── Per-colony display data ───────────────────────────────────────────────
+  const colonyDisplayData = colonyList.map((colony) => {
     const accrued =
       colony.status === "active"
         ? calculateAccumulatedTax(
@@ -123,18 +192,28 @@ export default async function GameDashboard() {
             requestTime,
           )
         : 0;
-    return { colony, accrued };
+
+    const survey = surveyByBodyId.get(colony.body_id) ?? null;
+    const accruedExtraction: ExtractionAmount[] =
+      survey && colony.last_extract_at && colony.status === "active"
+        ? calculateAccumulatedExtraction(
+            survey.resource_nodes,
+            colony.population_tier,
+            colony.last_extract_at,
+            requestTime,
+          )
+        : [];
+
+    return { colony, accrued, accruedExtraction };
   });
 
-  const totalAccrued = colonyTaxInfo.reduce((sum, c) => sum + c.accrued, 0);
+  const totalAccrued = colonyDisplayData.reduce((s, d) => s + d.accrued, 0);
 
   return (
     <div className="space-y-6">
       {/* Page header */}
       <div>
-        <h1 className="text-xl font-semibold text-zinc-100">
-          Command Centre
-        </h1>
+        <h1 className="text-xl font-semibold text-zinc-100">Command Centre</h1>
         <p className="mt-1 text-sm text-zinc-500">
           Welcome back, {player.handle}.
         </p>
@@ -228,6 +307,54 @@ export default async function GameDashboard() {
         </div>
       )}
 
+      {/* Core station */}
+      {station && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Core Station
+          </h2>
+          <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium text-zinc-200">
+                  {station.name}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  {systemDisplayName(station.current_system_id)} ·{" "}
+                  <span className="text-zinc-600">stationary (alpha)</span>
+                </p>
+              </div>
+              <span className="shrink-0 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
+                Hub
+              </span>
+            </div>
+
+            {/* Station resource inventory */}
+            {stationInventory.length > 0 ? (
+              <div className="mt-3 border-t border-zinc-800 pt-3">
+                <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                  Station inventory
+                </p>
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {stationInventory.map((row) => (
+                    <span key={row.resource_type} className="text-xs text-zinc-400">
+                      {row.resource_type}{" "}
+                      <span className="font-mono text-zinc-300">
+                        ×{row.quantity.toLocaleString()}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="mt-2 text-xs text-zinc-600">
+                Inventory empty — extract resources from colonies to fill it.
+              </p>
+            )}
+          </div>
+        </section>
+      )}
+
       {/* Ships */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
@@ -255,19 +382,20 @@ export default async function GameDashboard() {
             Colonies
           </h2>
           <div className="space-y-2">
-            {colonyTaxInfo.map(({ colony, accrued }) => (
+            {colonyDisplayData.map(({ colony, accrued, accruedExtraction }) => (
               <ColonyRow
                 key={colony.id}
                 colony={colony}
                 accrued={accrued}
+                accruedExtraction={accruedExtraction}
               />
             ))}
           </div>
         </section>
       )}
 
-      {/* Nearby systems (shown when ship is docked at a system) */}
-      {nearbySystems.length > 0 && currentSystemId && (
+      {/* Nearby systems */}
+      {nearbySystems.length > 0 && dockedSystemId && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Nearby systems
@@ -279,9 +407,7 @@ export default async function GameDashboard() {
                 href={`/game/system/${encodeURIComponent(nearby.id)}`}
                 className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 transition-colors hover:border-zinc-700"
               >
-                <p className="text-sm font-medium text-zinc-200">
-                  {nearby.name}
-                </p>
+                <p className="text-sm font-medium text-zinc-200">{nearby.name}</p>
                 <span className="font-mono text-xs text-zinc-500">
                   {nearby.distanceFromSource.toFixed(2)} ly
                 </span>
@@ -310,8 +436,8 @@ export default async function GameDashboard() {
             habitable world — your first colony is free.
           </li>
           <li>
-            <span className="text-zinc-400">4.</span> Collect taxes from your
-            colonies to build your credit balance.
+            <span className="text-zinc-400">4.</span> Collect taxes and extract
+            resources from your colonies to build your empire.
           </li>
         </ol>
       </section>
@@ -355,10 +481,7 @@ function ShipRow({
         <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
         <p className="text-xs text-zinc-500">
           {systemHref ? (
-            <Link
-              href={systemHref}
-              className="hover:text-zinc-300 transition-colors"
-            >
+            <Link href={systemHref} className="hover:text-zinc-300 transition-colors">
               {locationDisplay}
             </Link>
           ) : (
@@ -370,6 +493,7 @@ function ShipRow({
         <p className="text-xs text-zinc-500">
           {ship.speed_ly_per_hr} ly/hr · {ship.cargo_cap} cargo
         </p>
+        <p className="text-xs text-zinc-700 capitalize">{ship.dispatch_mode}</p>
       </div>
     </div>
   );
@@ -378,9 +502,11 @@ function ShipRow({
 function ColonyRow({
   colony,
   accrued,
+  accruedExtraction,
 }: {
   colony: Colony;
   accrued: number;
+  accruedExtraction: ExtractionAmount[];
 }) {
   const systemName = systemDisplayName(colony.system_id);
   const bodyIndex = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
@@ -390,6 +516,19 @@ function ColonyRow({
     abandoned: "text-amber-400",
     collapsed: "text-zinc-600",
   };
+
+  // Growth label
+  let growthLabel: string | null = null;
+  if (colony.status === "active") {
+    if (!colony.next_growth_at) {
+      growthLabel = "Max tier";
+    } else {
+      const growthDate = new Date(colony.next_growth_at);
+      growthLabel = `grows ${growthDate > new Date() ? growthDate.toLocaleDateString() : "soon"}`;
+    }
+  }
+
+  const extractSummary = formatExtractionSummary(accruedExtraction);
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
@@ -402,45 +541,44 @@ function ColonyRow({
             >
               {systemName}
             </Link>
-            <span className="ml-1.5 text-xs text-zinc-600">
-              · Body {bodyIndex}
-            </span>
+            <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
           </p>
           <p className="mt-0.5 text-xs text-zinc-500">
             Tier {colony.population_tier}{" "}
             <span className={`font-medium ${statusColor[colony.status]}`}>
               {colony.status}
             </span>
-            {colony.next_growth_at && colony.status === "active" && (
-              <span className="ml-2 text-zinc-600">
-                · grows{" "}
-                {new Date(colony.next_growth_at) > new Date()
-                  ? new Date(colony.next_growth_at).toLocaleDateString()
-                  : "soon"}
-              </span>
+            {growthLabel && (
+              <span className="ml-2 text-zinc-600">· {growthLabel}</span>
             )}
           </p>
         </div>
 
-        {/* Tax info and collect button */}
-        <div className="shrink-0 text-right">
+        {/* Right-side actions */}
+        <div className="shrink-0 text-right space-y-1.5">
+          {/* Tax */}
           {colony.status === "active" && (
-            <div className="space-y-1">
+            <div>
               <p className="text-xs text-zinc-500">
                 {accrued > 0 ? (
-                  <span className="text-amber-300 font-medium">
-                    {accrued} ¢ accrued
-                  </span>
+                  <span className="text-amber-300 font-medium">{accrued} ¢ accrued</span>
                 ) : (
                   <span className="text-zinc-600">
-                    {BALANCE.colony.taxPerHourByTier[colony.population_tier]}{" "}
-                    ¢/hr
+                    {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
                   </span>
                 )}
               </p>
               {accrued > 0 && (
                 <CollectButton colonyId={colony.id} accrued={accrued} />
               )}
+            </div>
+          )}
+
+          {/* Extraction */}
+          {colony.status === "active" && extractSummary && (
+            <div>
+              <p className="text-xs text-teal-300 font-medium">{extractSummary} ready</p>
+              <ExtractButton colonyId={colony.id} summary={extractSummary} />
             </div>
           )}
         </div>
@@ -456,3 +594,4 @@ function EmptyState({ message }: { message: string }) {
     </div>
   );
 }
+

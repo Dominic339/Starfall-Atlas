@@ -154,6 +154,12 @@ export interface Colony {
   next_growth_at: string | null;
   last_tax_collected_at: string;
   storage_cap: number;
+  /**
+   * Timestamp of last resource extraction into station inventory.
+   * Initialized to created_at on colony founding. NULL only for rows
+   * created before migration 00017 (back-filled by migration).
+   */
+  last_extract_at: string | null;
   /** Set when status transitions to 'abandoned' */
   abandoned_at: string | null;
   /** Set when status transitions to 'collapsed' */

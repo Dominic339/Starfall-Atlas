@@ -27,7 +27,7 @@ import { z } from "zod";
 import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, singleResult } from "@/lib/supabase/utils";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
@@ -85,15 +85,19 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
 
   // ── Ship presence check ───────────────────────────────────────────────────
-  const { data: ship } = singleResult<Ship>(
+  // Either of the player's ships being present is sufficient.
+  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
     await admin
       .from("ships")
       .select("current_system_id")
-      .eq("owner_id", player.id)
-      .single(),
+      .eq("owner_id", player.id),
   );
 
-  if (!ship?.current_system_id || ship.current_system_id !== systemId) {
+  const shipPresent = (allShips ?? []).some(
+    (s) => s.current_system_id === systemId,
+  );
+
+  if (!shipPresent) {
     return toErrorResponse(
       fail(
         "invalid_target",

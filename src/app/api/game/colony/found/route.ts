@@ -32,13 +32,13 @@ import {
 } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import { nextGrowthAt } from "@/lib/game/taxes";
 import { BALANCE } from "@/lib/config/balance";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
-import type { Ship, Colony, SystemDiscovery, Player } from "@/lib/types/game";
+import type { Colony, Ship, SystemDiscovery, Player } from "@/lib/types/game";
 
 const FoundColonySchema = z.object({
   bodyId: z.string().min(1).max(128),
@@ -105,15 +105,19 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient();
 
   // ── Ship presence check ───────────────────────────────────────────────────
-  const { data: ship } = singleResult<Ship>(
+  // Either of the player's ships being present is sufficient.
+  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
     await admin
       .from("ships")
       .select("current_system_id")
-      .eq("owner_id", player.id)
-      .single(),
+      .eq("owner_id", player.id),
   );
 
-  if (!ship?.current_system_id || ship.current_system_id !== systemId) {
+  const shipPresent = (allShips ?? []).some(
+    (s) => s.current_system_id === systemId,
+  );
+
+  if (!shipPresent) {
     return toErrorResponse(
       fail(
         "invalid_target",
@@ -235,6 +239,7 @@ export async function POST(request: NextRequest) {
         population_tier: 1,
         next_growth_at: growthAt?.toISOString() ?? null,
         last_tax_collected_at: now.toISOString(),
+        last_extract_at: now.toISOString(),
         storage_cap: BALANCE.colony.defaultStorageCap,
       })
       .select("*")

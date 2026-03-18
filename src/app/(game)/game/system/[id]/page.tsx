@@ -14,7 +14,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, singleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, getNearbySystems, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import { distanceBetween } from "@/lib/game/travel";
@@ -72,19 +72,25 @@ export default async function SystemPage({
   const admin = createAdminClient();
 
   // ── Fetch current player and ship ─────────────────────────────────────────
-  const { data: player } = singleResult<Player>(
+  const { data: player } = maybeSingleResult<Player>(
     await admin
       .from("players")
       .select("id, handle, credits, first_colony_placed, colony_slots")
       .eq("auth_id", user.id)
-      .single(),
+      .maybeSingle(),
   );
 
   if (!player) redirect("/login");
 
-  const { data: ship } = singleResult<Ship>(
-    await admin.from("ships").select("*").eq("owner_id", player.id).single(),
+  // Fetch all ships — players start with 2 (Phase 5.5).
+  const { data: shipsData } = listResult<Ship>(
+    await admin
+      .from("ships")
+      .select("*")
+      .eq("owner_id", player.id)
+      .order("created_at", { ascending: true }),
   );
+  const shipList = shipsData ?? [];
 
   // ── Fetch pending travel job (in transit?) ────────────────────────────────
   const { data: pendingJobs } = listResult<TravelJob>(
@@ -98,13 +104,17 @@ export default async function SystemPage({
   );
   const activeTravelJob = pendingJobs?.[0] ?? null;
 
-  // Is the ship currently in transit TO this system?
+  // Is any ship currently in transit TO this system?
   const inTransitHere =
-    activeTravelJob?.to_system_id === systemId && !ship?.current_system_id;
+    !!activeTravelJob &&
+    activeTravelJob.to_system_id === systemId &&
+    shipList.some(
+      (s) => !s.current_system_id && s.id === activeTravelJob.ship_id,
+    );
 
-  // Is the ship currently AT this system (arrived)?
-  const shipIsHere =
-    ship?.current_system_id === systemId && !activeTravelJob;
+  // Is any ship currently docked AT this system?
+  const shipPresentHere = shipList.find((s) => s.current_system_id === systemId) ?? null;
+  const shipIsHere = !!shipPresentHere;
 
   // ── Discovery / stewardship state ─────────────────────────────────────────
   const { data: myDiscovery } = maybeSingleResult<SystemDiscovery>(
@@ -137,13 +147,31 @@ export default async function SystemPage({
     stewardHandle = stewardPlayer?.handle ?? null;
   }
 
-  // ── Travel reachability from current ship position ────────────────────────
+  // ── Travel reachability ───────────────────────────────────────────────────
+  // Find a ship that is docked somewhere other than this system and not the
+  // ship currently in an active travel job. This is the ship that would be
+  // dispatched by POST /api/game/travel (first docked ship).
+  const travelingShipId = activeTravelJob?.ship_id ?? null;
+  const travelableShip =
+    !activeTravelJob
+      ? (shipList.find(
+          (s) =>
+            s.current_system_id != null &&
+            s.current_system_id !== systemId,
+        ) ?? null)
+      : (shipList.find(
+          (s) =>
+            s.current_system_id != null &&
+            s.current_system_id !== systemId &&
+            s.id !== travelingShipId,
+        ) ?? null);
+
   const maxRangeLy = BALANCE.lanes.baseRangeLy;
   let travelDistance: number | null = null;
   let canTravelHere = false;
 
-  if (ship?.current_system_id && ship.current_system_id !== systemId) {
-    const fromEntry = getCatalogEntry(ship.current_system_id);
+  if (travelableShip?.current_system_id) {
+    const fromEntry = getCatalogEntry(travelableShip.current_system_id);
     if (fromEntry) {
       travelDistance = distanceBetween(
         { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
@@ -154,8 +182,8 @@ export default async function SystemPage({
   }
 
   const travelHours =
-    ship && travelDistance !== null
-      ? travelDistance / ship.speed_ly_per_hr
+    travelableShip && travelDistance !== null
+      ? travelDistance / travelableShip.speed_ly_per_hr
       : null;
 
   // ── Nearby systems from this system ───────────────────────────────────────
@@ -174,12 +202,15 @@ export default async function SystemPage({
     (surveyResults ?? []).map((s) => [s.body_id, s]),
   );
 
-  // ── Phase 5: Colonies in this system (any player) ─────────────────────────
-  type ColonyRow = Pick<Colony, "id" | "body_id" | "owner_id" | "status">;
+  // ── Phase 5/6: Colonies in this system (any player) ──────────────────────
+  type ColonyRow = Pick<
+    Colony,
+    "id" | "body_id" | "owner_id" | "status" | "population_tier" | "next_growth_at"
+  >;
   const { data: systemColonies } = listResult<ColonyRow>(
     await admin
       .from("colonies")
-      .select("id, body_id, owner_id, status")
+      .select("id, body_id, owner_id, status, population_tier, next_growth_at")
       .eq("system_id", systemId),
   );
   const colonyByBodyId = new Map(
@@ -228,7 +259,9 @@ export default async function SystemPage({
             )}
             {shipIsHere && !isSol && (
               <span className="rounded-full bg-indigo-900/50 px-2 py-0.5 text-xs font-medium text-indigo-300">
-                Ship present
+                {shipList.filter((s) => s.current_system_id === systemId).length > 1
+                  ? "Ships present"
+                  : "Ship present"}
               </span>
             )}
             {inTransitHere && (
@@ -331,13 +364,12 @@ export default async function SystemPage({
               <DiscoverButton systemId={systemId} systemName={system.name} />
             )}
 
-            {/* Travel button — ship is elsewhere and system is reachable */}
+            {/* Travel button — a travelable ship is docked and this system is reachable */}
             {!shipIsHere &&
               !inTransitHere &&
               canTravelHere &&
               travelDistance !== null &&
-              travelHours !== null &&
-              !activeTravelJob && (
+              travelHours !== null && (
                 <TravelButton
                   destinationSystemId={systemId}
                   destinationName={system.name}
@@ -346,17 +378,17 @@ export default async function SystemPage({
                 />
               )}
 
-            {/* Ship is in transit elsewhere */}
-            {activeTravelJob && !inTransitHere && (
+            {/* A ship is in transit elsewhere (and no ship is here / heading here) */}
+            {activeTravelJob && !inTransitHere && !shipIsHere && !canTravelHere && (
               <p className="text-sm text-zinc-500">
-                Your ship is en route to{" "}
+                A ship is en route to{" "}
                 <Link
                   href={`/game/system/${encodeURIComponent(activeTravelJob.to_system_id)}`}
                   className="text-indigo-400 hover:text-indigo-300"
                 >
                   {systemDisplayName(activeTravelJob.to_system_id)}
                 </Link>
-                . Travel actions are locked while in transit.
+                .
               </p>
             )}
 
@@ -364,8 +396,7 @@ export default async function SystemPage({
             {!shipIsHere &&
               !inTransitHere &&
               !canTravelHere &&
-              !activeTravelJob &&
-              ship?.current_system_id && (
+              travelableShip && (
                 <p className="text-sm text-zinc-500">
                   {travelDistance !== null
                     ? `${system.name} is ${travelDistance.toFixed(2)} ly away — beyond your current travel range (${maxRangeLy} ly). Build relay stations to extend your reach.`
@@ -438,9 +469,9 @@ export default async function SystemPage({
                         Surveyed
                       </span>
                     )}
-                    {myColonyHere && (
+                    {myColonyHere && colony && (
                       <span className="rounded-full bg-indigo-900/40 px-2 py-0.5 text-xs text-indigo-300">
-                        Your colony
+                        Your colony · Tier {colony.population_tier}
                       </span>
                     )}
                     {bodyIsOccupied && !myColonyHere && (
