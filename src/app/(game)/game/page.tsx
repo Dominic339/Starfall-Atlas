@@ -760,11 +760,19 @@ export default async function GameDashboard() {
   return (
     <div className="space-y-6">
       {/* Page header */}
-      <div>
-        <h1 className="text-xl font-semibold text-zinc-100">Command Centre</h1>
-        <p className="mt-1 text-sm text-zinc-500">
-          Welcome back, {player.handle}.
-        </p>
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <h1 className="text-xl font-semibold text-zinc-100">Command Centre</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Welcome back, {player.handle}.
+          </p>
+        </div>
+        <Link
+          href="/game/research"
+          className="shrink-0 rounded-lg border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-200 transition-colors"
+        >
+          Research Lab →
+        </Link>
       </div>
 
       {/* Status grid */}

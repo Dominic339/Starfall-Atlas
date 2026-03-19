@@ -505,6 +505,22 @@ export interface PremiumEntitlement {
 }
 
 // ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+/**
+ * A single research entry that a player has unlocked.
+ * Definitions live in src/lib/config/research.ts.
+ */
+export interface PlayerResearch {
+  id: string;
+  player_id: PlayerId;
+  /** Matches a ResearchDefinition.id from research.ts */
+  research_id: string;
+  unlocked_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------
 
