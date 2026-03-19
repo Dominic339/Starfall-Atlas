@@ -21,6 +21,7 @@ import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult } from "@/lib/supabase/utils";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
+import { taxMultiplier } from "@/lib/game/colonyUpkeep";
 import type { Colony, Player } from "@/lib/types/game";
 
 const CollectSchema = z.object({
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
   const { data: colony } = singleResult<Colony>(
     await admin
       .from("colonies")
-      .select("id, owner_id, population_tier, last_tax_collected_at, status")
+      .select("id, owner_id, population_tier, last_tax_collected_at, status, upkeep_missed_periods")
       .eq("id", colonyId)
       .single(),
   );
@@ -71,11 +72,13 @@ export async function POST(request: NextRequest) {
 
   // ── Calculate accrued taxes ───────────────────────────────────────────────
   const now = new Date();
-  const credits = calculateAccumulatedTax(
+  const rawCredits = calculateAccumulatedTax(
     colony.last_tax_collected_at,
     colony.population_tier,
     now,
   );
+  // Apply health multiplier (struggling = 75%, neglected = 50%).
+  const credits = Math.floor(rawCredits * taxMultiplier(colony.upkeep_missed_periods));
 
   if (credits === 0) {
     return Response.json({

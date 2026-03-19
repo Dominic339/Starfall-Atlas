@@ -28,6 +28,7 @@ import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
+import { extractionMultiplier } from "@/lib/game/colonyUpkeep";
 import type {
   Colony,
   SurveyResult,
@@ -56,7 +57,7 @@ export async function POST(request: NextRequest) {
   const { data: colony } = singleResult<Colony>(
     await admin
       .from("colonies")
-      .select("id, owner_id, body_id, population_tier, status, last_extract_at")
+      .select("id, owner_id, body_id, population_tier, status, last_extract_at, upkeep_missed_periods")
       .eq("id", colonyId)
       .single(),
   );
@@ -105,12 +106,18 @@ export async function POST(request: NextRequest) {
   // Fall back to now (= 0 yield) if last_extract_at is somehow null.
   const lastExtractAt = colony.last_extract_at ?? now.toISOString();
 
-  const extracted = calculateAccumulatedExtraction(
+  const rawExtracted = calculateAccumulatedExtraction(
     survey.resource_nodes,
     colony.population_tier,
     lastExtractAt,
     now,
   );
+
+  // Apply health multiplier (struggling = 50%, neglected = 25% of base yield).
+  const mult = extractionMultiplier(colony.upkeep_missed_periods);
+  const extracted = rawExtracted
+    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * mult) }))
+    .filter((item) => item.quantity > 0);
 
   if (extracted.length === 0) {
     return Response.json({

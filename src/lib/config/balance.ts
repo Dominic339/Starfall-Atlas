@@ -278,6 +278,44 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Colony upkeep (GAME_RULES.md §7.2 — iron supply keeps colonies healthy)
+  // -------------------------------------------------------------------------
+  upkeep: {
+    /** Hours between upkeep resolution periods. */
+    periodHours: 24,
+
+    /**
+     * Iron units consumed per tier per period.
+     * A tier-3 colony needs 6 iron per 24-hour period.
+     */
+    ironPerTierPerPeriod: 2,
+
+    /**
+     * Maximum number of overdue periods resolved in a single page load.
+     * Caps the iron draw per session and prevents runaway catch-up loops.
+     */
+    maxCatchupPeriods: 14,
+
+    /**
+     * Missed periods at or above which the colony becomes "struggling".
+     * Reduces extraction and tax yield.
+     */
+    strugglingThreshold: 1,
+
+    /**
+     * Missed periods at or above which the colony becomes "neglected".
+     * Severer yield reduction and growth blocked.
+     */
+    neglectedThreshold: 3,
+
+    /**
+     * Every N consecutive missed periods the colony loses one population tier.
+     * Counter resets after each tier loss. Minimum tier is 1.
+     */
+    tierLossMissedPeriods: 5,
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {
