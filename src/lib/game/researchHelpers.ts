@@ -99,11 +99,14 @@ export function milestoneLabel(m: MilestoneRequirement): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Maximum total upgrade points that may be distributed across all of the
- * player's ships, given their unlocked hull research.
+ * Maximum total upgrade points allowed on a SINGLE ship (not a global pool).
+ * Each ship is an independent asset and enforces this cap individually.
  *
  * Baseline (no hull research): BASE_TOTAL_SHIP_UPGRADES (6)
  * T2 → 11, T3 → 23, T4 → 59, T5 → 60.
+ *
+ * Phase 11 note: this was clarified from Phase 10 — the limit is per-ship,
+ * applied separately to each ship's own upgrade total.
  */
 export function maxTotalShipUpgrades(
   unlockedIds: ReadonlySet<string> | string[],
@@ -117,7 +120,8 @@ export function maxTotalShipUpgrades(
 }
 
 /**
- * Maximum allowed upgrade level for a specific ship stat.
+ * Maximum allowed upgrade level for a specific ship stat ON A SINGLE SHIP.
+ * Applied per-ship — each ship enforces this cap independently.
  *
  * Baseline (no stat research): BASE_STAT_CAP (1)
  * Tech I → 3, Tech II → 6, Tech III → 10.

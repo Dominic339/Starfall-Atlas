@@ -80,6 +80,13 @@ export interface Ship {
   /** The colony being targeted in the current automation cycle. NULL when idle or manual. */
   auto_target_colony_id: ColonyId | null;
   skin_entitlement_id: string | null;
+  /** Per-stat upgrade levels (0–10). Research controls soft caps. */
+  hull_level: number;
+  shield_level: number;
+  cargo_level: number;
+  engine_level: number;
+  turret_level: number;
+  utility_level: number;
   created_at: string;
   updated_at: string;
 }

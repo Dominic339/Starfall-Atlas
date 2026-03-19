@@ -46,6 +46,12 @@ import { applyGrowthResolution } from "@/lib/game/taxes";
 import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
 import { rankColonyCandidates, autoStateLabel } from "@/lib/game/shipAutomation";
 import {
+  SHIP_STAT_KEYS,
+  SHIP_STAT_LABELS,
+  buildShipUpgradeSummary,
+  type ShipUpgradeSummary,
+} from "@/lib/game/shipUpgrades";
+import {
   colonyHealthStatus,
   extractionMultiplier,
   taxMultiplier,
@@ -69,6 +75,8 @@ import type {
 import type { ExtractionAmount } from "@/lib/game/extraction";
 import { CollectButton, ExtractButton, UnloadButton } from "./_components/ColonyActions";
 import { ShipModeSelector } from "./_components/ShipModeSelector";
+import { UpgradeButton } from "./_components/UpgradeButton";
+import type { PlayerResearch } from "@/lib/types/game";
 
 export const dynamic = "force-dynamic";
 
@@ -94,7 +102,7 @@ export default async function GameDashboard() {
   if (!player) redirect("/login");
 
   // ── Step 2: parallel fetches that only need player.id ─────────────────────
-  const [shipsRes, jobsRes, coloniesRes, stationRes] = await Promise.all([
+  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes] = await Promise.all([
     admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
     // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
     admin
@@ -114,10 +122,21 @@ export default async function GameDashboard() {
       .select("*")
       .eq("owner_id", player.id)
       .maybeSingle(),
+    // Phase 11: player research for upgrade cap computation
+    admin
+      .from("player_research")
+      .select("research_id")
+      .eq("player_id", player.id),
   ]);
 
   const shipList = listResult<Ship>(shipsRes).data ?? [];
   const allTravelJobs = listResult<TravelJob>(jobsRes).data ?? [];
+  // Research unlock set — used for per-ship upgrade cap computation (Phase 11).
+  const unlockedResearchIds = new Set(
+    (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
+      (r) => r.research_id,
+    ),
+  );
   // Per-ship travel job index (used by automation resolver and ShipRow).
   const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
   // Keep a single "active" job for the in-transit banner (first pending job).
@@ -676,6 +695,17 @@ export default async function GameDashboard() {
     }
   }
 
+  // ── Phase 11: per-ship upgrade summaries ──────────────────────────────────
+  // Computed after auto-resolution so resolvedShipList reflects current state.
+  // Station iron needed for affordability checks.
+  const stationIronForUpgrades =
+    stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
+
+  const upgradeByShipId = new Map<string, ShipUpgradeSummary>();
+  for (const ship of resolvedShipList) {
+    upgradeByShipId.set(ship.id, buildShipUpgradeSummary(ship, unlockedResearchIds));
+  }
+
   // ── Derived state ─────────────────────────────────────────────────────────
   const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
 
@@ -928,6 +958,8 @@ export default async function GameDashboard() {
                 cargo={cargoByShipId.get(ship.id) ?? []}
                 stationSystemId={station?.current_system_id ?? null}
                 autoTargetSystemName={autoTargetNameByShipId.get(ship.id) ?? null}
+                upgradeSummary={upgradeByShipId.get(ship.id) ?? null}
+                stationIron={stationIronForUpgrades}
               />
             ))}
           </div>
@@ -1019,12 +1051,16 @@ function ShipRow({
   cargo,
   stationSystemId,
   autoTargetSystemName,
+  upgradeSummary,
+  stationIron,
 }: {
   ship: Ship;
   job: TravelJob | null;
   cargo: { resource_type: string; quantity: number }[];
   stationSystemId: string | null;
   autoTargetSystemName: string | null;
+  upgradeSummary: ShipUpgradeSummary | null;
+  stationIron: number;
 }) {
   const isThisShipInTransit = !ship.current_system_id && job !== null;
   const isAuto = ship.dispatch_mode !== "manual";
@@ -1068,11 +1104,22 @@ function ShipRow({
           : `~${(remainingMin / 60).toFixed(1)} hr`;
   }
 
+  const tier = upgradeSummary?.tier ?? 1;
+  const totalUpgrades = upgradeSummary?.totalUpgrades ?? 0;
+  const maxTotal = upgradeSummary?.maxTotalUpgrades ?? 6;
+
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+      {/* ── Header row ────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
+            {/* Ship tier badge */}
+            <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
+              T{tier}
+            </span>
+          </div>
           <p className="text-xs text-zinc-500">
             {systemHref ? (
               <Link href={systemHref} className="hover:text-zinc-300 transition-colors">
@@ -1109,6 +1156,80 @@ function ShipRow({
           </p>
           {canUnload && (
             <UnloadButton shipId={ship.id} summary={cargoSummary} />
+          )}
+        </div>
+      )}
+
+      {/* ── Upgrade panel ─────────────────────────────────────────────────── */}
+      {upgradeSummary && (
+        <div className="mt-2 border-t border-zinc-800 pt-2">
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              Ship Upgrades
+            </p>
+            <p className="text-xs text-zinc-600">
+              {totalUpgrades}/{maxTotal} used · T{tier}
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+            {SHIP_STAT_KEYS.map((stat) => {
+              const s = upgradeSummary.stats[stat];
+              const canAfford = stationIron >= s.ironCost;
+              const showButton = s.canUpgrade;
+              const buttonAffordable = showButton && canAfford;
+
+              // Effective value label for wired stats
+              let valueLabel = "";
+              if (stat === "cargo") {
+                valueLabel = ` · cap ${upgradeSummary.effectiveCargoCap}`;
+              } else if (stat === "engine") {
+                valueLabel = ` · ${upgradeSummary.effectiveSpeed} ly/hr`;
+              }
+
+              // Reason for locked
+              let lockedReason = "";
+              if (s.isAtStatCap && s.researchCap < 10) {
+                lockedReason = `Research cap (${s.researchCap})`;
+              } else if (s.isAtStatCap) {
+                lockedReason = "Max";
+              } else if (s.isAtTotalCap) {
+                lockedReason = "Ship at limit";
+              }
+
+              return (
+                <div key={stat} className="flex items-center justify-between gap-1 min-w-0">
+                  <span className="text-xs text-zinc-500 shrink-0">
+                    {SHIP_STAT_LABELS[stat]}{" "}
+                    <span className="font-mono text-zinc-300">Lv {s.currentLevel}</span>
+                    <span className="text-zinc-600">{valueLabel}</span>
+                  </span>
+                  <span className="shrink-0">
+                    {showButton ? (
+                      buttonAffordable ? (
+                        <UpgradeButton
+                          shipId={ship.id}
+                          stat={stat}
+                          ironCost={s.ironCost}
+                        />
+                      ) : (
+                        <span className="text-xs text-zinc-700" title={`Need ${s.ironCost} iron`}>
+                          ↑ {s.ironCost}⛏
+                        </span>
+                      )
+                    ) : (
+                      lockedReason ? (
+                        <span className="text-xs text-zinc-700">{lockedReason}</span>
+                      ) : null
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {stationIron > 0 && (
+            <p className="mt-1.5 text-xs text-zinc-700">
+              Station iron: <span className="font-mono text-zinc-500">{stationIron.toLocaleString()}</span>
+            </p>
           )}
         </div>
       )}

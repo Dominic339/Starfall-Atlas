@@ -316,6 +316,50 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Ship upgrades (Phase 11)
+  // -------------------------------------------------------------------------
+  shipUpgrades: {
+    /**
+     * Iron cost to upgrade a stat to level N = ironCostPerLevel[stat] * N.
+     * (Level 1 costs 1×, level 2 costs 2×, …)
+     */
+    ironCostPerLevel: {
+      hull:    8,
+      shield:  8,
+      cargo:   10,
+      engine:  15,
+      turret:  12,
+      utility: 8,
+    } as Record<string, number>,
+
+    /**
+     * Base cargo capacity at level 0.
+     * Must match the ships table DEFAULT (00002_players_ships.sql).
+     */
+    baseCargoCapacity: 100,
+
+    /** Additional cargo_cap units per cargo upgrade level. */
+    cargoCapPerLevel: 50,
+
+    /**
+     * Base ship speed at level 0 (ly/hr).
+     * Must match the ships table DEFAULT (00002_players_ships.sql).
+     */
+    baseSpeedLyPerHr: 1.0,
+
+    /** Additional speed (ly/hr) per engine upgrade level. */
+    speedPerLevel: 0.2,
+
+    /**
+     * Ship tier thresholds — minimum total upgrades (inclusive) to reach each tier.
+     * Index = tier (1-based). Index 0 is unused.
+     *   Tier 1: 0–3   Tier 2: 4–11  Tier 3: 12–23
+     *   Tier 4: 24–59  Tier 5: 60
+     */
+    tierMinUpgrades: [0, 0, 4, 12, 24, 60] as number[],
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {
