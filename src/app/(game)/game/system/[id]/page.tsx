@@ -17,6 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, getNearbySystems, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
+import { isHarshPlanetType } from "@/lib/game/habitability";
 import { distanceBetween } from "@/lib/game/travel";
 import { BALANCE } from "@/lib/config/balance";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
@@ -85,6 +86,17 @@ export default async function SystemPage({
   );
 
   if (!player) redirect("/login");
+
+  // Phase 16: fetch player research to check harsh colony gating.
+  const { data: researchData } = listResult<{ research_id: string }>(
+    await admin
+      .from("player_research")
+      .select("research_id")
+      .eq("player_id", player.id),
+  );
+  const hasHarshColonyResearch = (researchData ?? []).some(
+    (r) => r.research_id === "harsh_colony_environment",
+  );
 
   // Fetch all ships — players start with 2 (Phase 5.5).
   const { data: shipsData } = listResult<Ship>(
@@ -533,12 +545,19 @@ export default async function SystemPage({
             // Per-body action conditions
             const canSurveyThis =
               canActOnBodies && survey === null;
+
+            // Phase 16: harsh planets need research; others need habitability score.
+            const isHarshBody = isHarshPlanetType(body.type);
+            const harshGateMet = !isHarshBody || hasHarshColonyResearch;
+            const habitabilityGateMet = isHarshBody ? true : body.canHostColony;
+
             // Sol bodies can never be colonized (GAME_RULES.md §1.1).
             const canFoundColonyHere =
               canActOnBodies &&
               !isSol &&
               survey !== null &&
-              body.canHostColony &&
+              habitabilityGateMet &&
+              harshGateMet &&
               !bodyIsOccupied;
 
             return (
@@ -549,24 +568,52 @@ export default async function SystemPage({
                 {/* Body header row */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">
-                      {bodyLabel(body.type)}
-                      {body.index === system.anchorBodyIndex && (
-                        <span className="ml-2 text-xs text-zinc-500">
-                          (anchor)
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-medium ${
+                        isHarshBody
+                          ? "text-red-300"
+                          : body.type === "lush" || body.type === "ocean" || body.type === "habitable"
+                            ? "text-emerald-300"
+                            : "text-zinc-200"
+                      }`}>
+                        {bodyLabel(body.type)}
+                      </p>
+                      {isHarshBody && (
+                        <span className="rounded-full bg-red-950/60 px-1.5 py-0.5 text-xs text-red-400">
+                          Harsh
                         </span>
                       )}
-                    </p>
+                      {body.index === system.anchorBodyIndex && (
+                        <span className="text-xs text-zinc-500">(anchor)</span>
+                      )}
+                    </div>
                     <p className="text-xs capitalize text-zinc-600">
                       {body.size} · index {body.index}
                     </p>
+                    {/* Upkeep hint for harsh planets */}
+                    {isHarshBody && (
+                      <p className="mt-0.5 text-xs text-amber-700">
+                        Dome maintenance: food + iron per period
+                      </p>
+                    )}
                   </div>
 
                   {/* Right-side badges */}
                   <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                    {body.canHostColony ? (
+                    {/* Colonization status badge */}
+                    {isHarshBody ? (
+                      hasHarshColonyResearch ? (
+                        <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">
+                          Research unlocked
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                          Needs research
+                        </span>
+                      )
+                    ) : body.canHostColony ? (
                       <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400">
-                        Habitable
+                        Colonizable
                       </span>
                     ) : (
                       <span className="text-xs text-zinc-700">

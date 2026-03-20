@@ -106,8 +106,27 @@ export type EuxResourceType = (typeof EUX_RESOURCE_TYPES)[number];
 /** Star spectral classifications (used in world generation). */
 export type SpectralClass = "O" | "B" | "A" | "F" | "G" | "K" | "M";
 
-/** Body types produced by deterministic world generation. */
+/**
+ * Body types produced by deterministic world generation.
+ *
+ * Phase 16 adds named planet types with distinct resource identities and
+ * colonization rules. Legacy types are kept for backward-compatible generation.
+ *
+ * Colonization tiers:
+ *   Baseline (no research): lush, ocean, habitable, rocky, barren, frozen
+ *   Lightly restricted (habitability score gate): desert, ice_planet
+ *   Research-gated (harsh_colony_environment): volcanic, toxic
+ *   Not colonizable: gas_giant, ice_giant, asteroid_belt
+ */
 export type BodyType =
+  // Phase 16 named planet types
+  | "lush"          // biomass + water — easiest to colonize (food source)
+  | "ocean"         // biomass + water (high qty) — easy to colonize (food source)
+  | "desert"        // silica — arid world, industrially valuable
+  | "ice_planet"    // water + sulfur (low) — frigid, lightly restricted
+  | "volcanic"      // sulfur + rare_crystal — requires harsh_colony_environment research
+  | "toxic"         // sulfur + rare_crystal — requires harsh_colony_environment research
+  // Legacy types (pre-Phase 16; kept for backward-compatible generation)
   | "rocky"
   | "habitable"
   | "gas_giant"

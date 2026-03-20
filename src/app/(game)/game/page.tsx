@@ -81,8 +81,10 @@ import {
   isGrowthBlocked,
   upkeepPeriodsToResolve,
   resolveColonyUpkeep,
+  upkeepDescription,
 } from "@/lib/game/colonyUpkeep";
 import type { ColonyHealthStatus } from "@/lib/game/colonyUpkeep";
+import { isHarshPlanetType } from "@/lib/game/habitability";
 import {
   getStructureTier,
   researchLevel,
@@ -387,14 +389,28 @@ export default async function GameDashboard() {
   // from the station inventory. Processing is sequential per colony so that
   // iron drawn for one colony reduces what is available to the next.
   //
-  // stationIron is tracked in memory and updated after each colony so that
-  // the rendered station inventory reflects what actually remains.
+  // Phase 16: upkeep draws food (all colonies) and iron (harsh colonies only).
+  // Both are tracked in-memory so the rendered station inventory is correct.
   //
   // DB updates: colonies (tier, missed_periods, last_upkeep_at, next_growth_at)
-  //             resource_inventory (station iron quantity or deletion)
+  //             resource_inventory (station food/iron quantity or deletion)
 
-  // Find current station iron from the already-fetched stationInventory.
+  // Helper: derive planet type from a colony's body_id (deterministic, no DB).
+  function colonyPlanetType(bodyId: string): import("@/lib/types/enums").BodyType | null {
+    const lastColon = bodyId.lastIndexOf(":");
+    if (lastColon === -1) return null;
+    const sysId = bodyId.slice(0, lastColon);
+    const bIdx = parseInt(bodyId.slice(lastColon + 1), 10);
+    if (isNaN(bIdx)) return null;
+    const catEntry = getCatalogEntry(sysId);
+    const sys = generateSystem(sysId, catEntry ?? undefined);
+    return sys.bodies[bIdx]?.type ?? null;
+  }
+
+  // Find current food and iron from the already-fetched stationInventory.
+  let stationFood = stationInventory.find((r) => r.resource_type === "food")?.quantity ?? 0;
   let stationIron = stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
+  let totalFoodDrawn = 0;
   let totalIronDrawn = 0;
 
   for (let ci = 0; ci < colonyList.length; ci++) {
@@ -409,8 +425,24 @@ export default async function GameDashboard() {
     const habitatTier = getStructureTier(colonyStructures as Structure[], "habitat_module");
     const reductionFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
 
-    const result = resolveColonyUpkeep(colony, periods, stationIron, requestTime, reductionFrac);
+    // Phase 16: compute planet type to determine if harsh iron dome is required.
+    const planetType = colonyPlanetType(colony.body_id);
+    const isHarsh = planetType !== null && isHarshPlanetType(planetType);
 
+    const result = resolveColonyUpkeep(
+      colony,
+      periods,
+      stationFood,
+      stationIron,
+      isHarsh,
+      requestTime,
+      reductionFrac,
+    );
+
+    if (result.foodConsumed > 0) {
+      stationFood -= result.foodConsumed;
+      totalFoodDrawn += result.foodConsumed;
+    }
     if (result.ironConsumed > 0) {
       stationIron -= result.ironConsumed;
       totalIronDrawn += result.ironConsumed;
@@ -445,36 +477,37 @@ export default async function GameDashboard() {
     };
   }
 
-  // Update in-memory station iron so the rendered inventory is correct.
-  if (totalIronDrawn > 0) {
-    const newIron = stationIron; // already decremented above
-    if (newIron <= 0) {
+  // Helper: persist one resource type's updated quantity to station inventory.
+  async function updateStationResource(resourceType: string, newQty: number) {
+    if (newQty <= 0) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (admin as any)
         .from("resource_inventory")
         .delete()
         .eq("location_type", "station")
         .eq("location_id", station?.id)
-        .eq("resource_type", "iron");
+        .eq("resource_type", resourceType);
     } else {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await (admin as any)
         .from("resource_inventory")
         .upsert(
-          [{ location_type: "station", location_id: station?.id, resource_type: "iron", quantity: newIron }],
+          [{ location_type: "station", location_id: station?.id, resource_type: resourceType, quantity: newQty }],
           { onConflict: "location_type,location_id,resource_type" },
         );
     }
-    // Reflect the updated iron in the rendered station inventory.
-    const ironIdx = stationInventory.findIndex((r) => r.resource_type === "iron");
-    if (ironIdx >= 0) {
-      if (newIron <= 0) {
-        stationInventory.splice(ironIdx, 1);
-      } else {
-        stationInventory[ironIdx] = { resource_type: "iron", quantity: newIron };
-      }
+    // Reflect in the rendered station inventory.
+    const idx = stationInventory.findIndex((r) => r.resource_type === resourceType);
+    if (newQty <= 0) {
+      if (idx >= 0) stationInventory.splice(idx, 1);
+    } else {
+      if (idx >= 0) stationInventory[idx] = { resource_type: resourceType, quantity: newQty };
+      else stationInventory.push({ resource_type: resourceType, quantity: newQty });
     }
   }
+
+  if (totalFoodDrawn > 0) await updateStationResource("food", stationFood);
+  if (totalIronDrawn > 0) await updateStationResource("iron", stationIron);
 
   // ── Step 5: lazy auto-ship resolution ─────────────────────────────────────
   // For each ship in an auto mode, advance its state machine by one meaningful
@@ -1559,6 +1592,11 @@ export default async function GameDashboard() {
       return { type, currentTier, targetTier, cost, canAfford, atMax };
     });
 
+    // Phase 16: planet type for display and upkeep description.
+    const planetType = colonyPlanetType(colony.body_id);
+    const isHarsh = planetType !== null && isHarshPlanetType(planetType);
+    const upkeepDesc = upkeepDescription(colony.population_tier, isHarsh, upkeepRedFrac);
+
     return {
       colony,
       accrued,
@@ -1571,6 +1609,9 @@ export default async function GameDashboard() {
       storageCap,
       upkeepRedFrac,
       buildOptions,
+      planetType,
+      isHarsh,
+      upkeepDesc,
     };
   });
 
@@ -1925,7 +1966,7 @@ export default async function GameDashboard() {
             Colonies
           </h2>
           <div className="space-y-2">
-            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health, extractorTier, warehouseTier, habitatTier, storageCap, upkeepRedFrac, buildOptions }) => (
+            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health, extractorTier, warehouseTier, habitatTier, storageCap, upkeepRedFrac, buildOptions, planetType, isHarsh, upkeepDesc }) => (
               <ColonyRow
                 key={colony.id}
                 colony={colony}
@@ -1938,6 +1979,9 @@ export default async function GameDashboard() {
                 storageCap={storageCap}
                 upkeepRedFrac={upkeepRedFrac}
                 buildOptions={buildOptions}
+                planetType={planetType}
+                isHarsh={isHarsh}
+                upkeepDesc={upkeepDesc}
               />
             ))}
           </div>
@@ -2206,6 +2250,9 @@ function ColonyRow({
   storageCap,
   upkeepRedFrac,
   buildOptions,
+  planetType,
+  isHarsh,
+  upkeepDesc,
 }: {
   colony: Colony;
   accrued: number;
@@ -2224,6 +2271,9 @@ function ColonyRow({
     canAfford: boolean;
     atMax: boolean;
   }[];
+  planetType: import("@/lib/types/enums").BodyType | null;
+  isHarsh: boolean;
+  upkeepDesc: string;
 }) {
   const systemName = systemDisplayName(colony.system_id);
   const bodyIndex = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
@@ -2275,6 +2325,23 @@ function ColonyRow({
               </Link>
               <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
             </p>
+            {/* Planet type badge */}
+            {planetType && (
+              <span className={`rounded-full px-1.5 py-0.5 text-xs ${
+                isHarsh
+                  ? "bg-red-950/60 text-red-400"
+                  : planetType === "lush" || planetType === "ocean" || planetType === "habitable"
+                    ? "bg-emerald-950/60 text-emerald-500"
+                    : "bg-zinc-800 text-zinc-400"
+              }`}>
+                {bodyTypeLabel(planetType)}
+              </span>
+            )}
+            {isHarsh && (
+              <span className="rounded-full bg-amber-950/60 px-1.5 py-0.5 text-xs text-amber-500">
+                Harsh
+              </span>
+            )}
             {colony.status === "active" && health !== "well_supplied" && (
               <span className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${badge.classes}`}>
                 {badge.label}
@@ -2292,11 +2359,17 @@ function ColonyRow({
               </span>
             )}
           </p>
+          {/* Upkeep description — always show for active colonies */}
+          {colony.status === "active" && (
+            <p className="mt-0.5 text-xs text-zinc-600">
+              Upkeep: {upkeepDesc}
+            </p>
+          )}
           {colony.status === "active" && health !== "well_supplied" && (
             <p className="mt-0.5 text-xs text-red-500">
               {health === "neglected"
-                ? `Neglected ${colony.upkeep_missed_periods} periods — send iron to station!`
-                : "Low iron supply — yields reduced · send iron to station"}
+                ? `Neglected ${colony.upkeep_missed_periods} periods — ${isHarsh ? "send food + iron" : "send food"} to station!`
+                : `Low ${isHarsh ? "food/iron" : "food"} supply — yields reduced`}
             </p>
           )}
         </div>
@@ -2384,6 +2457,25 @@ function ColonyRow({
       )}
     </div>
   );
+}
+
+function bodyTypeLabel(type: string): string {
+  const labels: Record<string, string> = {
+    lush:          "Lush",
+    ocean:         "Ocean",
+    desert:        "Desert",
+    ice_planet:    "Ice",
+    volcanic:      "Volcanic",
+    toxic:         "Toxic",
+    rocky:         "Rocky",
+    habitable:     "Habitable",
+    barren:        "Barren",
+    frozen:        "Frozen",
+    gas_giant:     "Gas Giant",
+    ice_giant:     "Ice Giant",
+    asteroid_belt: "Asteroid Belt",
+  };
+  return labels[type] ?? type;
 }
 
 function EmptyState({ message }: { message: string }) {

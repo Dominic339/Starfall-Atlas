@@ -1,17 +1,27 @@
 /**
  * Deterministic resource profile generation for bodies.
  *
- * Given a body's type and size (derived from its seed), produces:
- *   - basicResourceNodes: visible after a basic survey
- *   - deepResourceNodes: visible only after a Deep Survey Kit (premium)
+ * Phase 16 rewrite: planet types now have distinct resource identities that
+ * map to the extended resource set introduced in Phase 15.
  *
- * Rules from GAME_RULES.md §6:
- * - Common: iron, carbon, ice
- * - Refined: steel, fuel_cells, polymers (crafted — not directly mined)
- * - Rare: exotic_matter, crystalline_core, void_dust
+ * Planet → primary resources:
+ *   lush       → biomass, water          (food chain input)
+ *   ocean      → biomass, water (high)   (food chain input)
+ *   desert     → silica, iron            (glass + industrial)
+ *   ice_planet → water, sulfur           (food + chemicals)
+ *   volcanic   → sulfur, iron, rare_crystal (industrial + rare)
+ *   toxic      → sulfur, rare_crystal    (chemicals + rare)
+ *   rocky      → iron, carbon            (construction backbone)
+ *   habitable  → biomass, water, carbon  (legacy — same as lush)
+ *   barren     → iron, silica            (dry industrial)
+ *   frozen     → water, carbon           (legacy)
  *
- * Rare nodes are deep-survey-only. The quantity cap is identical whether
- * found by basic or deep survey (anti-p2w invariant from §15).
+ * Rules:
+ * - Basic nodes: visible after a standard survey, fully extractable
+ * - Deep nodes: visible only after a Deep Survey Kit (premium), is_rare = true
+ * - Rare node types (exotic_matter, crystalline_core, void_dust) are deep-only
+ * - rare_crystal is NOT a deep-only type; it can appear in basic nodes for
+ *   volcanic / toxic planets (it is the semi-rare mineral of those worlds)
  */
 
 import type { BodyType, ResourceType } from "@/lib/types/enums";
@@ -26,51 +36,84 @@ import { randInt, weightedPick } from "./rng";
 type ResourceWeight = { value: ResourceType; weight: number };
 
 const COMMON_RESOURCES: Record<BodyType, ResourceWeight[]> = {
+  // ── Phase 16 named planet types ──────────────────────────────────────────
+  lush: [
+    { value: "biomass", weight: 5 },
+    { value: "water",   weight: 4 },
+  ],
+  ocean: [
+    { value: "water",   weight: 7 },
+    { value: "biomass", weight: 3 },
+  ],
+  desert: [
+    { value: "silica",  weight: 7 },
+    { value: "iron",    weight: 2 },
+    { value: "carbon",  weight: 1 },
+  ],
+  ice_planet: [
+    { value: "water",   weight: 6 },
+    { value: "sulfur",  weight: 3 },
+  ],
+  volcanic: [
+    { value: "sulfur",       weight: 5 },
+    { value: "iron",         weight: 3 },
+    { value: "rare_crystal", weight: 2 },
+  ],
+  toxic: [
+    { value: "sulfur",       weight: 5 },
+    { value: "rare_crystal", weight: 3 },
+    { value: "carbon",       weight: 1 },
+  ],
+
+  // ── Legacy types (pre-Phase 16; updated for Phase 15 resource set) ────────
   rocky: [
-    { value: "iron", weight: 6 },
+    { value: "iron",   weight: 6 },
     { value: "carbon", weight: 3 },
-    { value: "ice", weight: 1 },
   ],
   habitable: [
-    { value: "iron", weight: 4 },
-    { value: "carbon", weight: 5 },
-    { value: "ice", weight: 3 },
+    { value: "biomass", weight: 4 },
+    { value: "water",   weight: 4 },
+    { value: "carbon",  weight: 1 },
   ],
   gas_giant: [
-    { value: "carbon", weight: 4 },
-    { value: "ice", weight: 2 },
-    { value: "iron", weight: 1 },
+    { value: "carbon", weight: 5 },
+    { value: "sulfur", weight: 2 },
   ],
   ice_giant: [
-    { value: "ice", weight: 8 },
+    { value: "water",  weight: 6 },
     { value: "carbon", weight: 2 },
-    { value: "iron", weight: 1 },
   ],
   asteroid_belt: [
-    { value: "iron", weight: 7 },
+    { value: "iron",   weight: 7 },
     { value: "carbon", weight: 4 },
-    { value: "ice", weight: 2 },
   ],
   barren: [
-    { value: "iron", weight: 5 },
-    { value: "carbon", weight: 2 },
-    { value: "ice", weight: 1 },
+    { value: "iron",   weight: 5 },
+    { value: "silica", weight: 2 },
   ],
   frozen: [
-    { value: "ice", weight: 9 },
+    { value: "water",  weight: 7 },
     { value: "carbon", weight: 2 },
-    { value: "iron", weight: 1 },
   ],
 };
 
+// Deep nodes use only the three truly rare types (never gatherable via basic survey).
 const RARE_RESOURCES: Record<BodyType, ResourceWeight[]> = {
-  rocky: [{ value: "crystalline_core", weight: 3 }, { value: "exotic_matter", weight: 1 }],
-  habitable: [{ value: "crystalline_core", weight: 2 }, { value: "exotic_matter", weight: 2 }],
-  gas_giant: [{ value: "exotic_matter", weight: 3 }, { value: "void_dust", weight: 2 }],
-  ice_giant: [{ value: "void_dust", weight: 3 }, { value: "exotic_matter", weight: 1 }],
-  asteroid_belt: [{ value: "crystalline_core", weight: 3 }, { value: "void_dust", weight: 2 }],
-  barren: [{ value: "crystalline_core", weight: 2 }, { value: "void_dust", weight: 1 }],
-  frozen: [{ value: "void_dust", weight: 3 }, { value: "crystalline_core", weight: 1 }],
+  // Phase 16 types
+  lush:         [{ value: "exotic_matter",    weight: 2 }, { value: "crystalline_core", weight: 1 }],
+  ocean:        [{ value: "exotic_matter",    weight: 3 }, { value: "void_dust",        weight: 1 }],
+  desert:       [{ value: "crystalline_core", weight: 3 }, { value: "void_dust",        weight: 1 }],
+  ice_planet:   [{ value: "void_dust",        weight: 3 }, { value: "exotic_matter",    weight: 1 }],
+  volcanic:     [{ value: "crystalline_core", weight: 2 }, { value: "exotic_matter",    weight: 2 }],
+  toxic:        [{ value: "void_dust",        weight: 2 }, { value: "exotic_matter",    weight: 2 }],
+  // Legacy types
+  rocky:        [{ value: "crystalline_core", weight: 3 }, { value: "exotic_matter",    weight: 1 }],
+  habitable:    [{ value: "crystalline_core", weight: 2 }, { value: "exotic_matter",    weight: 2 }],
+  gas_giant:    [{ value: "exotic_matter",    weight: 3 }, { value: "void_dust",        weight: 2 }],
+  ice_giant:    [{ value: "void_dust",        weight: 3 }, { value: "exotic_matter",    weight: 1 }],
+  asteroid_belt:[{ value: "crystalline_core", weight: 3 }, { value: "void_dust",        weight: 2 }],
+  barren:       [{ value: "crystalline_core", weight: 2 }, { value: "void_dust",        weight: 1 }],
+  frozen:       [{ value: "void_dust",        weight: 3 }, { value: "crystalline_core", weight: 1 }],
 };
 
 // ---------------------------------------------------------------------------

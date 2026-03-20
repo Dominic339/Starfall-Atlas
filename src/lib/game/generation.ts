@@ -47,45 +47,67 @@ function bodyTypeWeights(spectralClass: SpectralClass): BodyTypeWeight[] {
   switch (spectralClass) {
     case "G":
     case "K":
+      // Sol-like stars: rich diversity including lush, ocean, volcanic worlds.
       return [
-        { value: "rocky",         weight: 30 },
-        { value: "habitable",     weight: 20 },
-        { value: "gas_giant",     weight: 20 },
-        { value: "ice_giant",     weight: 10 },
-        { value: "asteroid_belt", weight: 12 },
-        { value: "barren",        weight: 5  },
+        { value: "rocky",         weight: 22 },
+        { value: "lush",          weight: 14 }, // Phase 16
+        { value: "habitable",     weight: 6  }, // legacy
+        { value: "ocean",         weight: 6  }, // Phase 16
+        { value: "gas_giant",     weight: 16 },
+        { value: "ice_giant",     weight: 8  },
+        { value: "asteroid_belt", weight: 10 },
+        { value: "desert",        weight: 6  }, // Phase 16
+        { value: "barren",        weight: 4  },
         { value: "frozen",        weight: 3  },
+        { value: "ice_planet",    weight: 3  }, // Phase 16
+        { value: "volcanic",      weight: 1  }, // Phase 16 — rare
+        { value: "toxic",         weight: 1  }, // Phase 16 — rare
       ];
     case "F":
+      // Slightly hotter stars: fewer lush, more desert and barren.
       return [
-        { value: "rocky",         weight: 30 },
-        { value: "habitable",     weight: 12 },
-        { value: "gas_giant",     weight: 25 },
-        { value: "ice_giant",     weight: 12 },
-        { value: "asteroid_belt", weight: 12 },
-        { value: "barren",        weight: 6  },
+        { value: "rocky",         weight: 28 },
+        { value: "lush",          weight: 8  }, // Phase 16
+        { value: "habitable",     weight: 4  }, // legacy
+        { value: "desert",        weight: 8  }, // Phase 16
+        { value: "gas_giant",     weight: 22 },
+        { value: "ice_giant",     weight: 10 },
+        { value: "asteroid_belt", weight: 10 },
+        { value: "barren",        weight: 5  },
         { value: "frozen",        weight: 3  },
+        { value: "ice_planet",    weight: 1  }, // Phase 16
+        { value: "volcanic",      weight: 1  }, // Phase 16
       ];
     case "M":
+      // Red dwarfs: mostly rocky, barren, frozen; occasional lush in close orbits.
       return [
-        { value: "rocky",         weight: 40 },
-        { value: "barren",        weight: 20 },
-        { value: "frozen",        weight: 15 },
-        { value: "habitable",     weight: 8  },
+        { value: "rocky",         weight: 32 },
+        { value: "barren",        weight: 18 },
+        { value: "frozen",        weight: 12 },
+        { value: "lush",          weight: 6  }, // Phase 16
+        { value: "habitable",     weight: 4  }, // legacy
+        { value: "desert",        weight: 6  }, // Phase 16
         { value: "asteroid_belt", weight: 10 },
         { value: "gas_giant",     weight: 5  },
+        { value: "ice_planet",    weight: 3  }, // Phase 16
         { value: "ice_giant",     weight: 2  },
+        { value: "volcanic",      weight: 1  }, // Phase 16
+        { value: "toxic",         weight: 1  }, // Phase 16
       ];
     case "A":
     case "B":
     case "O":
+      // Hot, harsh stars: rocky and barren dominant; no lush worlds.
       return [
-        { value: "rocky",         weight: 35 },
-        { value: "barren",        weight: 30 },
-        { value: "gas_giant",     weight: 20 },
-        { value: "ice_giant",     weight: 8  },
-        { value: "asteroid_belt", weight: 5  },
-        { value: "frozen",        weight: 2  },
+        { value: "rocky",         weight: 33 },
+        { value: "barren",        weight: 28 },
+        { value: "desert",        weight: 8  }, // Phase 16
+        { value: "volcanic",      weight: 4  }, // Phase 16 — more common near hot stars
+        { value: "toxic",         weight: 3  }, // Phase 16
+        { value: "gas_giant",     weight: 14 },
+        { value: "ice_giant",     weight: 6  },
+        { value: "asteroid_belt", weight: 4  },
+        { value: "frozen",        weight: 0  },
         { value: "habitable",     weight: 0  },
       ];
   }

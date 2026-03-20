@@ -278,21 +278,34 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
-  // Colony upkeep (GAME_RULES.md §7.2 — iron supply keeps colonies healthy)
+  // Colony upkeep (GAME_RULES.md §7.2 — Phase 16 food + iron dome model)
+  //
+  // All colonies consume food each period (population sustain resource).
+  // Harsh colonies (volcanic, toxic) additionally consume iron for dome
+  // maintenance. Health is determined by whether both required resources
+  // were available.
   // -------------------------------------------------------------------------
   upkeep: {
     /** Hours between upkeep resolution periods. */
     periodHours: 24,
 
     /**
-     * Iron units consumed per tier per period.
-     * A tier-3 colony needs 6 iron per 24-hour period.
+     * Food units consumed per tier per period (ALL colonies).
+     * A tier-3 colony needs 6 food per 24-hour period.
+     * Food is produced by refining biomass+water at the station.
+     */
+    foodPerTierPerPeriod: 2,
+
+    /**
+     * Iron units consumed per tier per period for harsh colonies ONLY
+     * (volcanic and toxic planet types — dome/maintenance upkeep).
+     * Non-harsh colonies do not consume iron for upkeep.
      */
     ironPerTierPerPeriod: 2,
 
     /**
      * Maximum number of overdue periods resolved in a single page load.
-     * Caps the iron draw per session and prevents runaway catch-up loops.
+     * Caps resource draw per session and prevents runaway catch-up loops.
      */
     maxCatchupPeriods: 14,
 
