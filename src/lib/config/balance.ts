@@ -408,6 +408,62 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Station refining (Phase 15)
+  // -------------------------------------------------------------------------
+  refining: {
+    /**
+     * Refining recipes. Key = output resource type.
+     * Each recipe defines how many input units are consumed per output unit.
+     * All conversions are 1:1 per unit of output.
+     */
+    recipes: {
+      steel: {
+        inputs: [
+          { resource_type: "iron",   quantity: 1 },
+          { resource_type: "carbon", quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+      glass: {
+        inputs: [
+          { resource_type: "silica", quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+      food: {
+        inputs: [
+          { resource_type: "biomass", quantity: 1 },
+          { resource_type: "water",   quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+    } as Record<string, { inputs: { resource_type: string; quantity: number }[]; outputPerBatch: number }>,
+  },
+
+  // -------------------------------------------------------------------------
+  // Colony transports (Phase 15)
+  // -------------------------------------------------------------------------
+  colonyTransport: {
+    /**
+     * Speed of colony transport units in light-years per hour.
+     * Used to compute minimum route intervals.
+     */
+    speedLyPerHr: 2.0,
+
+    /** Minimum route interval regardless of distance. */
+    minIntervalMinutes: 30,
+
+    /** Maximum periods to resolve per dashboard load (prevents runaway catch-up). */
+    maxCatchupPeriods: 24,
+
+    /**
+     * Threshold for 'excess' mode: resources above this quantity are transferred.
+     * e.g. if colony has 150 iron and threshold = 100, transfer 50.
+     */
+    excessThreshold: 100,
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {

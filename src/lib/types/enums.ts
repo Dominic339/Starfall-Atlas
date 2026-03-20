@@ -73,12 +73,21 @@ export type PremiumItemType =
 
 /** Resource type codes used in inventory, market, and extraction. */
 export type ResourceType =
-  // Common (available via Emergency Universal Exchange)
+  // Common raw (available via Emergency Universal Exchange)
   | "iron"
   | "carbon"
   | "ice"
-  // Refined (crafted from common resources; not on EUX)
+  // Extended raw (gathered via colony extraction, Phase 15)
+  | "silica"
+  | "water"
+  | "biomass"
+  | "sulfur"
+  | "rare_crystal"
+  // Refined (produced at station from raw resources, Phase 15)
+  | "food"
   | "steel"
+  | "glass"
+  // Refined legacy
   | "fuel_cells"
   | "polymers"
   // Rare (deep survey only; not on EUX)

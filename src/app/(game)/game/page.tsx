@@ -39,14 +39,22 @@
  *   - Structures fetched in Step 3; effects applied to extraction/upkeep/storage
  *   - BuildStructureButton per colony in ColonyRow
  *
+ * Phase 15 additions:
+ *   - Colony supply routes and transports
+ *   - Routes fetched in Step 2; transports fetched in Step 3
+ *   - Step 6: lazy route resolution (inter-colony resource transfer)
+ *   - Refine form added to station section
+ *
  * Fetch order:
  *   1. player (auth gate)
- *   2. ships, ALL travel jobs, colonies, station, research, fleets (parallel)
- *   3. surveys, station inv, ship cargo, colony inv totals, structures (parallel)
- *   4. lazy growth resolution (DB writes for due colonies)
- *   4.5. lazy upkeep resolution (DB writes per colony; mutates stationIron)
- *   5. lazy auto-ship resolution (skips fleet members)
- *   5.5. lazy fleet travel resolution (DB writes when fleet jobs all arrived)
+ *   2. ships, travel jobs, colonies, station, research, fleets, slots, routes (parallel)
+ *   3. surveys, station inv, ship cargo, colony inv totals, structures, transports (parallel)
+ *   4. lazy growth resolution
+ *   4.5. lazy upkeep resolution
+ *   5. lazy auto-ship resolution
+ *   5.5. lazy fleet travel resolution
+ *   5.6. slot auto fleet loop
+ *   6. lazy colony route resolution
  */
 
 import { redirect } from "next/navigation";
@@ -98,6 +106,8 @@ import type {
   Fleet,
   FleetSlot,
   PlayerResearch,
+  ColonyRoute,
+  ColonyTransport,
 } from "@/lib/types/game";
 import type { ExtractionAmount } from "@/lib/game/extraction";
 import { CollectButton, ExtractButton, UnloadButton } from "./_components/ColonyActions";
@@ -106,6 +116,7 @@ import { UpgradeButton } from "./_components/UpgradeButton";
 import { CreateFleetForm, DispatchFleetForm, DisbandFleetButton } from "./_components/FleetActions";
 import { FleetSlotModeSelector } from "./_components/FleetSlotControls";
 import { BuildStructureButton } from "./_components/ColonyStructures";
+import { RefineForm } from "./_components/RefineControls";
 
 export const dynamic = "force-dynamic";
 
@@ -131,7 +142,7 @@ export default async function GameDashboard() {
   if (!player) redirect("/login");
 
   // ── Step 2: parallel fetches that only need player.id ─────────────────────
-  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes, slotsRes] = await Promise.all([
+  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes, slotsRes, routesRes] = await Promise.all([
     admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
     // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
     admin
@@ -169,6 +180,12 @@ export default async function GameDashboard() {
       .select("*")
       .eq("player_id", player.id)
       .order("slot_number", { ascending: true }),
+    // Phase 15: colony supply routes
+    admin
+      .from("colony_routes")
+      .select("*")
+      .eq("player_id", player.id)
+      .order("created_at", { ascending: true }),
   ]);
 
   const shipList = listResult<Ship>(shipsRes).data ?? [];
@@ -198,6 +215,8 @@ export default async function GameDashboard() {
 
   // Phase 13: fleet slots — mutable so auto loop can update state in-memory.
   let slotList = listResult<FleetSlot>(slotsRes).data ?? [];
+  // Phase 15: colony supply routes (mutable: last_run_at updated during Step 6).
+  const colonyRouteList: ColonyRoute[] = (listResult<ColonyRoute>(routesRes).data ?? []).map((r) => ({ ...r }));
 
   // Lazy bootstrap: create 2 default manual slots on first-ever dashboard load.
   if (slotList.length === 0) {
@@ -223,7 +242,7 @@ export default async function GameDashboard() {
     .filter((c) => c.status === "active")
     .map((c) => c.id);
 
-  const [surveyRes, invRes, cargoRes, colonyInvRes, structuresRes] = await Promise.all([
+  const [surveyRes, invRes, cargoRes, colonyInvRes, structuresRes, transportsRes] = await Promise.all([
     colonyBodyIds.length > 0
       ? admin
           .from("survey_results")
@@ -260,6 +279,13 @@ export default async function GameDashboard() {
           .select("id, colony_id, type, tier, is_active")
           .in("colony_id", rawColonies.map((c) => c.id))
           .eq("is_active", true)
+      : Promise.resolve({ data: [] }),
+    // Phase 15: colony transports — needed to gate route resolution.
+    rawColonies.length > 0
+      ? admin
+          .from("colony_transports")
+          .select("colony_id, tier")
+          .in("colony_id", rawColonies.map((c) => c.id))
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -311,6 +337,12 @@ export default async function GameDashboard() {
     const list = structuresByColonyId.get(row.colony_id) ?? [];
     list.push(row);
     structuresByColonyId.set(row.colony_id, list);
+  }
+
+  // Phase 15: transport count per colony (gates route resolution).
+  const transportsByColonyId = new Map<string, number>();
+  for (const row of ((transportsRes.data ?? []) as Pick<ColonyTransport, "colony_id">[]) ) {
+    transportsByColonyId.set(row.colony_id, (transportsByColonyId.get(row.colony_id) ?? 0) + 1);
   }
 
   // Phase 14: wired research levels (extraction, sustainability, storage).
@@ -1243,6 +1275,105 @@ export default async function GameDashboard() {
     }
   }
 
+  // ── Step 6: lazy colony route resolution ──────────────────────────────────
+  // For each route, compute how many periods have elapsed since last_run_at,
+  // cap at maxCatchupPeriods, and transfer resources from source colony
+  // inventory to destination colony inventory.
+  // Gate: source colony must have ≥1 transport and sufficient inventory.
+
+  for (const route of colonyRouteList) {
+    const fromColony = colonyList.find((c) => c.id === route.from_colony_id && c.status === "active");
+    const toColony   = colonyList.find((c) => c.id === route.to_colony_id   && c.status === "active");
+    if (!fromColony || !toColony) continue;
+
+    // Transport gate: source colony must have at least one transport.
+    if ((transportsByColonyId.get(fromColony.id) ?? 0) < 1) continue;
+
+    const lastRun = new Date(route.last_run_at);
+    const elapsedMs = requestTime.getTime() - lastRun.getTime();
+    const elapsedMinutes = elapsedMs / 60_000;
+    const rawPeriods = Math.floor(elapsedMinutes / route.interval_minutes);
+    if (rawPeriods <= 0) continue;
+    const periods = Math.min(rawPeriods, BALANCE.colonyTransport.maxCatchupPeriods);
+
+    // Determine how much to transfer per period.
+    const sourceInv = colonyInvByColonyId.get(fromColony.id) ?? [];
+    const sourceRow = sourceInv.find((r) => r.resource_type === route.resource_type);
+    const available = sourceRow?.quantity ?? 0;
+    if (available <= 0) {
+      // Nothing to send — still advance last_run_at so we don't re-check stale data.
+    } else {
+      let transferTotal = 0;
+      if (route.mode === "all") {
+        transferTotal = available;
+      } else if (route.mode === "excess") {
+        transferTotal = Math.max(0, available - BALANCE.colonyTransport.excessThreshold) * periods;
+        transferTotal = Math.min(transferTotal, available);
+      } else if (route.mode === "fixed") {
+        transferTotal = Math.min((route.fixed_amount ?? 0) * periods, available);
+      }
+
+      if (transferTotal > 0) {
+        const newSourceQty = available - transferTotal;
+
+        // Update source colony inventory in DB.
+        if (newSourceQty <= 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("resource_inventory")
+            .delete()
+            .eq("location_type", "colony")
+            .eq("location_id", fromColony.id)
+            .eq("resource_type", route.resource_type);
+        } else {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("resource_inventory")
+            .update({ quantity: newSourceQty })
+            .eq("location_type", "colony")
+            .eq("location_id", fromColony.id)
+            .eq("resource_type", route.resource_type);
+        }
+
+        // Upsert destination colony inventory in DB.
+        const destInv = colonyInvByColonyId.get(toColony.id) ?? [];
+        const destRow = destInv.find((r) => r.resource_type === route.resource_type);
+        const destCurrent = destRow?.quantity ?? 0;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("resource_inventory")
+          .upsert(
+            [{ location_type: "colony", location_id: toColony.id, resource_type: route.resource_type, quantity: destCurrent + transferTotal }],
+            { onConflict: "location_type,location_id,resource_type" },
+          );
+
+        // Update in-memory source inventory.
+        const newSourceInv = sourceInv
+          .map((r) => r.resource_type === route.resource_type ? { ...r, quantity: newSourceQty } : r)
+          .filter((r) => r.quantity > 0);
+        colonyInvByColonyId.set(fromColony.id, newSourceInv);
+        colonyInvTotals.set(fromColony.id, newSourceInv.reduce((s, r) => s + r.quantity, 0));
+
+        // Update in-memory dest inventory.
+        const newDestInv = [...destInv];
+        const destIdx = newDestInv.findIndex((r) => r.resource_type === route.resource_type);
+        if (destIdx >= 0) newDestInv[destIdx] = { ...newDestInv[destIdx], quantity: destCurrent + transferTotal };
+        else newDestInv.push({ resource_type: route.resource_type, quantity: destCurrent + transferTotal });
+        colonyInvByColonyId.set(toColony.id, newDestInv);
+        colonyInvTotals.set(toColony.id, newDestInv.reduce((s, r) => s + r.quantity, 0));
+      }
+    }
+
+    // Advance last_run_at by consumed periods.
+    const newLastRunAt = new Date(lastRun.getTime() + periods * route.interval_minutes * 60_000).toISOString();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("colony_routes")
+      .update({ last_run_at: newLastRunAt })
+      .eq("id", route.id);
+    route.last_run_at = newLastRunAt;
+  }
+
   // ── Phase 11: per-ship upgrade summaries ──────────────────────────────────
   // Computed after auto-resolution so resolvedShipList reflects current state.
   // Station iron needed for affordability checks.
@@ -1595,6 +1726,14 @@ export default async function GameDashboard() {
                 Inventory empty — extract and haul resources to fill it.
               </p>
             )}
+
+            {/* Phase 15: Refining */}
+            <div className="mt-3 border-t border-zinc-800 pt-3">
+              <p className="mb-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Refine resources
+              </p>
+              <RefineForm />
+            </div>
           </div>
         </section>
       )}

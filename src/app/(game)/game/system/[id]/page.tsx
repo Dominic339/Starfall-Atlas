@@ -38,6 +38,8 @@ import {
   FoundColonyButton,
   LoadButton,
 } from "./_components/SystemActions";
+import { CreateRouteForm, DeleteRouteButton } from "./_components/RouteControls";
+import type { ColonyRoute, ColonyTransport } from "@/lib/types/game";
 
 export const dynamic = "force-dynamic";
 
@@ -251,6 +253,78 @@ export default async function SystemPage({
 
   // Ship present here for load actions (first docked ship in system)
   const loadingShip = shipList.find((s) => s.current_system_id === systemId) ?? null;
+
+  // ── Phase 15: supply routes and transports for this system's colonies ──────
+  // Fetch all player's active colonies (for route destination selector).
+  type AllColonyRow = { id: string; body_id: string; system_id: string };
+  const { data: allPlayerColonies } = listResult<AllColonyRow>(
+    await admin
+      .from("colonies")
+      .select("id, body_id, system_id")
+      .eq("owner_id", player.id)
+      .eq("status", "active"),
+  );
+  const allActiveColonies = allPlayerColonies ?? [];
+
+  // Fetch existing routes for player's colonies in this system.
+  type RouteRow = Pick<ColonyRoute,
+    "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes"
+  >;
+  const colonyRoutesRows: RouteRow[] =
+    myColonyIds.length > 0
+      ? (listResult<RouteRow>(
+          await admin
+            .from("colony_routes")
+            .select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes")
+            .eq("player_id", player.id)
+            .or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`)
+            .order("from_colony_id"),
+        ).data ?? [])
+      : [];
+
+  // Fetch transports for player's colonies in this system.
+  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
+  const transportRows: TransportRow[] =
+    myColonyIds.length > 0
+      ? (listResult<TransportRow>(
+          await admin
+            .from("colony_transports")
+            .select("id, colony_id, tier")
+            .in("colony_id", myColonyIds),
+        ).data ?? [])
+      : [];
+
+  // Build lookup maps.
+  const routesByFromColonyId = new Map<string, RouteRow[]>();
+  const routesByToColonyId   = new Map<string, RouteRow[]>();
+  for (const r of colonyRoutesRows) {
+    const fl = routesByFromColonyId.get(r.from_colony_id) ?? [];
+    fl.push(r);
+    routesByFromColonyId.set(r.from_colony_id, fl);
+    const tl = routesByToColonyId.get(r.to_colony_id) ?? [];
+    tl.push(r);
+    routesByToColonyId.set(r.to_colony_id, tl);
+  }
+  const transportsByColonyId = new Map<string, TransportRow[]>();
+  for (const t of transportRows) {
+    const list = transportsByColonyId.get(t.colony_id) ?? [];
+    list.push(t);
+    transportsByColonyId.set(t.colony_id, list);
+  }
+
+  // Build destination colony selector options (exclude current colony, already-routed ones per resource).
+  const colonyLabelById = new Map<string, string>(
+    allActiveColonies.map((c) => [
+      c.id,
+      `${systemDisplayName(c.system_id)} · Body ${c.body_id.slice(c.body_id.lastIndexOf(":") + 1)}`,
+    ]),
+  );
+
+  // All resources that could appear in colony inventory (for the form).
+  const ALL_RESOURCE_TYPES = [
+    "iron", "carbon", "ice", "silica", "water", "biomass", "sulfur", "rare_crystal",
+    "food", "steel", "glass",
+  ];
 
   // ── Conditions for per-body actions ──────────────────────────────────────
   // Player can act on bodies if ship is here AND system is accessible.
@@ -583,6 +657,60 @@ export default async function SystemPage({
                     </div>
                   );
                 })()}
+
+                {/* Supply routes (Phase 15) — shown for player's active colonies */}
+                {myColonyHere && colony && (
+                  <div className="mt-2 border-t border-zinc-800 pt-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">
+                        Supply Routes
+                      </p>
+                      {transportsByColonyId.get(colony.id) ? (
+                        <span className="text-xs text-zinc-600">
+                          {transportsByColonyId.get(colony.id)!.length} transport{transportsByColonyId.get(colony.id)!.length !== 1 ? "s" : ""}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-amber-700">No transport — routes inactive</span>
+                      )}
+                    </div>
+
+                    {/* Outgoing routes */}
+                    {(routesByFromColonyId.get(colony.id) ?? []).map((route) => (
+                      <div key={route.id} className="flex items-center justify-between gap-2 py-0.5">
+                        <span className="text-xs text-zinc-500">
+                          → {colonyLabelById.get(route.to_colony_id) ?? route.to_colony_id.slice(0, 8)}
+                          <span className="text-zinc-700 ml-1">
+                            {route.resource_type} · {route.mode}
+                            {route.mode === "fixed" ? ` ×${route.fixed_amount}` : ""}
+                            {" "}every {route.interval_minutes}m
+                          </span>
+                        </span>
+                        <DeleteRouteButton routeId={route.id} />
+                      </div>
+                    ))}
+
+                    {/* Incoming routes */}
+                    {(routesByToColonyId.get(colony.id) ?? []).map((route) => (
+                      <div key={route.id} className="py-0.5">
+                        <span className="text-xs text-zinc-700">
+                          ← {colonyLabelById.get(route.from_colony_id) ?? route.from_colony_id.slice(0, 8)}
+                          {" "}{route.resource_type} inbound
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Create new route */}
+                    <div className="mt-1.5">
+                      <CreateRouteForm
+                        fromColonyId={colony.id}
+                        destColonies={allActiveColonies
+                          .filter((c) => c.id !== colony.id)
+                          .map((c) => ({ id: c.id, label: colonyLabelById.get(c.id) ?? c.id }))}
+                        resourceTypes={ALL_RESOURCE_TYPES}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Per-body actions */}
                 {(canSurveyThis || canFoundColonyHere) && (

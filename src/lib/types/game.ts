@@ -428,6 +428,43 @@ export interface ResourceInventoryRow {
 }
 
 // ---------------------------------------------------------------------------
+// Colony supply routes (Phase 15)
+// ---------------------------------------------------------------------------
+
+export type ColonyRouteMode = "all" | "excess" | "fixed";
+
+/**
+ * Automated resource transfer route between two player-owned colonies.
+ * Resolved lazily on dashboard load.
+ */
+export interface ColonyRoute {
+  id: string;
+  player_id: PlayerId;
+  from_colony_id: ColonyId;
+  to_colony_id: ColonyId;
+  resource_type: string;
+  mode: ColonyRouteMode;
+  /** Only used when mode = 'fixed'. */
+  fixed_amount: number | null;
+  /** Minutes between each transfer attempt. */
+  interval_minutes: number;
+  /** Timestamp of last resolved period. Advances by interval per period. */
+  last_run_at: string;
+  created_at: string;
+}
+
+/**
+ * Transport unit stationed at a colony. At least one is required for
+ * outgoing supply routes to execute.
+ */
+export interface ColonyTransport {
+  id: string;
+  colony_id: ColonyId;
+  tier: number;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Economy: markets and auctions
 // ---------------------------------------------------------------------------
 
