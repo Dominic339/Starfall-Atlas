@@ -80,6 +80,13 @@ export interface Ship {
   /** The colony being targeted in the current automation cycle. NULL when idle or manual. */
   auto_target_colony_id: ColonyId | null;
   skin_entitlement_id: string | null;
+  /** Per-stat upgrade levels (0–10). Research controls soft caps. */
+  hull_level: number;
+  shield_level: number;
+  cargo_level: number;
+  engine_level: number;
+  turret_level: number;
+  utility_level: number;
   created_at: string;
   updated_at: string;
 }
@@ -502,6 +509,22 @@ export interface PremiumEntitlement {
   consumed_at: string | null;
   purchase_ref: string | null;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+/**
+ * A single research entry that a player has unlocked.
+ * Definitions live in src/lib/config/research.ts.
+ */
+export interface PlayerResearch {
+  id: string;
+  player_id: PlayerId;
+  /** Matches a ResearchDefinition.id from research.ts */
+  research_id: string;
+  unlocked_at: string;
 }
 
 // ---------------------------------------------------------------------------
