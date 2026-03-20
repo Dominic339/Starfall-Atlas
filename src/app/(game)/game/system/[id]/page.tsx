@@ -709,9 +709,17 @@ export default async function SystemPage({
                 {myColonyHere && colony && (
                   <div className="mt-2 border-t border-zinc-800 pt-2">
                     <div className="flex items-center justify-between mb-1.5">
-                      <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">
-                        Supply Routes
-                      </p>
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">
+                          Supply Routes
+                        </p>
+                        <Link
+                          href="/game/routes"
+                          className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
+                        >
+                          Map →
+                        </Link>
+                      </div>
                       {transportsByColonyId.get(colony.id) ? (
                         <span className="text-xs text-zinc-600">
                           {transportsByColonyId.get(colony.id)!.length} transport{transportsByColonyId.get(colony.id)!.length !== 1 ? "s" : ""}

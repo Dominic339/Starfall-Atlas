@@ -63,6 +63,7 @@ import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName, getNearbySystems } from "@/lib/catalog";
+import { generateSystem } from "@/lib/game/generation";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
 import { applyGrowthResolution } from "@/lib/game/taxes";
@@ -1627,12 +1628,20 @@ export default async function GameDashboard() {
             Welcome back, {player.handle}.
           </p>
         </div>
-        <Link
-          href="/game/research"
-          className="shrink-0 rounded-lg border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-200 transition-colors"
-        >
-          Research Lab →
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href="/game/routes"
+            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
+          >
+            Route Map →
+          </Link>
+          <Link
+            href="/game/research"
+            className="rounded-lg border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-200 transition-colors"
+          >
+            Research Lab →
+          </Link>
+        </div>
       </div>
 
       {/* Status grid */}
