@@ -25,13 +25,22 @@
  *   - Extraction and tax multipliers applied at collection time
  *   - Tier loss after 5 consecutive missed periods
  *
+ * Phase 12 additions:
+ *   - Fleet model: fleets table + fleet_ships join + fleet_id on travel_jobs
+ *   - Manual fleet creation from co-located docked ships
+ *   - Manual fleet dispatch (all member ships travel together at slowest speed)
+ *   - Lazy fleet travel resolution in Step 5.5 (ships arrive together)
+ *   - Ships in active fleets are skipped by auto-resolution (Step 5)
+ *   - Manual fleet disband only
+ *
  * Fetch order:
  *   1. player (auth gate)
- *   2. ships, ALL travel jobs, colonies, station (parallel after player)
+ *   2. ships, ALL travel jobs, colonies, station, research, fleets (parallel)
  *   3. surveys, station inv, ship cargo, colony inv totals (parallel)
  *   4. lazy growth resolution (DB writes for due colonies)
  *   4.5. lazy upkeep resolution (DB writes per colony; mutates stationIron)
- *   5. lazy auto-ship resolution (DB writes for each automated ship)
+ *   5. lazy auto-ship resolution (skips fleet members)
+ *   5.5. lazy fleet travel resolution (DB writes when fleet jobs all arrived)
  */
 
 import { redirect } from "next/navigation";
@@ -71,12 +80,14 @@ import type {
   SurveyResult,
   SystemId,
   ColonyId,
+  Fleet,
+  PlayerResearch,
 } from "@/lib/types/game";
 import type { ExtractionAmount } from "@/lib/game/extraction";
 import { CollectButton, ExtractButton, UnloadButton } from "./_components/ColonyActions";
 import { ShipModeSelector } from "./_components/ShipModeSelector";
 import { UpgradeButton } from "./_components/UpgradeButton";
-import type { PlayerResearch } from "@/lib/types/game";
+import { CreateFleetForm, DispatchFleetForm, DisbandFleetButton } from "./_components/FleetActions";
 
 export const dynamic = "force-dynamic";
 
@@ -102,7 +113,7 @@ export default async function GameDashboard() {
   if (!player) redirect("/login");
 
   // ── Step 2: parallel fetches that only need player.id ─────────────────────
-  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes] = await Promise.all([
+  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes] = await Promise.all([
     admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
     // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
     admin
@@ -127,6 +138,13 @@ export default async function GameDashboard() {
       .from("player_research")
       .select("research_id")
       .eq("player_id", player.id),
+    // Phase 12: active and traveling fleets with their member ship IDs
+    admin
+      .from("fleets")
+      .select("*, fleet_ships(ship_id)")
+      .eq("player_id", player.id)
+      .neq("status", "disbanded")
+      .order("created_at", { ascending: true }),
   ]);
 
   const shipList = listResult<Ship>(shipsRes).data ?? [];
@@ -139,6 +157,20 @@ export default async function GameDashboard() {
   );
   // Per-ship travel job index (used by automation resolver and ShipRow).
   const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
+
+  // Phase 12: fleet data structures.
+  // fleetList is mutable — Step 5.5 updates status/current_system_id in place.
+  type FleetWithShips = Fleet & { fleet_ships: { ship_id: string }[] };
+  const rawFleets = (listResult<FleetWithShips>(fleetsRes).data ?? []);
+  const fleetList: FleetWithShips[] = rawFleets.map((f) => ({ ...f }));
+  // Ships that belong to any non-disbanded fleet (active or traveling).
+  const shipIdsInFleet = new Set(
+    fleetList.flatMap((f) => f.fleet_ships.map((fs) => fs.ship_id)),
+  );
+  // Map fleet ID → member ship IDs for quick lookups.
+  const shipIdsByFleetId = new Map(
+    fleetList.map((f) => [f.id, f.fleet_ships.map((fs) => fs.ship_id)]),
+  );
   // Keep a single "active" job for the in-transit banner (first pending job).
   const activeTravelJob = allTravelJobs[0] ?? null;
 
@@ -366,6 +398,8 @@ export default async function GameDashboard() {
     for (let si = 0; si < resolvedShipList.length; si++) {
       let ship = resolvedShipList[si];
       if (ship.dispatch_mode === "manual") continue;
+      // Phase 12: ships in a fleet are not auto-resolved individually.
+      if (shipIdsInFleet.has(ship.id)) continue;
 
       const mode = ship.dispatch_mode as
         | "auto_collect_nearest"
@@ -695,6 +729,68 @@ export default async function GameDashboard() {
     }
   }
 
+  // ── Step 5.5: lazy fleet travel resolution ────────────────────────────────
+  // For each traveling fleet, check if all member ship jobs have arrived.
+  // If so: mark jobs complete, land ships at destination, flip fleet to active.
+
+  for (let fi = 0; fi < fleetList.length; fi++) {
+    const fleet = fleetList[fi];
+    if (fleet.status !== "traveling") continue;
+
+    const memberShipIds = shipIdsByFleetId.get(fleet.id) ?? [];
+    if (memberShipIds.length === 0) continue;
+
+    const fleetJobs = allTravelJobs.filter((j) => j.fleet_id === fleet.id);
+    if (fleetJobs.length === 0) continue;
+
+    const allArrived = fleetJobs.every(
+      (j) => new Date(j.arrive_at) <= requestTime,
+    );
+    if (!allArrived) continue;
+
+    const destSystemId = fleetJobs[0].to_system_id as SystemId;
+
+    // Mark all fleet travel jobs complete.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("travel_jobs")
+      .update({ status: "complete" })
+      .in("id", fleetJobs.map((j) => j.id));
+
+    // Land all member ships at destination.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("ships")
+      .update({ current_system_id: destSystemId, current_body_id: null })
+      .in("id", memberShipIds);
+
+    // Mark fleet active at destination.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("fleets")
+      .update({ status: "active", current_system_id: destSystemId, updated_at: requestTime.toISOString() })
+      .eq("id", fleet.id);
+
+    // Update in-memory resolved ship list.
+    for (let si = 0; si < resolvedShipList.length; si++) {
+      if (memberShipIds.includes(resolvedShipList[si].id)) {
+        resolvedShipList[si] = {
+          ...resolvedShipList[si],
+          current_system_id: destSystemId,
+          current_body_id: null,
+        };
+        travelJobByShipId.delete(resolvedShipList[si].id);
+      }
+    }
+
+    // Update in-memory fleet.
+    fleetList[fi] = {
+      ...fleet,
+      status: "active",
+      current_system_id: destSystemId,
+    };
+  }
+
   // ── Phase 11: per-ship upgrade summaries ──────────────────────────────────
   // Computed after auto-resolution so resolvedShipList reflects current state.
   // Station iron needed for affordability checks.
@@ -749,6 +845,47 @@ export default async function GameDashboard() {
         autoTargetNameByShipId.set(ship.id, systemDisplayName(colony.system_id));
       }
     }
+  }
+
+  // ── Fleet display data ────────────────────────────────────────────────────
+  // Ship name lookup for fleet member display.
+  const shipNameById = new Map(resolvedShipList.map((s) => [s.id, s.name]));
+
+  // Eligible ships for fleet creation: docked, not already in a fleet.
+  const dockedShipsForFleet = resolvedShipList
+    .filter((s) => s.current_system_id !== null && !shipIdsInFleet.has(s.id))
+    .map((s) => ({ id: s.id, name: s.name }));
+
+  // Per-fleet ETA display (when traveling).
+  const fleetEtaDisplay = new Map<string, string>();
+  for (const fleet of fleetList) {
+    if (fleet.status !== "traveling") continue;
+    const fleetJobs = allTravelJobs.filter((j) => j.fleet_id === fleet.id);
+    if (fleetJobs.length === 0) continue;
+    const latestArriveAt = fleetJobs.reduce(
+      (latest, j) =>
+        new Date(j.arrive_at) > new Date(latest) ? j.arrive_at : latest,
+      fleetJobs[0].arrive_at,
+    );
+    const remainingMs = Math.max(0, new Date(latestArriveAt).getTime() - requestTime.getTime());
+    const remainingMin = Math.ceil(remainingMs / 60_000);
+    const eta =
+      remainingMin <= 0
+        ? "Arrived — refreshing…"
+        : remainingMin < 60
+          ? `~${remainingMin} min remaining`
+          : `~${(remainingMin / 60).toFixed(1)} hr remaining`;
+    fleetEtaDisplay.set(fleet.id, eta);
+  }
+
+  // Per-fleet nearby systems for dispatch form.
+  const fleetNearbySystems = new Map<string, { id: string; name: string }[]>();
+  for (const fleet of fleetList) {
+    if (fleet.status !== "active" || !fleet.current_system_id) continue;
+    const nearby = getNearbySystems(fleet.current_system_id, BALANCE.lanes.baseRangeLy)
+      .slice(0, 6)
+      .map((n) => ({ id: n.id, name: n.name }));
+    fleetNearbySystems.set(fleet.id, nearby);
   }
 
   // ── Per-colony display data ───────────────────────────────────────────────
@@ -965,6 +1102,88 @@ export default async function GameDashboard() {
           </div>
         )}
       </section>
+
+      {/* Fleets */}
+      {(fleetList.length > 0 || dockedShipsForFleet.length >= 2) && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Fleets
+          </h2>
+          <div className="space-y-3">
+            {/* Active/traveling fleet cards */}
+            {fleetList.map((fleet) => {
+              const memberShipIds = shipIdsByFleetId.get(fleet.id) ?? [];
+              const eta = fleetEtaDisplay.get(fleet.id);
+              const destJob = allTravelJobs.find((j) => j.fleet_id === fleet.id);
+              const nearby = fleetNearbySystems.get(fleet.id) ?? [];
+
+              return (
+                <div
+                  key={fleet.id}
+                  className={`rounded-lg border bg-zinc-900 px-4 py-3 ${
+                    fleet.status === "traveling"
+                      ? "border-indigo-800"
+                      : "border-zinc-700"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-medium text-zinc-200">{fleet.name}</p>
+                        <span className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${
+                          fleet.status === "traveling"
+                            ? "bg-indigo-900/50 text-indigo-300"
+                            : "bg-zinc-800 text-zinc-400"
+                        }`}>
+                          {fleet.status === "traveling" ? "In transit" : "Staged"}
+                        </span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        {fleet.status === "traveling" && destJob
+                          ? `→ ${systemDisplayName(destJob.to_system_id)}`
+                          : fleet.current_system_id
+                            ? systemDisplayName(fleet.current_system_id)
+                            : "Unknown location"}
+                        {eta && (
+                          <span className="ml-2 text-zinc-600">{eta}</span>
+                        )}
+                      </p>
+                      <p className="mt-1 text-xs text-zinc-600">
+                        {memberShipIds.length} ship{memberShipIds.length !== 1 ? "s" : ""}:{" "}
+                        {memberShipIds
+                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                          .map((id) => shipNameById.get(id as any) ?? id.slice(0, 8))
+                          .join(", ")}
+                      </p>
+                    </div>
+                    {fleet.status === "active" && (
+                      <DisbandFleetButton fleetId={fleet.id} />
+                    )}
+                  </div>
+
+                  {/* Dispatch form for staged fleets */}
+                  {fleet.status === "active" && nearby.length > 0 && (
+                    <div className="mt-3 border-t border-zinc-800 pt-3">
+                      <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                        Dispatch Fleet
+                      </p>
+                      <DispatchFleetForm
+                        fleetId={fleet.id}
+                        nearbySystems={nearby}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Form fleet panel */}
+            {dockedShipsForFleet.length >= 2 && (
+              <CreateFleetForm dockedShips={dockedShipsForFleet} />
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Colonies */}
       {colonyList.length > 0 && (

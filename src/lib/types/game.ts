@@ -343,11 +343,40 @@ export interface TravelJob {
   from_system_id: SystemId;
   to_system_id: SystemId;
   lane_id: LaneId | null;
+  /** Non-null when the job was created by a fleet dispatch. */
+  fleet_id: string | null;
   depart_at: string;
   arrive_at: string;
   transit_tax_paid: number;
   status: JobStatus;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleets
+// ---------------------------------------------------------------------------
+
+export type FleetStatus = "active" | "traveling" | "disbanded";
+
+/** Fleet header row — a named, temporary grouping of co-located ships. */
+export interface Fleet {
+  id: string;
+  player_id: PlayerId;
+  name: string;
+  /** 'active' = staged at current_system_id. 'traveling' = ships in transit. 'disbanded' = dissolved. */
+  status: FleetStatus;
+  /** System where ships are staged. NULL while traveling. */
+  current_system_id: SystemId | null;
+  disbanded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Join row linking a ship to its current fleet. */
+export interface FleetShip {
+  fleet_id: string;
+  ship_id: ShipId;
+  joined_at: string;
 }
 
 // ---------------------------------------------------------------------------
