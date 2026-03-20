@@ -652,7 +652,7 @@ export function RouteMapClient({
                                   : undefined
                               }
                             >
-                              {/* Transport indicator */}
+                              {/* Transport indicator dot */}
                               <span
                                 className={`h-1.5 w-1.5 shrink-0 rounded-full ${
                                   colony.hasTransport
@@ -661,13 +661,19 @@ export function RouteMapClient({
                                 }`}
                                 title={
                                   colony.hasTransport
-                                    ? "Has transport"
-                                    : "No transport"
+                                    ? `${colony.transportTierLabel} · ${colony.transportCapacity}/period`
+                                    : "No transport — routes inactive"
                                 }
                               />
                               <span className="truncate">
                                 {colonyShortLabel(colony)}
                               </span>
+                              {/* Capacity chip */}
+                              {colony.hasTransport && (
+                                <span className="ml-auto shrink-0 rounded bg-zinc-800 px-1 text-zinc-500 text-[10px]">
+                                  {colony.transportCapacity}/p
+                                </span>
+                              )}
                             </div>
                           );
                         })}
@@ -787,6 +793,17 @@ export function RouteMapClient({
                             <span>× {route.fixedAmount}</span>
                           )}
                           <span>{route.intervalMinutes}m interval</span>
+                          {/* Phase 18: throughput cap from source colony */}
+                          {fromColony && (
+                            <span
+                              className={fromColony.hasTransport ? "text-zinc-700" : "text-amber-700"}
+                              title="Max units per interval (transport capacity)"
+                            >
+                              {fromColony.hasTransport
+                                ? `cap ${fromColony.transportCapacity}/period`
+                                : "no transport"}
+                            </span>
+                          )}
                         </div>
                       </div>
 

@@ -40,6 +40,7 @@ import {
   LoadButton,
 } from "./_components/SystemActions";
 import { CreateRouteForm, DeleteRouteButton } from "./_components/RouteControls";
+import { TransportPanel } from "./_components/TransportControls";
 import type { ColonyRoute, ColonyTransport } from "@/lib/types/game";
 
 export const dynamic = "force-dynamic";
@@ -323,6 +324,31 @@ export default async function SystemPage({
     list.push(t);
     transportsByColonyId.set(t.colony_id, list);
   }
+
+  // ── Phase 18: station inventory (for transport purchase/upgrade affordability) ──
+  const { data: stationRow } = maybeSingleResult<{ id: string }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("player_stations")
+      .select("id")
+      .eq("owner_id", player.id)
+      .maybeSingle(),
+  );
+
+  type StationInvRow = { resource_type: string; quantity: number };
+  const stationInvRes = stationRow
+    ? await admin
+        .from("resource_inventory")
+        .select("resource_type, quantity")
+        .eq("location_type", "station")
+        .eq("location_id", stationRow.id)
+        .in("resource_type", ["iron", "carbon", "steel"])
+    : { data: [] as StationInvRow[], error: null };
+  const { data: stationInvRows } = listResult<StationInvRow>(stationInvRes);
+  const stationInvMap = new Map((stationInvRows ?? []).map((r) => [r.resource_type, r.quantity]));
+  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
+  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
+  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
 
   // Build destination colony selector options (exclude current colony, already-routed ones per resource).
   const colonyLabelById = new Map<string, string>(
@@ -720,13 +746,17 @@ export default async function SystemPage({
                           Map →
                         </Link>
                       </div>
-                      {transportsByColonyId.get(colony.id) ? (
-                        <span className="text-xs text-zinc-600">
-                          {transportsByColonyId.get(colony.id)!.length} transport{transportsByColonyId.get(colony.id)!.length !== 1 ? "s" : ""}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-amber-700">No transport — routes inactive</span>
-                      )}
+                    </div>
+
+                    {/* Phase 18: Transport summary + purchase/upgrade controls */}
+                    <div className="mb-2">
+                      <TransportPanel
+                        colonyId={colony.id}
+                        transports={transportsByColonyId.get(colony.id) ?? []}
+                        stationIron={stationIronForTransports}
+                        stationCarbon={stationCarbonForTransports}
+                        stationSteel={stationSteelForTransports}
+                      />
                     </div>
 
                     {/* Outgoing routes */}

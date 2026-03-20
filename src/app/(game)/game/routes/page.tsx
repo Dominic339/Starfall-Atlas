@@ -4,7 +4,7 @@
  * Server component. Fetches:
  *   - Player's active colonies (with system_id, body_id)
  *   - All player supply routes
- *   - Colony transport counts (for gating indicator)
+ *   - Colony transport rows (tier + colony_id for capacity display)
  *
  * Passes serialized data to the client-side RouteMapClient which handles
  * the interactive SVG map and route table panel.
@@ -16,6 +16,7 @@ import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName } from "@/lib/catalog";
+import { colonyTransportCapacity } from "@/lib/game/transportCapacity";
 import type { Colony, ColonyRoute, Player } from "@/lib/types/game";
 import { RouteMapClient } from "./_components/RouteMapClient";
 
@@ -31,6 +32,12 @@ export interface ColonyMapEntry {
   bodyIndex: number;
   populationTier: number;
   hasTransport: boolean;
+  /** Total transport capacity (units per route period). 0 = no transports. */
+  transportCapacity: number;
+  /** Number of transport units at this colony. */
+  transportCount: number;
+  /** Tier summary string, e.g. "T1+T2". Empty if none. */
+  transportTierLabel: string;
   /** 3D catalog position in light-years */
   systemX: number;
   systemY: number;
@@ -64,8 +71,8 @@ export default async function RoutesPage() {
   );
   if (!player) redirect("/login");
 
-  // ── Parallel fetches ────────────────────────────────────────────────────
-  const [coloniesRes, routesRes, transportsRes] = await Promise.all([
+  // ── Fetch colonies + routes ──────────────────────────────────────────────
+  const [coloniesRes, routesRes] = await Promise.all([
     admin
       .from("colonies")
       .select("id, system_id, body_id, status, population_tier")
@@ -77,32 +84,26 @@ export default async function RoutesPage() {
       .select("*")
       .eq("player_id", player.id)
       .order("created_at", { ascending: true }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (admin as any)
-      .from("colony_transports")
-      .select("colony_id")
-      .in(
-        "colony_id",
-        // We'll get colony IDs after the parallel fetch; use a placeholder
-        // that returns nothing if we don't have colonies yet. We re-fetch below.
-        ["00000000-0000-0000-0000-000000000000"],
-      ),
   ]);
 
   const rawColonies = listResult<Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">>(coloniesRes).data ?? [];
   const rawRoutes   = listResult<ColonyRoute>(routesRes).data ?? [];
 
-  // Re-fetch transports with correct colony IDs if there are colonies
-  let transportColonyIds = new Set<string>();
+  // ── Fetch transport rows (tier info) ────────────────────────────────────
+  type TransportRow = { colony_id: string; tier: number };
+  const transportsByColony = new Map<string, TransportRow[]>();
+
   if (rawColonies.length > 0) {
     const colonyIds = rawColonies.map((c) => c.id);
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: tData } = await (admin as any)
       .from("colony_transports")
-      .select("colony_id")
+      .select("colony_id, tier")
       .in("colony_id", colonyIds);
-    for (const row of (tData ?? []) as { colony_id: string }[]) {
-      transportColonyIds.add(row.colony_id);
+    for (const row of (tData ?? []) as TransportRow[]) {
+      const list = transportsByColony.get(row.colony_id) ?? [];
+      list.push(row);
+      transportsByColony.set(row.colony_id, list);
     }
   }
 
@@ -111,6 +112,10 @@ export default async function RoutesPage() {
     const entry = getCatalogEntry(c.system_id);
     const lastColon = c.body_id.lastIndexOf(":");
     const bodyIndex = lastColon >= 0 ? parseInt(c.body_id.slice(lastColon + 1), 10) : 0;
+    const transports = transportsByColony.get(c.id) ?? [];
+    const capacity = colonyTransportCapacity(transports);
+    const tierLabel = transports.map((t) => `T${t.tier}`).join("+");
+
     return {
       id: c.id,
       systemId: c.system_id,
@@ -118,7 +123,10 @@ export default async function RoutesPage() {
       bodyId: c.body_id,
       bodyIndex: isNaN(bodyIndex) ? 0 : bodyIndex,
       populationTier: c.population_tier,
-      hasTransport: transportColonyIds.has(c.id),
+      hasTransport: transports.length > 0,
+      transportCapacity: capacity,
+      transportCount: transports.length,
+      transportTierLabel: tierLabel,
       systemX: entry?.x ?? 0,
       systemY: entry?.y ?? 0,
       systemZ: entry?.z ?? 0,

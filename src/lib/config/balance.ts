@@ -454,7 +454,7 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
-  // Colony transports (Phase 15)
+  // Colony transports (Phase 15 / Phase 18)
   // -------------------------------------------------------------------------
   colonyTransport: {
     /**
@@ -474,6 +474,35 @@ export const BALANCE = {
      * e.g. if colony has 150 iron and threshold = 100, transfer 50.
      */
     excessThreshold: 100,
+
+    // ── Phase 18: transport purchasing and throughput ───────────────────────
+
+    /**
+     * Iron cost to purchase a new tier-1 colony transport unit.
+     * Deducted from player station inventory.
+     */
+    purchaseCostIron: 20,
+
+    /**
+     * Cost to upgrade a transport from tier (N-1) to tier N.
+     * Index = target tier (1-based; index 0 unused).
+     * All costs deducted from station inventory.
+     */
+    upgradeCosts: [
+      null,                                      // [0] unused
+      null,                                      // [1] purchase (use purchaseCostIron)
+      { iron: 40,  carbon: 10, steel: 0  },      // [2] T1 → T2
+      { iron: 80,  carbon: 20, steel: 0  },      // [3] T2 → T3
+      { iron: 150, carbon: 40, steel: 20 },      // [4] T3 → T4
+      { iron: 250, carbon: 80, steel: 50 },      // [5] T4 → T5
+    ] as (null | { iron: number; carbon: number; steel: number })[],
+
+    /**
+     * Maximum resources a single transport can carry per route resolution period.
+     * Index = tier (1-based). Index 0 unused.
+     * Total colony capacity = sum of capacityPerTier[tier] for each transport row.
+     */
+    capacityPerTier: [0, 100, 200, 350, 500, 750] as number[],
   },
 
   // -------------------------------------------------------------------------

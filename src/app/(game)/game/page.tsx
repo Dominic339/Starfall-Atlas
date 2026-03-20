@@ -86,6 +86,7 @@ import {
 } from "@/lib/game/colonyUpkeep";
 import type { ColonyHealthStatus } from "@/lib/game/colonyUpkeep";
 import { isHarshPlanetType } from "@/lib/game/habitability";
+import { colonyTransportCapacity } from "@/lib/game/transportCapacity";
 import {
   getStructureTier,
   researchLevel,
@@ -342,11 +343,17 @@ export default async function GameDashboard() {
     structuresByColonyId.set(row.colony_id, list);
   }
 
-  // Phase 15: transport count per colony (gates route resolution).
-  const transportsByColonyId = new Map<string, number>();
-  for (const row of ((transportsRes.data ?? []) as Pick<ColonyTransport, "colony_id">[]) ) {
-    transportsByColonyId.set(row.colony_id, (transportsByColonyId.get(row.colony_id) ?? 0) + 1);
+  // Phase 15/18: transport rows per colony — used for gate check and throughput cap.
+  const transportRowsByColonyId = new Map<string, Pick<ColonyTransport, "colony_id" | "tier">[]>();
+  for (const row of ((transportsRes.data ?? []) as Pick<ColonyTransport, "colony_id" | "tier">[])) {
+    const list = transportRowsByColonyId.get(row.colony_id) ?? [];
+    list.push(row);
+    transportRowsByColonyId.set(row.colony_id, list);
   }
+  // Convenience: count-only map (kept for backward compat with any remaining uses).
+  const transportsByColonyId = new Map<string, number>(
+    [...transportRowsByColonyId.entries()].map(([id, rows]) => [id, rows.length]),
+  );
 
   // Phase 14: wired research levels (extraction, sustainability, storage).
   const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
@@ -1321,7 +1328,8 @@ export default async function GameDashboard() {
     if (!fromColony || !toColony) continue;
 
     // Transport gate: source colony must have at least one transport.
-    if ((transportsByColonyId.get(fromColony.id) ?? 0) < 1) continue;
+    const sourceTransports = transportRowsByColonyId.get(fromColony.id) ?? [];
+    if (sourceTransports.length === 0) continue;
 
     const lastRun = new Date(route.last_run_at);
     const elapsedMs = requestTime.getTime() - lastRun.getTime();
@@ -1329,6 +1337,11 @@ export default async function GameDashboard() {
     const rawPeriods = Math.floor(elapsedMinutes / route.interval_minutes);
     if (rawPeriods <= 0) continue;
     const periods = Math.min(rawPeriods, BALANCE.colonyTransport.maxCatchupPeriods);
+
+    // Phase 18: throughput cap — total capacity of all transports at source,
+    // multiplied by number of periods being resolved.
+    const capacityPerPeriod = colonyTransportCapacity(sourceTransports);
+    const transferCap = capacityPerPeriod * periods;
 
     // Determine how much to transfer per period.
     const sourceInv = colonyInvByColonyId.get(fromColony.id) ?? [];
@@ -1339,12 +1352,12 @@ export default async function GameDashboard() {
     } else {
       let transferTotal = 0;
       if (route.mode === "all") {
-        transferTotal = available;
+        transferTotal = Math.min(available, transferCap);
       } else if (route.mode === "excess") {
         transferTotal = Math.max(0, available - BALANCE.colonyTransport.excessThreshold) * periods;
-        transferTotal = Math.min(transferTotal, available);
+        transferTotal = Math.min(transferTotal, available, transferCap);
       } else if (route.mode === "fixed") {
-        transferTotal = Math.min((route.fixed_amount ?? 0) * periods, available);
+        transferTotal = Math.min((route.fixed_amount ?? 0) * periods, available, transferCap);
       }
 
       if (transferTotal > 0) {
