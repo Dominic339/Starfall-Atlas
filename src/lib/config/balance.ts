@@ -316,6 +316,54 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Colony structures and wired research effects (Phase 14)
+  // -------------------------------------------------------------------------
+  structures: {
+    /** Maximum structure tier buildable in alpha. */
+    maxTier: 3,
+
+    /**
+     * Iron and carbon cost to build or upgrade to each tier.
+     * buildCostByTier[1] = build tier 1, buildCostByTier[2] = upgrade to tier 2, etc.
+     * Index 0 is unused.
+     */
+    buildCostByTier: [
+      null,                        // 0: unused
+      { iron: 20, carbon: 10 },   // 1: initial build
+      { iron: 50, carbon: 25 },   // 2: upgrade to tier 2
+      { iron: 100, carbon: 50 },  // 3: upgrade to tier 3
+    ] as (null | { iron: number; carbon: number })[],
+
+    /** Extractor: additional extraction multiplier per tier (additive). */
+    extractor: {
+      extractionBonusPerTier: 0.25,
+    },
+
+    /** Warehouse: additional colony storage cap per tier. */
+    warehouse: {
+      storageCapPerTier: 500,
+    },
+
+    /** Habitat module: upkeep iron reduction fraction per tier (additive, capped at 1.0). */
+    habitat_module: {
+      upkeepReductionPerTier: 0.20,
+    },
+
+    /**
+     * Wired colony research effects (extraction_N, sustainability_N, storage_N).
+     * Each unlocked research level adds this much bonus.
+     */
+    researchEffects: {
+      /** Per extraction research level: +bonusPerLevel to the extraction multiplier. */
+      extractionBonusPerLevel: 0.10,
+      /** Per sustainability research level: fraction of upkeep iron saved. */
+      sustainabilityBonusPerLevel: 0.10,
+      /** Per storage research level: additional storage cap units. */
+      storageCapPerLevel: 200,
+    },
+  },
+
+  // -------------------------------------------------------------------------
   // Ship upgrades (Phase 11)
   // -------------------------------------------------------------------------
   shipUpgrades: {

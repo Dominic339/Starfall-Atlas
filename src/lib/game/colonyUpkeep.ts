@@ -45,10 +45,24 @@ export interface UpkeepPeriodResult {
 // ---------------------------------------------------------------------------
 
 /**
- * How many iron units the colony needs for one upkeep period.
+ * How many iron units the colony needs for one upkeep period (base, no reduction).
  */
 export function upkeepIronRequired(tier: number): number {
   return BALANCE.upkeep.ironPerTierPerPeriod * tier;
+}
+
+/**
+ * Effective iron cost after applying habitat_module / sustainability research reduction.
+ *
+ * @param tier             - Colony population tier
+ * @param reductionFraction - Fraction of upkeep saved (0.0–1.0). 0 = full cost.
+ */
+export function effectiveUpkeepIronRequired(
+  tier: number,
+  reductionFraction: number,
+): number {
+  const base = upkeepIronRequired(tier);
+  return Math.max(0, Math.ceil(base * (1 - reductionFraction)));
 }
 
 /**
@@ -110,10 +124,11 @@ export function upkeepPeriodsToResolve(
 /**
  * Apply one upkeep period to a colony.
  *
- * @param tier            current population_tier
- * @param missedPeriods   current upkeep_missed_periods
- * @param ironAvailable   iron units in station inventory (may be partial/0)
- * @param periodEndAt     timestamp to use as the new last_upkeep_at
+ * @param tier              current population_tier
+ * @param missedPeriods     current upkeep_missed_periods
+ * @param ironAvailable     iron units in station inventory (may be partial/0)
+ * @param periodEndAt       timestamp to use as the new last_upkeep_at
+ * @param reductionFraction fraction of upkeep saved by structures/research (0–1, default 0)
  * @returns UpkeepPeriodResult with updated fields and iron consumed
  */
 export function applyUpkeepPeriod(
@@ -121,8 +136,9 @@ export function applyUpkeepPeriod(
   missedPeriods: number,
   ironAvailable: number,
   periodEndAt: Date,
+  reductionFraction = 0,
 ): UpkeepPeriodResult {
-  const required = upkeepIronRequired(tier);
+  const required = effectiveUpkeepIronRequired(tier, reductionFraction);
   const paid = ironAvailable >= required;
   const ironConsumed = paid ? required : 0;
 
@@ -156,12 +172,19 @@ export function applyUpkeepPeriod(
  * iron drawn from each period reduces what is available for the next.
  *
  * Returns the DB fields to update and the total iron consumed.
+ *
+ * @param colony               - Colony snapshot
+ * @param periodsToResolve     - Number of periods to process
+ * @param ironAvailableAtStart - Station iron at start
+ * @param periodEndAt          - Timestamp for last_upkeep_at update
+ * @param reductionFraction    - Fraction of upkeep saved (0–1, default 0)
  */
 export function resolveColonyUpkeep(
   colony: Pick<Colony, "population_tier" | "upkeep_missed_periods" | "last_upkeep_at" | "next_growth_at">,
   periodsToResolve: number,
   ironAvailableAtStart: number,
   periodEndAt: Date,
+  reductionFraction = 0,
 ): {
   ironConsumed: number;
   newTier: number;
@@ -178,7 +201,7 @@ export function resolveColonyUpkeep(
   let tierLostCount = 0;
 
   for (let i = 0; i < periodsToResolve; i++) {
-    const result = applyUpkeepPeriod(tier, missed, ironRemaining, periodEndAt);
+    const result = applyUpkeepPeriod(tier, missed, ironRemaining, periodEndAt, reductionFraction);
     totalIronConsumed += result.ironConsumed;
     ironRemaining -= result.ironConsumed;
     missed = result.missedPeriods;

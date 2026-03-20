@@ -13,6 +13,7 @@ export type AllianceRole = "founder" | "officer" | "member";
 export type StructureType =
   | "extractor"
   | "warehouse"
+  | "habitat_module"
   | "shipyard" // post-alpha only
   | "trade_hub"
   | "relay_station";

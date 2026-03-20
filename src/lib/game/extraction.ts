@@ -52,10 +52,13 @@ export function extractionRatePerNode(populationTier: number): number {
  * Calculate how many units of each basic resource have accumulated
  * since last extraction.
  *
- * @param resourceNodes   - Resource nodes from the body's survey result
- * @param populationTier  - Current colony tier (1–10)
- * @param lastExtractAt   - ISO timestamp of last extraction (or colony founding)
- * @param now             - Current server time (defaults to Date.now())
+ * @param resourceNodes       - Resource nodes from the body's survey result
+ * @param populationTier      - Current colony tier (1–10)
+ * @param lastExtractAt       - ISO timestamp of last extraction (or colony founding)
+ * @param now                 - Current server time (defaults to Date.now())
+ * @param extractionMultiplier - Bonus multiplier from structures/research (default 1.0).
+ *                               Applied after the base rate. Health multiplier is applied
+ *                               separately by the caller.
  * @returns Array of { resource_type, quantity } for each node with >0 yield.
  *          Returns [] if nothing has accrued yet.
  */
@@ -64,6 +67,7 @@ export function calculateAccumulatedExtraction(
   populationTier: number,
   lastExtractAt: string,
   now: Date = new Date(),
+  extractionMultiplier = 1.0,
 ): ExtractionAmount[] {
   const lastMs = new Date(lastExtractAt).getTime();
   const elapsedMs = Math.max(0, now.getTime() - lastMs);
@@ -78,7 +82,7 @@ export function calculateAccumulatedExtraction(
     .filter((node) => !node.is_rare) // rare nodes require Extractor structure (future)
     .map((node) => ({
       resource_type: node.type,
-      quantity: Math.floor(effectiveHours * ratePerHr),
+      quantity: Math.floor(effectiveHours * ratePerHr * extractionMultiplier),
     }))
     .filter((item) => item.quantity > 0);
 }

@@ -33,10 +33,16 @@
  *   - Ships in active fleets are skipped by auto-resolution (Step 5)
  *   - Manual fleet disband only
  *
+ * Phase 14 additions:
+ *   - Colony structures: warehouse / extractor / habitat_module (tiers 1–3)
+ *   - Colony research wired: extraction, sustainability, storage
+ *   - Structures fetched in Step 3; effects applied to extraction/upkeep/storage
+ *   - BuildStructureButton per colony in ColonyRow
+ *
  * Fetch order:
  *   1. player (auth gate)
  *   2. ships, ALL travel jobs, colonies, station, research, fleets (parallel)
- *   3. surveys, station inv, ship cargo, colony inv totals (parallel)
+ *   3. surveys, station inv, ship cargo, colony inv totals, structures (parallel)
  *   4. lazy growth resolution (DB writes for due colonies)
  *   4.5. lazy upkeep resolution (DB writes per colony; mutates stationIron)
  *   5. lazy auto-ship resolution (skips fleet members)
@@ -69,12 +75,21 @@ import {
   resolveColonyUpkeep,
 } from "@/lib/game/colonyUpkeep";
 import type { ColonyHealthStatus } from "@/lib/game/colonyUpkeep";
+import {
+  getStructureTier,
+  researchLevel,
+  extractionBonusMultiplier,
+  upkeepReductionFraction,
+  effectiveStorageCap,
+  structureBuildCost,
+} from "@/lib/game/colonyStructures";
 import { BALANCE } from "@/lib/config/balance";
 import type {
   Player,
   Ship,
   TravelJob,
   Colony,
+  Structure,
   PlayerStation,
   ResourceInventoryRow,
   SurveyResult,
@@ -90,6 +105,7 @@ import { ShipModeSelector } from "./_components/ShipModeSelector";
 import { UpgradeButton } from "./_components/UpgradeButton";
 import { CreateFleetForm, DispatchFleetForm, DisbandFleetButton } from "./_components/FleetActions";
 import { FleetSlotModeSelector } from "./_components/FleetSlotControls";
+import { BuildStructureButton } from "./_components/ColonyStructures";
 
 export const dynamic = "force-dynamic";
 
@@ -207,7 +223,7 @@ export default async function GameDashboard() {
     .filter((c) => c.status === "active")
     .map((c) => c.id);
 
-  const [surveyRes, invRes, cargoRes, colonyInvRes] = await Promise.all([
+  const [surveyRes, invRes, cargoRes, colonyInvRes, structuresRes] = await Promise.all([
     colonyBodyIds.length > 0
       ? admin
           .from("survey_results")
@@ -236,6 +252,14 @@ export default async function GameDashboard() {
           .select("location_id, resource_type, quantity")
           .eq("location_type", "colony")
           .in("location_id", activeColonyIds)
+      : Promise.resolve({ data: [] }),
+    // Phase 14: colony structures for all player colonies.
+    rawColonies.length > 0
+      ? admin
+          .from("structures")
+          .select("id, colony_id, type, tier, is_active")
+          .in("colony_id", rawColonies.map((c) => c.id))
+          .eq("is_active", true)
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -279,6 +303,20 @@ export default async function GameDashboard() {
       (colonyInvTotals.get(row.location_id) ?? 0) + row.quantity,
     );
   }
+
+  // Phase 14: structures per colony.
+  type StructureRow = Pick<Structure, "id" | "colony_id" | "type" | "tier" | "is_active">;
+  const structuresByColonyId = new Map<string, StructureRow[]>();
+  for (const row of ((structuresRes.data ?? []) as StructureRow[])) {
+    const list = structuresByColonyId.get(row.colony_id) ?? [];
+    list.push(row);
+    structuresByColonyId.set(row.colony_id, list);
+  }
+
+  // Phase 14: wired research levels (extraction, sustainability, storage).
+  const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
+  const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
+  const storageResearchLvl = researchLevel(unlockedResearchIds, "storage");
 
   // ── Step 4: lazy growth resolution ──────────────────────────────────────
   const requestTime = new Date();
@@ -334,7 +372,12 @@ export default async function GameDashboard() {
     const periods = upkeepPeriodsToResolve(colony.last_upkeep_at, requestTime);
     if (periods === 0) continue;
 
-    const result = resolveColonyUpkeep(colony, periods, stationIron, requestTime);
+    // Phase 14: compute per-colony upkeep reduction from structures + research.
+    const colonyStructures = structuresByColonyId.get(colony.id) ?? [];
+    const habitatTier = getStructureTier(colonyStructures as Structure[], "habitat_module");
+    const reductionFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
+
+    const result = resolveColonyUpkeep(colony, periods, stationIron, requestTime, reductionFrac);
 
     if (result.ironConsumed > 0) {
       stationIron -= result.ironConsumed;
@@ -1328,6 +1371,9 @@ export default async function GameDashboard() {
     return "Idle";
   }
 
+  // Phase 14: station carbon for build cost affordability checks.
+  const stationCarbon = stationInventory.find((r) => r.resource_type === "carbon")?.quantity ?? 0;
+
   // ── Per-colony display data ───────────────────────────────────────────────
   const colonyDisplayData = colonyList.map((colony) => {
     const health = colonyHealthStatus(colony.upkeep_missed_periods);
@@ -1343,6 +1389,15 @@ export default async function GameDashboard() {
     // Apply health tax multiplier for display (matches what collect will give).
     const accrued = Math.floor(rawAccrued * taxMultiplier(colony.upkeep_missed_periods));
 
+    // Phase 14: per-colony structure tiers and bonuses.
+    const colonyStructures = (structuresByColonyId.get(colony.id) ?? []) as Structure[];
+    const extractorTier = getStructureTier(colonyStructures, "extractor");
+    const warehouseTier = getStructureTier(colonyStructures, "warehouse");
+    const habitatTier = getStructureTier(colonyStructures, "habitat_module");
+    const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
+    const storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
+    const upkeepRedFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
+
     const survey = surveyByBodyId.get(colony.body_id) ?? null;
     const rawExtraction: ExtractionAmount[] =
       survey && colony.last_extract_at && colony.status === "active"
@@ -1351,6 +1406,7 @@ export default async function GameDashboard() {
             colony.population_tier,
             colony.last_extract_at,
             requestTime,
+            extBonusMult,
           )
         : [];
     // Apply health extraction multiplier for display (matches what extract will give).
@@ -1359,7 +1415,32 @@ export default async function GameDashboard() {
       .map((item) => ({ ...item, quantity: Math.floor(item.quantity * extMult) }))
       .filter((item) => item.quantity > 0);
 
-    return { colony, accrued, accruedExtraction, health };
+    // Build options: one entry per buildable type showing current tier and next cost.
+    const BUILDABLE = ["warehouse", "extractor", "habitat_module"] as const;
+    const buildOptions = BUILDABLE.map((type) => {
+      const currentTier = getStructureTier(colonyStructures, type);
+      const targetTier = currentTier + 1;
+      const atMax = targetTier > BALANCE.structures.maxTier;
+      const cost = atMax ? null : structureBuildCost(targetTier);
+      const canAfford = cost !== null &&
+        (stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0) >= cost.iron &&
+        stationCarbon >= cost.carbon;
+      return { type, currentTier, targetTier, cost, canAfford, atMax };
+    });
+
+    return {
+      colony,
+      accrued,
+      accruedExtraction,
+      health,
+      colonyStructures,
+      extractorTier,
+      warehouseTier,
+      habitatTier,
+      storageCap,
+      upkeepRedFrac,
+      buildOptions,
+    };
   });
 
   const totalAccrued = colonyDisplayData.reduce((s, d) => s + d.accrued, 0);
@@ -1705,13 +1786,19 @@ export default async function GameDashboard() {
             Colonies
           </h2>
           <div className="space-y-2">
-            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health }) => (
+            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health, extractorTier, warehouseTier, habitatTier, storageCap, upkeepRedFrac, buildOptions }) => (
               <ColonyRow
                 key={colony.id}
                 colony={colony}
                 accrued={accrued}
                 accruedExtraction={accruedExtraction}
                 health={health}
+                extractorTier={extractorTier}
+                warehouseTier={warehouseTier}
+                habitatTier={habitatTier}
+                storageCap={storageCap}
+                upkeepRedFrac={upkeepRedFrac}
+                buildOptions={buildOptions}
               />
             ))}
           </div>
@@ -1974,11 +2061,30 @@ function ColonyRow({
   accrued,
   accruedExtraction,
   health,
+  extractorTier,
+  warehouseTier,
+  habitatTier,
+  storageCap,
+  upkeepRedFrac,
+  buildOptions,
 }: {
   colony: Colony;
   accrued: number;
   accruedExtraction: ExtractionAmount[];
   health: ColonyHealthStatus;
+  extractorTier: number;
+  warehouseTier: number;
+  habitatTier: number;
+  storageCap: number;
+  upkeepRedFrac: number;
+  buildOptions: {
+    type: "warehouse" | "extractor" | "habitat_module";
+    currentTier: number;
+    targetTier: number;
+    cost: { iron: number; carbon: number } | null;
+    canAfford: boolean;
+    atMax: boolean;
+  }[];
 }) {
   const systemName = systemDisplayName(colony.system_id);
   const bodyIndex = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
@@ -2084,6 +2190,59 @@ function ColonyRow({
           )}
         </div>
       </div>
+
+      {/* Structures panel */}
+      {colony.status === "active" && (
+        <div className="mt-3 border-t border-zinc-800 pt-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
+              Structures
+            </p>
+            <div className="flex items-center gap-3 text-xs text-zinc-600">
+              {warehouseTier > 0 && (
+                <span>Storage {storageCap.toLocaleString()} (+{storageCap - colony.storage_cap})</span>
+              )}
+              {extractorTier > 0 && (
+                <span>Extractor T{extractorTier}</span>
+              )}
+              {habitatTier > 0 && upkeepRedFrac > 0 && (
+                <span>Upkeep −{Math.round(upkeepRedFrac * 100)}%</span>
+              )}
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {buildOptions.map(({ type, currentTier, targetTier, cost, canAfford, atMax }) => {
+              const label =
+                type === "warehouse" ? "Warehouse" :
+                type === "extractor" ? "Extractor" :
+                "Habitat Mod.";
+              if (atMax) {
+                return (
+                  <span key={type} className="text-xs text-zinc-700">
+                    {label} T{currentTier} (max)
+                  </span>
+                );
+              }
+              const buttonLabel =
+                currentTier === 0
+                  ? `Build ${label} T1`
+                  : `Upgrade ${label} T${targetTier}`;
+              return cost ? (
+                <BuildStructureButton
+                  key={type}
+                  colonyId={colony.id}
+                  structureType={type}
+                  targetTier={targetTier}
+                  ironCost={cost.iron}
+                  carbonCost={cost.carbon}
+                  canAfford={canAfford}
+                  label={buttonLabel}
+                />
+              ) : null;
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
