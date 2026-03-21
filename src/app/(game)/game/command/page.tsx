@@ -1638,7 +1638,7 @@ export default async function GameDashboard() {
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Command Centre</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Welcome back, {player.handle}.
+            {player.handle}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
@@ -1658,80 +1658,101 @@ export default async function GameDashboard() {
             href="/game/research"
             className="rounded-lg border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-200 transition-colors"
           >
-            Research Lab →
+            Research →
           </Link>
         </div>
       </div>
 
-      {/* Status grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {/* Location */}
-        <div className="rounded-lg border border-indigo-900 bg-zinc-900 p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Current location
-          </p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-indigo-300 truncate">
-            {isAnyInTransit && bannerJob
-              ? systemDisplayName(bannerJob.to_system_id)
-              : currentSystemId
-                ? systemDisplayName(currentSystemId)
-                : "Unknown"}
-          </p>
-          <p className="mt-1 text-xs text-zinc-600">
-            {isAnyInTransit && etaDisplay ? (
-              etaDisplay
-            ) : currentSystemId ? (
-              <Link
-                href={`/game/system/${encodeURIComponent(currentSystemId)}`}
-                className="text-indigo-500 hover:text-indigo-400"
-              >
-                View system →
-              </Link>
-            ) : (
-              "Position unknown"
-            )}
-          </p>
-        </div>
+      {/* ── Station (primary section) ────────────────────────────────────── */}
+      {station && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Station
+          </h2>
+          <div className="rounded-lg border border-amber-900/50 bg-zinc-900 px-4 py-3">
+            {/* Station header */}
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-base font-semibold text-zinc-100">
+                  {station.name}
+                </p>
+                <p className="text-xs text-zinc-500">
+                  <Link
+                    href={`/game/system/${encodeURIComponent(station.current_system_id)}`}
+                    className="text-amber-500 hover:text-amber-400 transition-colors"
+                  >
+                    {systemDisplayName(station.current_system_id)}
+                  </Link>
+                  {" · "}
+                  <span className="text-zinc-600">stationary hub</span>
+                </p>
+              </div>
+              <div className="flex shrink-0 flex-col items-end gap-1">
+                <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">
+                  Hub
+                </span>
+                <span className="text-xs text-zinc-600">
+                  {activeColonyCount}/{player.colony_slots} colon{activeColonyCount !== 1 ? "ies" : "y"}
+                </span>
+              </div>
+            </div>
 
-        {/* Credits */}
-        <div className="rounded-lg border border-amber-900 bg-zinc-900 p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Credits
-          </p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-amber-300">
-            {player.credits.toLocaleString()}
-          </p>
-          <p className="mt-1 text-xs text-zinc-600">
-            {totalAccrued > 0
-              ? `${totalAccrued} ¢ accrued — collect below`
-              : activeColonyCount > 0
-                ? "Taxes accruing — check colonies below"
-                : "Found a colony to start earning"}
-          </p>
-        </div>
+            {/* Credits + accrued */}
+            <div className="mt-3 border-t border-zinc-800 pt-3 flex items-center justify-between gap-4">
+              <div>
+                <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
+                <p className="mt-0.5 font-mono text-xl font-semibold text-amber-300">
+                  {player.credits.toLocaleString()}
+                </p>
+              </div>
+              {totalAccrued > 0 && (
+                <p className="text-xs text-zinc-500">
+                  +{totalAccrued} ¢ pending — collect from colonies
+                </p>
+              )}
+            </div>
 
-        {/* Colonies */}
-        <div className="rounded-lg border border-emerald-900 bg-zinc-900 p-4">
-          <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-            Active colonies
-          </p>
-          <p className="mt-1 font-mono text-2xl font-semibold text-emerald-300">
-            {activeColonyCount}
-          </p>
-          <p className="mt-1 text-xs text-zinc-600">
-            {player.colony_slots} slot
-            {player.colony_slots !== 1 ? "s" : ""} available
-          </p>
-        </div>
-      </div>
+            {/* Station inventory */}
+            <div className="mt-3 border-t border-zinc-800 pt-3">
+              <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Inventory
+              </p>
+              {stationInventory.length > 0 ? (
+                <div className="flex flex-wrap gap-x-4 gap-y-1">
+                  {stationInventory.map((row) => (
+                    <span key={row.resource_type} className="text-xs text-zinc-400">
+                      {row.resource_type}{" "}
+                      <span className="font-mono text-zinc-200">
+                        ×{row.quantity.toLocaleString()}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-700">
+                  Empty — extract resources from colonies and haul them here.
+                </p>
+              )}
+            </div>
+
+            {/* Refining */}
+            <div className="mt-3 border-t border-zinc-800 pt-3">
+              <p className="mb-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
+                Refine
+              </p>
+              <RefineForm />
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* In-transit banner (manual ships only; auto ships show state in ShipRow) */}
       {isAnyInTransit && bannerJob && activeTravelJob?.ship_id &&
         resolvedShipList.find((s) => s.id === activeTravelJob.ship_id)?.dispatch_mode === "manual" && (
-        <div className="rounded-lg border border-zinc-700 bg-zinc-900/70 px-4 py-3 flex items-center justify-between gap-4">
+        <div className="rounded-lg border border-indigo-900/60 bg-zinc-900/70 px-4 py-3 flex items-center justify-between gap-4">
           <div>
             <p className="text-sm text-zinc-300">
-              <span className="text-zinc-500">In transit →</span>{" "}
+              <span className="text-zinc-500">Ship in transit →</span>{" "}
               <Link
                 href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
                 className="text-indigo-400 hover:text-indigo-300 font-medium"
@@ -1745,92 +1766,12 @@ export default async function GameDashboard() {
           </div>
           <Link
             href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
-            className="shrink-0 rounded-lg bg-indigo-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-indigo-600 transition-colors"
+            className="shrink-0 rounded-lg bg-indigo-800 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-700 transition-colors"
           >
-            Go to system
+            View system →
           </Link>
         </div>
       )}
-
-      {/* Core station */}
-      {station && (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Core Station
-          </h2>
-          <div className="rounded-lg border border-zinc-700 bg-zinc-900 px-4 py-3">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-sm font-medium text-zinc-200">
-                  {station.name}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  {systemDisplayName(station.current_system_id)} ·{" "}
-                  <span className="text-zinc-600">stationary (alpha)</span>
-                </p>
-              </div>
-              <span className="shrink-0 rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
-                Hub
-              </span>
-            </div>
-
-            {stationInventory.length > 0 ? (
-              <div className="mt-3 border-t border-zinc-800 pt-3">
-                <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                  Station inventory
-                </p>
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {stationInventory.map((row) => (
-                    <span key={row.resource_type} className="text-xs text-zinc-400">
-                      {row.resource_type}{" "}
-                      <span className="font-mono text-zinc-300">
-                        ×{row.quantity.toLocaleString()}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <p className="mt-2 text-xs text-zinc-600">
-                Inventory empty — extract and haul resources to fill it.
-              </p>
-            )}
-
-            {/* Phase 15: Refining */}
-            <div className="mt-3 border-t border-zinc-800 pt-3">
-              <p className="mb-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Refine resources
-              </p>
-              <RefineForm />
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Ships */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-          Ships
-        </h2>
-        {resolvedShipList.length === 0 ? (
-          <EmptyState message="No ships found. Try refreshing or signing out and back in." />
-        ) : (
-          <div className="space-y-2">
-            {resolvedShipList.map((ship) => (
-              <ShipRow
-                key={ship.id}
-                ship={ship}
-                job={travelJobByShipId.get(ship.id) ?? null}
-                cargo={cargoByShipId.get(ship.id) ?? []}
-                stationSystemId={station?.current_system_id ?? null}
-                autoTargetSystemName={autoTargetNameByShipId.get(ship.id) ?? null}
-                upgradeSummary={upgradeByShipId.get(ship.id) ?? null}
-                stationIron={stationIronForUpgrades}
-              />
-            ))}
-          </div>
-        )}
-      </section>
 
       {/* Fleet Slots */}
       <section>
@@ -1985,6 +1926,31 @@ export default async function GameDashboard() {
             </div>
           )}
         </div>
+      </section>
+
+      {/* Ships — secondary to station/fleet context */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+          Ships
+        </h2>
+        {resolvedShipList.length === 0 ? (
+          <EmptyState message="No ships found. Try refreshing or signing out and back in." />
+        ) : (
+          <div className="space-y-2">
+            {resolvedShipList.map((ship) => (
+              <ShipRow
+                key={ship.id}
+                ship={ship}
+                job={travelJobByShipId.get(ship.id) ?? null}
+                cargo={cargoByShipId.get(ship.id) ?? []}
+                stationSystemId={station?.current_system_id ?? null}
+                autoTargetSystemName={autoTargetNameByShipId.get(ship.id) ?? null}
+                upgradeSummary={upgradeByShipId.get(ship.id) ?? null}
+                stationIron={stationIronForUpgrades}
+              />
+            ))}
+          </div>
+        )}
       </section>
 
       {/* Colonies */}
@@ -2201,22 +2167,19 @@ function ShipRow({
               {totalUpgrades}/{maxTotal} used · T{tier}
             </p>
           </div>
+          {/* Active stats (cargo + engine) */}
           <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {SHIP_STAT_KEYS.map((stat) => {
+            {(["cargo", "engine"] as const).map((stat) => {
               const s = upgradeSummary.stats[stat];
               const canAfford = stationIron >= s.ironCost;
               const showButton = s.canUpgrade;
               const buttonAffordable = showButton && canAfford;
 
-              // Effective value label for wired stats
-              let valueLabel = "";
-              if (stat === "cargo") {
-                valueLabel = ` · cap ${upgradeSummary.effectiveCargoCap}`;
-              } else if (stat === "engine") {
-                valueLabel = ` · ${upgradeSummary.effectiveSpeed} ly/hr`;
-              }
+              const valueLabel =
+                stat === "cargo"
+                  ? ` · cap ${upgradeSummary.effectiveCargoCap}`
+                  : ` · ${upgradeSummary.effectiveSpeed} ly/hr`;
 
-              // Reason for locked
               let lockedReason = "";
               if (s.isAtStatCap && s.researchCap < 10) {
                 lockedReason = `Research cap (${s.researchCap})`;
@@ -2236,26 +2199,64 @@ function ShipRow({
                   <span className="shrink-0">
                     {showButton ? (
                       buttonAffordable ? (
-                        <UpgradeButton
-                          shipId={ship.id}
-                          stat={stat}
-                          ironCost={s.ironCost}
-                        />
+                        <UpgradeButton shipId={ship.id} stat={stat} ironCost={s.ironCost} />
                       ) : (
                         <span className="text-xs text-zinc-700" title={`Need ${s.ironCost} iron`}>
                           ↑ {s.ironCost}⛏
                         </span>
                       )
-                    ) : (
-                      lockedReason ? (
-                        <span className="text-xs text-zinc-700">{lockedReason}</span>
-                      ) : null
-                    )}
+                    ) : lockedReason ? (
+                      <span className="text-xs text-zinc-700">{lockedReason}</span>
+                    ) : null}
                   </span>
                 </div>
               );
             })}
           </div>
+
+          {/* Combat / utility stats — upgradeable but not yet active in gameplay */}
+          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
+            {(["hull", "shield", "turret", "utility"] as const).map((stat) => {
+              const s = upgradeSummary.stats[stat];
+              const canAfford = stationIron >= s.ironCost;
+              const showButton = s.canUpgrade;
+              const buttonAffordable = showButton && canAfford;
+
+              let lockedReason = "";
+              if (s.isAtStatCap && s.researchCap < 10) {
+                lockedReason = `Research cap (${s.researchCap})`;
+              } else if (s.isAtStatCap) {
+                lockedReason = "Max";
+              } else if (s.isAtTotalCap) {
+                lockedReason = "Ship at limit";
+              }
+
+              return (
+                <div key={stat} className="flex items-center justify-between gap-1 min-w-0">
+                  <span className="text-xs text-zinc-600 shrink-0">
+                    {SHIP_STAT_LABELS[stat]}{" "}
+                    <span className="font-mono text-zinc-500">Lv {s.currentLevel ?? 0}</span>
+                  </span>
+                  <span className="shrink-0">
+                    {showButton ? (
+                      buttonAffordable ? (
+                        <UpgradeButton shipId={ship.id} stat={stat} ironCost={s.ironCost} />
+                      ) : (
+                        <span className="text-xs text-zinc-700" title={`Need ${s.ironCost} iron`}>
+                          ↑ {s.ironCost}⛏
+                        </span>
+                      )
+                    ) : lockedReason ? (
+                      <span className="text-xs text-zinc-700">{lockedReason}</span>
+                    ) : null}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-1 text-xs text-zinc-800">
+            Hull · Shield · Turret · Utility — combat stats, not active yet
+          </p>
           {stationIron > 0 && (
             <p className="mt-1.5 text-xs text-zinc-700">
               Station iron: <span className="font-mono text-zinc-500">{stationIron.toLocaleString()}</span>

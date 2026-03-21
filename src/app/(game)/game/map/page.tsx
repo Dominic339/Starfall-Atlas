@@ -18,7 +18,8 @@ import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { getAllCatalogEntries } from "@/lib/catalog";
+import { getAllCatalogEntries, getCatalogEntry } from "@/lib/catalog";
+import { generateSystem } from "@/lib/game/generation";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
@@ -96,6 +97,8 @@ export default async function GalaxyMapPage() {
     stewardshipsRes,
     asteroidsRes,
     myHarvestsRes,
+    stationRes,
+    firstDiscoveriesRes,
   ] = await Promise.all([
     // Ships — need id, current_system_id, name, speed
     admin
@@ -148,6 +151,19 @@ export default async function GalaxyMapPage() {
       .select("id, asteroid_id, fleet_id, harvest_power_per_hr, status, started_at, last_resolved_at")
       .eq("player_id", player.id)
       .eq("status", "active"),
+
+    // Player station — for station location display
+    admin
+      .from("player_stations")
+      .select("current_system_id")
+      .eq("owner_id", player.id)
+      .maybeSingle(),
+
+    // First discoverers per system (is_first = true) — for panel display
+    admin
+      .from("system_discoveries")
+      .select("system_id, player_id")
+      .eq("is_first", true),
   ]);
 
   // ── Parse results ─────────────────────────────────────────────────────────
@@ -169,14 +185,35 @@ export default async function GalaxyMapPage() {
     started_at: string; last_resolved_at: string;
   };
 
-  const ships         = listResult<ShipRow>(shipsRes).data ?? [];
-  const colonies      = listResult<ColonyRow>(coloniesRes).data ?? [];
-  const discoveries   = listResult<DiscoveryRow>(discoveriesRes).data ?? [];
-  const fleets        = listResult<FleetRow>(fleetsRes).data ?? [];
-  const travelJobs    = listResult<TravelRow>(travelJobsRes).data ?? [];
-  const stewardships  = listResult<StewardRow>(stewardshipsRes).data ?? [];
-  const asteroidRows  = listResult<AsteroidRow>(asteroidsRes).data ?? [];
-  const myHarvests    = listResult<HarvestRow>(myHarvestsRes).data ?? [];
+  type FirstDiscoveryRow = { system_id: string; player_id: string };
+
+  const ships              = listResult<ShipRow>(shipsRes).data ?? [];
+  const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
+  const discoveries        = listResult<DiscoveryRow>(discoveriesRes).data ?? [];
+  const fleets             = listResult<FleetRow>(fleetsRes).data ?? [];
+  const travelJobs         = listResult<TravelRow>(travelJobsRes).data ?? [];
+  const stewardships       = listResult<StewardRow>(stewardshipsRes).data ?? [];
+  const asteroidRows       = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  const myHarvests         = listResult<HarvestRow>(myHarvestsRes).data ?? [];
+  const firstDiscoveries   = listResult<FirstDiscoveryRow>(firstDiscoveriesRes).data ?? [];
+  const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
+
+  // Fetch discoverer handles for first-discovery systems (so panel can show names)
+  const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
+  type HandleRow = { id: string; handle: string };
+  const discovererHandles = new Map<string, string>();
+  if (firstDiscovererIds.length > 0) {
+    const { data: handleRows } = listResult<HandleRow>(
+      await admin.from("players").select("id, handle").in("id", firstDiscovererIds),
+    );
+    for (const h of handleRows ?? []) discovererHandles.set(h.id, h.handle);
+  }
+  // Map: systemId → discoverer handle (null if not first-discovered yet)
+  const firstDiscovererBySystem = new Map<string, string>();
+  for (const d of firstDiscoveries) {
+    const handle = discovererHandles.get(d.player_id);
+    if (handle) firstDiscovererBySystem.set(d.system_id, handle);
+  }
 
   // ── Lazy resolve asteroids that have active harvests ──────────────────────
   // Find which active asteroids have ANY active harvest (not just this player's)
@@ -217,6 +254,12 @@ export default async function GalaxyMapPage() {
   const dockedShip = ships.find((s) => s.current_system_id != null) ?? null;
   const currentShipSystemId = dockedShip?.current_system_id ?? null;
 
+  // ── Station coordinates for distance-from-station computation ─────────────
+  const stationCatalogEntry = stationSystemId ? getCatalogEntry(stationSystemId) : null;
+  const stationCoords = stationCatalogEntry
+    ? { x: stationCatalogEntry.x, y: stationCatalogEntry.y, z: stationCatalogEntry.z }
+    : null;
+
   // ── Build GalaxySystem array from catalog ─────────────────────────────────
   const catalogEntries = getAllCatalogEntries();
   const projected = projectCatalog([...catalogEntries]);
@@ -227,24 +270,31 @@ export default async function GalaxyMapPage() {
     catalogEntries.map((entry, i) => [entry.id, { svgX: projected[i].svgX, svgY: projected[i].svgY }]),
   );
 
-  const systems: GalaxySystem[] = catalogEntries.map((entry, i) => ({
-    id: entry.id,
-    name: entry.properName ?? entry.id,
-    spectralClass: entry.spectralClass,
-    x: entry.x,
-    y: entry.y,
-    z: entry.z,
-    distanceFromSol: Math.sqrt(entry.x ** 2 + entry.y ** 2 + entry.z ** 2),
-    svgX: projected[i].svgX,
-    svgY: projected[i].svgY,
-    isDiscovered: discoveredSystemIds.has(entry.id),
-    isPlayerSteward: stewardMap.get(entry.id) === player.id,
-    colonyCount: colonySystemIds.get(entry.id) ?? 0,
-    hasDockedShip: shipSystemIds.has(entry.id),
-    hasDockedFleet: fleetSystemIds.has(entry.id),
-    isCurrentLocation: entry.id === currentShipSystemId,
-    isInTransitTarget: inTransitTargets.has(entry.id),
-  }));
+  const systems: GalaxySystem[] = catalogEntries.map((entry, i) => {
+    // Compute body count deterministically (fast, no DB)
+    const generated = generateSystem(entry.id, entry);
+    return {
+      id: entry.id,
+      name: entry.properName ?? entry.id,
+      spectralClass: entry.spectralClass,
+      x: entry.x,
+      y: entry.y,
+      z: entry.z,
+      distanceFromSol: Math.sqrt(entry.x ** 2 + entry.y ** 2 + entry.z ** 2),
+      svgX: projected[i].svgX,
+      svgY: projected[i].svgY,
+      isDiscovered: discoveredSystemIds.has(entry.id),
+      isPlayerSteward: stewardMap.get(entry.id) === player.id,
+      discovererHandle: firstDiscovererBySystem.get(entry.id) ?? null,
+      colonyCount: colonySystemIds.get(entry.id) ?? 0,
+      bodyCount: generated.bodyCount,
+      hasDockedShip: shipSystemIds.has(entry.id),
+      hasDockedFleet: fleetSystemIds.has(entry.id),
+      isCurrentLocation: entry.id === currentShipSystemId,
+      isStationLocation: entry.id === stationSystemId,
+      isInTransitTarget: inTransitTargets.has(entry.id),
+    };
+  });
 
   // ── Build ship list for client ────────────────────────────────────────────
   const galaxyShips: GalaxyShip[] = ships.map((s) => ({
@@ -322,6 +372,7 @@ export default async function GalaxyMapPage() {
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}
         viewboxH={VIEWBOX_H}
+        stationCoords={stationCoords}
       />
     </div>
   );
