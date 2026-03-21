@@ -94,12 +94,30 @@ export interface GalaxyBeacon {
   allianceName: string;
 }
 
+/**
+ * Pre-computed territory data for one alliance.
+ * SVG-space coordinates are computed server-side and passed directly to avoid
+ * duplicate projection logic in the client component.
+ */
+export interface GalaxyTerritory {
+  allianceId: string;
+  allianceTag: string;
+  allianceName: string;
+  /** SVG-space polygon vertices for the territory fill. Empty = no valid territory. */
+  svgPolygon: { x: number; y: number }[];
+  /** Catalog system IDs whose centers lie inside the territory polygon. */
+  systemIds: string[];
+  /** SVG-space link lines between connected beacon systems. */
+  links: { x1: number; y1: number; x2: number; y2: number }[];
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
   fleets: GalaxyFleet[];
   asteroids: GalaxyAsteroid[];
   beacons: GalaxyBeacon[];
+  territories: GalaxyTerritory[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -183,6 +201,23 @@ function diamondPoints(cx: number, cy: number, r: number): string {
   return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`;
 }
 
+/**
+ * Deterministic hue (0–359) derived from an alliance tag string.
+ * Different alliances get visually distinct territory colors.
+ */
+function allianceHue(tag: string): number {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) {
+    h = (tag.charCodeAt(i) + ((h << 5) - h)) | 0;
+  }
+  return Math.abs(h) % 360;
+}
+
+/** HSL color string for territory fill/stroke from an alliance tag. */
+function allianceColor(tag: string): string {
+  return `hsl(${allianceHue(tag)}, 65%, 60%)`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -193,6 +228,7 @@ export function GalaxyMapClient({
   fleets,
   asteroids,
   beacons,
+  territories,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -269,6 +305,11 @@ export function GalaxyMapClient({
   }
   // Beacons in the selected system
   const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
+
+  // Territories that contain the selected system
+  const territoriesInSelected = selectedSystem
+    ? territories.filter((t) => t.systemIds.includes(selectedSystem.id))
+    : [];
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -543,6 +584,48 @@ export function GalaxyMapClient({
 
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
+
+            {/* ── Alliance territory polygons (rendered first — under everything) ── */}
+            {territories.map((t) => {
+              if (t.svgPolygon.length < 3) return null;
+              const color = allianceColor(t.allianceTag);
+              const pts = t.svgPolygon.map((p) => `${p.x},${p.y}`).join(" ");
+              return (
+                <polygon
+                  key={t.allianceId}
+                  points={pts}
+                  fill={color}
+                  fillOpacity={0.08}
+                  stroke={color}
+                  strokeOpacity={0.30}
+                  strokeWidth={1.5 / scale}
+                  strokeDasharray={`${5 / scale} ${3 / scale}`}
+                  pointerEvents="none"
+                />
+              );
+            })}
+
+            {/* ── Alliance beacon link lines (under system nodes, above territory fill) ── */}
+            {territories.flatMap((t) =>
+              t.links.map((lnk, i) => {
+                const color = allianceColor(t.allianceTag);
+                return (
+                  <line
+                    key={`${t.allianceId}-link-${i}`}
+                    x1={lnk.x1}
+                    y1={lnk.y1}
+                    x2={lnk.x2}
+                    y2={lnk.y2}
+                    stroke={color}
+                    strokeOpacity={0.35}
+                    strokeWidth={1 / scale}
+                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    pointerEvents="none"
+                  />
+                );
+              }),
+            )}
+
             {/* ── Travel range circle ─────────────────────────────────────── */}
             {currentSystem && (
               <circle
@@ -899,6 +982,10 @@ export function GalaxyMapClient({
             <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
             Beacon
           </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />
+            Territory
+          </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
             Travel range
@@ -1193,6 +1280,38 @@ export function GalaxyMapClient({
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Alliance territory */}
+              {territoriesInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Territory</span>
+                    <span className="text-xs" style={{ color: allianceColor(territoriesInSelected[0].allianceTag) }}>
+                      {territoriesInSelected.length === 1
+                        ? territoriesInSelected[0].allianceName
+                        : `${territoriesInSelected.length} alliances`}
+                    </span>
+                  </div>
+                  {territoriesInSelected.length > 1 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {territoriesInSelected.map((t) => (
+                        <span
+                          key={t.allianceId}
+                          title={t.allianceName}
+                          className="font-mono text-xs px-1.5 py-0.5 rounded border"
+                          style={{
+                            color: allianceColor(t.allianceTag),
+                            borderColor: allianceColor(t.allianceTag) + "40",
+                            background: allianceColor(t.allianceTag) + "15",
+                          }}
+                        >
+                          [{t.allianceTag}]
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

@@ -24,7 +24,8 @@ import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory } from "./_components/GalaxyMapClient";
+import { computeAllTerritories } from "@/lib/game/territory";
 
 export const dynamic = "force-dynamic";
 
@@ -369,6 +370,54 @@ export default async function GalaxyMapPage() {
       };
     });
 
+  // ── Compute alliance territories ──────────────────────────────────────────
+  // Build catalog lookup: systemId → { x, y }
+  const catalogBySystem = new Map(
+    catalogEntries.map((e) => [e.id, { x: e.x, y: e.y }]),
+  );
+  // All catalog systems as 2D points for PIP classification
+  const allCatalogSystems = catalogEntries.map((e) => ({
+    systemId: e.id,
+    x: e.x,
+    y: e.y,
+  }));
+
+  const territoryResults = computeAllTerritories({
+    beacons: rawBeaconRows.map((b) => ({
+      id: b.id,
+      allianceId: b.alliance_id,
+      systemId: b.system_id,
+    })),
+    alliances: allianceTagMap,
+    catalogBySystem,
+    allSystems: allCatalogSystems,
+    maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
+  });
+
+  // Convert territory results to SVG-space GalaxyTerritory objects
+  const galaxyTerritories: GalaxyTerritory[] = territoryResults.map((t) => ({
+    allianceId: t.allianceId,
+    allianceTag: t.allianceTag,
+    allianceName: t.allianceName,
+    // Convert hull catalog positions → SVG coords
+    svgPolygon: t.hullCatalog.map((p) => {
+      const pos = systemSvgMap.get(p.systemId);
+      return { x: pos?.svgX ?? 0, y: pos?.svgY ?? 0 };
+    }),
+    systemIds: t.systemsInTerritory,
+    // Convert links to SVG line endpoints
+    links: t.links.map((lnk) => {
+      const from = systemSvgMap.get(lnk.fromSystemId);
+      const to   = systemSvgMap.get(lnk.toSystemId);
+      return {
+        x1: from?.svgX ?? 0,
+        y1: from?.svgY ?? 0,
+        x2: to?.svgX ?? 0,
+        y2: to?.svgY ?? 0,
+      };
+    }),
+  }));
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* Header */}
@@ -406,6 +455,7 @@ export default async function GalaxyMapPage() {
         fleets={galaxyFleets}
         asteroids={galaxyAsteroids}
         beacons={galaxyBeacons}
+        territories={galaxyTerritories}
         pixelsPerLy={pixelsPerLy}
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}

@@ -558,6 +558,18 @@ export const BALANCE = {
     beaconPlaceCostIron: 50,
 
     /**
+     * Maximum 2D catalog-space distance (light-years, ignoring z) for two
+     * beacons to be considered "linked".  Also the maximum allowed length of
+     * any convex-hull edge — hull edges longer than this invalidate the
+     * territory polygon even if the hull has ≥ 3 vertices.
+     *
+     * At 10 ly the following alpha-catalog triangles are achievable:
+     *   Sol + Wolf 359 + Lalande 21185  (edges ≈ 7.72, 6.73, 1.02 ly)
+     *   Sol + Barnard's Star + Ross 154 (edges ≈ 5.95, 8.85, 3.32 ly)
+     */
+    beaconLinkMaxDistanceLy: 10,
+
+    /**
      * Maximum number of simultaneously active beacons an alliance may hold.
      * Prevents beacon spam; intended as a soft territory cap for alpha.
      */

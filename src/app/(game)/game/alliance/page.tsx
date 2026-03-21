@@ -17,6 +17,8 @@ import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getAllCatalogEntries } from "@/lib/catalog";
+import { BALANCE } from "@/lib/config/balance";
+import { computeAllTerritories } from "@/lib/game/territory";
 import type { Player } from "@/lib/types/game";
 import type { AllianceRole } from "@/lib/types/enums";
 import { AlliancePanel } from "./_components/AlliancePanel";
@@ -155,6 +157,35 @@ export default async function AlliancePage() {
     name: e.properName ?? e.id,
   }));
 
+  // ── Compute territory for this alliance (if any) ──────────────────────────
+  let hasValidTerritory = false;
+  let territorySystems: string[] = [];
+  let linkCount = 0;
+
+  if (membership && beacons.length > 0 && allianceData) {
+    const catalogBySystem = new Map(catalog.map((e) => [e.id, { x: e.x, y: e.y }]));
+    const allSystems      = catalog.map((e) => ({ systemId: e.id, x: e.x, y: e.y }));
+
+    const territoryResults = computeAllTerritories({
+      beacons: beacons.map((b) => ({
+        id: b.id,
+        allianceId: membership.alliance_id,
+        systemId: b.systemId,
+      })),
+      alliances: new Map([[membership.alliance_id, { name: allianceData.name, tag: allianceData.tag }]]),
+      catalogBySystem,
+      allSystems,
+      maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
+    });
+
+    const result = territoryResults[0];
+    if (result) {
+      hasValidTerritory = result.hasValidTerritory;
+      territorySystems  = result.systemsInTerritory;
+      linkCount         = result.links.length;
+    }
+  }
+
   return (
     <div className="max-w-2xl space-y-6">
       {/* Header */}
@@ -187,6 +218,15 @@ export default async function AlliancePage() {
         activeBeaconCount={activeBeaconCount}
         catalogSystems={catalogSystems}
         playerId={player.id}
+        territory={{
+          hasValidTerritory,
+          systemCount: territorySystems.length,
+          systemNames: territorySystems.map((id) => {
+            const entry = catalog.find((e) => e.id === id);
+            return entry?.properName ?? id;
+          }),
+          linkCount,
+        }}
       />
     </div>
   );
