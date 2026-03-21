@@ -629,6 +629,44 @@ export interface PlayerResearch {
 }
 
 // ---------------------------------------------------------------------------
+// Asteroid events (Phase 20)
+// ---------------------------------------------------------------------------
+
+/** A shared, persistent asteroid resource node visible on the galaxy map. */
+export interface AsteroidNode {
+  id: string;
+  /** Alpha-catalog system id this asteroid is associated with (backend region). */
+  system_id: string;
+  /** SVG-space pixel offset from the associated system's star node (for display). */
+  display_offset_x: number;
+  display_offset_y: number;
+  resource_type: string;
+  total_amount: number;
+  remaining_amount: number;
+  status: "active" | "depleted" | "expired";
+  /** Last time remaining_amount was lazily reconciled from active harvests. */
+  last_resolved_at: string;
+  spawned_at: string;
+  expires_at: string | null;
+}
+
+/**
+ * Tracks a fleet dispatched to harvest an asteroid node.
+ * harvest_power_per_hr is frozen at dispatch time for deterministic lazy resolution.
+ */
+export interface AsteroidHarvest {
+  id: string;
+  asteroid_id: string;
+  fleet_id: string;
+  player_id: string;
+  /** Units per hour this fleet contributes, computed from ship turret levels at dispatch. */
+  harvest_power_per_hr: number;
+  status: "active" | "completed" | "cancelled";
+  started_at: string;
+  last_resolved_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------
 

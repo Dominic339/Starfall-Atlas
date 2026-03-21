@@ -506,6 +506,42 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Asteroid events and shared harvest nodes (Phase 20)
+  // -------------------------------------------------------------------------
+  asteroids: {
+    /**
+     * Base units harvested per hour when the fleet has 0 turret levels.
+     * Ensures every fleet contributes something even before upgrades.
+     */
+    baseHarvestUnitsPerHr: 2,
+
+    /**
+     * Additional units per hour per point of total turret_level across
+     * all ships in the dispatched fleet.
+     * Example: a fleet with 3 ships each at turret_level 2 = 6 total → 30 u/hr bonus.
+     */
+    harvestUnitsPerHrPerTurretLevel: 5,
+
+    /**
+     * Maximum hours of harvest accumulation that can be resolved in a single
+     * page-load pass. Prevents enormous single-session catch-up yields.
+     */
+    maxHarvestAccumulationHours: 24,
+
+    /**
+     * Starting total_amount (units) seeded per resource type.
+     * Also used for any future asteroid spawning logic.
+     */
+    initialAmountByResource: {
+      iron:         500,
+      carbon:       400,
+      silica:       350,
+      sulfur:       300,
+      rare_crystal: 150,
+    } as Record<string, number>,
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {
