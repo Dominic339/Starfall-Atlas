@@ -1660,6 +1660,12 @@ export default async function GameDashboard() {
           >
             Research →
           </Link>
+          <Link
+            href="/game/alliance"
+            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
+          >
+            Alliance →
+          </Link>
         </div>
       </div>
 

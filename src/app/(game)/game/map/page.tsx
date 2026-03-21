@@ -24,7 +24,7 @@ import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon } from "./_components/GalaxyMapClient";
 
 export const dynamic = "force-dynamic";
 
@@ -99,6 +99,7 @@ export default async function GalaxyMapPage() {
     myHarvestsRes,
     stationRes,
     firstDiscoveriesRes,
+    beaconsRes,
   ] = await Promise.all([
     // Ships — need id, current_system_id, name, speed
     admin
@@ -164,6 +165,12 @@ export default async function GalaxyMapPage() {
       .from("system_discoveries")
       .select("system_id, player_id")
       .eq("is_first", true),
+
+    // Active alliance beacons (world-visible — all alliances)
+    admin
+      .from("alliance_beacons")
+      .select("id, alliance_id, system_id")
+      .eq("is_active", true),
   ]);
 
   // ── Parse results ─────────────────────────────────────────────────────────
@@ -186,6 +193,7 @@ export default async function GalaxyMapPage() {
   };
 
   type FirstDiscoveryRow = { system_id: string; player_id: string };
+  type RawBeaconRow = { id: string; alliance_id: string; system_id: string };
 
   const ships              = listResult<ShipRow>(shipsRes).data ?? [];
   const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
@@ -196,6 +204,7 @@ export default async function GalaxyMapPage() {
   const asteroidRows       = listResult<AsteroidRow>(asteroidsRes).data ?? [];
   const myHarvests         = listResult<HarvestRow>(myHarvestsRes).data ?? [];
   const firstDiscoveries   = listResult<FirstDiscoveryRow>(firstDiscoveriesRes).data ?? [];
+  const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];
   const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
 
   // Fetch discoverer handles for first-discovery systems (so panel can show names)
@@ -213,6 +222,17 @@ export default async function GalaxyMapPage() {
   for (const d of firstDiscoveries) {
     const handle = discovererHandles.get(d.player_id);
     if (handle) firstDiscovererBySystem.set(d.system_id, handle);
+  }
+
+  // ── Resolve beacon alliance tags ──────────────────────────────────────────
+  const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
+  type AllianceTagRow = { id: string; name: string; tag: string };
+  const allianceTagMap = new Map<string, { name: string; tag: string }>();
+  if (beaconAllianceIds.length > 0) {
+    const { data: allianceTagRows } = listResult<AllianceTagRow>(
+      await admin.from("alliances").select("id, name, tag").in("id", beaconAllianceIds),
+    );
+    for (const a of allianceTagRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
   }
 
   // ── Lazy resolve asteroids that have active harvests ──────────────────────
@@ -335,6 +355,20 @@ export default async function GalaxyMapPage() {
       };
     });
 
+  // ── Build beacon list for client ──────────────────────────────────────────
+  const galaxyBeacons: GalaxyBeacon[] = rawBeaconRows
+    .filter((b) => allianceTagMap.has(b.alliance_id))
+    .map((b) => {
+      const alliance = allianceTagMap.get(b.alliance_id)!;
+      return {
+        id: b.id,
+        systemId: b.system_id,
+        allianceId: b.alliance_id,
+        allianceTag: alliance.tag,
+        allianceName: alliance.name,
+      };
+    });
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* Header */}
@@ -354,6 +388,9 @@ export default async function GalaxyMapPage() {
           {galaxyAsteroids.length > 0 && (
             <> · {galaxyAsteroids.length} {galaxyAsteroids.length === 1 ? "asteroid" : "asteroids"}</>
           )}
+          {galaxyBeacons.length > 0 && (
+            <> · {galaxyBeacons.length} {galaxyBeacons.length === 1 ? "beacon" : "beacons"}</>
+          )}
         </span>
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-600">
           <Link href="/game/routes" className="hover:text-zinc-400 transition-colors">
@@ -368,6 +405,7 @@ export default async function GalaxyMapPage() {
         ships={galaxyShips}
         fleets={galaxyFleets}
         asteroids={galaxyAsteroids}
+        beacons={galaxyBeacons}
         pixelsPerLy={pixelsPerLy}
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}

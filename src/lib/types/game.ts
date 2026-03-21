@@ -554,8 +554,12 @@ export interface AuctionBid {
 export interface Alliance {
   id: AllianceId;
   name: string;
+  /** Short display tag (2–5 chars) shown on map beacons. */
+  tag: string;
   founder_id: PlayerId;
   member_count: number;
+  /** Short random token used for alpha direct-join flow. */
+  invite_code: string;
   emblem_entitlement_id: string | null;
   dissolved_at: string | null;
   created_at: string;
@@ -567,9 +571,20 @@ export interface AllianceMember {
   alliance_id: AllianceId;
   player_id: PlayerId;
   role: AllianceRole;
-  alliance_credits: number;
   joined_at: string;
   updated_at: string;
+}
+
+/** A beacon placed by an alliance officer/founder on a catalog system. */
+export interface AllianceBeacon {
+  id: string;
+  alliance_id: AllianceId;
+  /** Alpha-catalog system id. */
+  system_id: string;
+  placed_by: PlayerId;
+  is_active: boolean;
+  placed_at: string;
+  removed_at: string | null;
 }
 
 export interface AllianceGoal {

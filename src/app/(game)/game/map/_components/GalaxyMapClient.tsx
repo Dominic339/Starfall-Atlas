@@ -85,11 +85,21 @@ export interface GalaxyAsteroid {
   myHarvestId: string | null;
 }
 
+/** One alliance beacon visible on the galaxy map. */
+export interface GalaxyBeacon {
+  id: string;
+  systemId: string;
+  allianceId: string;
+  allianceTag: string;
+  allianceName: string;
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
   fleets: GalaxyFleet[];
   asteroids: GalaxyAsteroid[];
+  beacons: GalaxyBeacon[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -182,6 +192,7 @@ export function GalaxyMapClient({
   ships,
   fleets,
   asteroids,
+  beacons,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -248,6 +259,16 @@ export function GalaxyMapClient({
   const asteroidCountInSelected = selectedSystem
     ? asteroids.filter((a) => a.systemId === selectedSystem.id).length
     : 0;
+
+  // Beacons grouped by system (for SVG markers)
+  const beaconsBySystem = new Map<string, GalaxyBeacon[]>();
+  for (const b of beacons) {
+    const list = beaconsBySystem.get(b.systemId) ?? [];
+    list.push(b);
+    beaconsBySystem.set(b.systemId, list);
+  }
+  // Beacons in the selected system
+  const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -788,6 +809,42 @@ export function GalaxyMapClient({
                 </g>
               );
             })}
+
+            {/* ── Alliance beacons ─────────────────────────────────────────── */}
+            {systems.map((sys) => {
+              const sysBeacons = beaconsBySystem.get(sys.id);
+              if (!sysBeacons || sysBeacons.length === 0) return null;
+              const r = sys.spectralClass === "O" || sys.spectralClass === "B" ? 8
+                : sys.spectralClass === "G" || sys.spectralClass === "K" ? 7
+                : 6;
+              // Show a small flag/diamond in top-left, one per alliance (stacked)
+              return sysBeacons.map((b, i) => (
+                <g key={b.id} pointerEvents="none">
+                  <rect
+                    x={sys.svgX - r - 9 - i * 5}
+                    y={sys.svgY - r - 9}
+                    width={7}
+                    height={7}
+                    rx={1}
+                    fill="#6366f1"
+                    opacity={0.85}
+                  />
+                  {(transform.scale >= 2.5 || i === 0) && (
+                    <text
+                      x={sys.svgX - r - 5 - i * 5}
+                      y={sys.svgY - r - 12}
+                      textAnchor="middle"
+                      fontSize={8 / scale < 6 ? 6 : 8 / scale > 10 ? 10 : 8 / scale}
+                      fill="#818cf8"
+                      opacity={0.9}
+                      className="select-none"
+                    >
+                      {b.allianceTag}
+                    </text>
+                  )}
+                </g>
+              ));
+            })}
           </g>
         </svg>
 
@@ -837,6 +894,10 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
             Asteroid
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
+            Beacon
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
@@ -1109,6 +1170,29 @@ export function GalaxyMapClient({
                   <span className="text-xs text-yellow-400">
                     {asteroidCountInSelected} active
                   </span>
+                </div>
+              )}
+
+              {/* Alliance beacons */}
+              {beaconsInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Beacons</span>
+                    <span className="text-xs text-indigo-400">
+                      {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {beaconsInSelected.map((b) => (
+                      <span
+                        key={b.id}
+                        title={b.allianceName}
+                        className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
+                      >
+                        [{b.allianceTag}]
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>

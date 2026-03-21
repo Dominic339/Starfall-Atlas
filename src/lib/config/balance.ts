@@ -542,6 +542,29 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Alliances and beacons (Phase 23)
+  // -------------------------------------------------------------------------
+  alliance: {
+    /**
+     * Iron cost (deducted from station inventory) to found a new alliance.
+     * Represents a meaningful commitment while remaining achievable early-game.
+     */
+    createCostIron: 100,
+
+    /**
+     * Iron cost (deducted from station inventory) to place a single beacon
+     * on a catalog system. Officer or founder only.
+     */
+    beaconPlaceCostIron: 50,
+
+    /**
+     * Maximum number of simultaneously active beacons an alliance may hold.
+     * Prevents beacon spam; intended as a soft territory cap for alpha.
+     */
+    maxActiveBeacons: 20,
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {
