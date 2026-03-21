@@ -1643,6 +1643,12 @@ export default async function GameDashboard() {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <Link
+            href="/game/map"
+            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
+          >
+            Galaxy Map →
+          </Link>
+          <Link
             href="/game/routes"
             className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
           >
