@@ -94,6 +94,18 @@ export interface GalaxyBeacon {
   allianceName: string;
 }
 
+/** An active beacon dispute visible on the galaxy map. */
+export interface GalaxyDispute {
+  id: string;
+  beaconId: string;
+  beaconSystemId: string;
+  defendingAllianceId: string;
+  defendingAllianceTag: string;
+  attackingAllianceId: string;
+  attackingAllianceTag: string;
+  resolvesAt: string;
+}
+
 /**
  * Pre-computed territory data for one alliance.
  * SVG-space coordinates are computed server-side and passed directly to avoid
@@ -118,6 +130,7 @@ interface GalaxyMapClientProps {
   asteroids: GalaxyAsteroid[];
   beacons: GalaxyBeacon[];
   territories: GalaxyTerritory[];
+  disputes: GalaxyDispute[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -229,6 +242,7 @@ export function GalaxyMapClient({
   asteroids,
   beacons,
   territories,
+  disputes,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -310,6 +324,15 @@ export function GalaxyMapClient({
   const territoriesInSelected = selectedSystem
     ? territories.filter((t) => t.systemIds.includes(selectedSystem.id))
     : [];
+
+  // Disputes indexed by beacon system id
+  const disputesBySystem = new Map<string, GalaxyDispute[]>();
+  for (const d of disputes) {
+    const list = disputesBySystem.get(d.beaconSystemId) ?? [];
+    list.push(d);
+    disputesBySystem.set(d.beaconSystemId, list);
+  }
+  const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -928,6 +951,49 @@ export function GalaxyMapClient({
                 </g>
               ));
             })}
+
+            {/* ── Active dispute markers ───────────────────────────────────── */}
+            {systems.map((sys) => {
+              const sysDisputes = disputesBySystem.get(sys.id);
+              if (!sysDisputes || sysDisputes.length === 0) return null;
+              const r = sys.spectralClass === "O" || sys.spectralClass === "B" ? 8
+                : sys.spectralClass === "G" || sys.spectralClass === "K" ? 7
+                : 6;
+              return (
+                <g key={`dispute-${sys.id}`} pointerEvents="none">
+                  {/* Pulsing orange ring around disputed systems */}
+                  <circle
+                    cx={sys.svgX}
+                    cy={sys.svgY}
+                    r={r + 10}
+                    fill="none"
+                    stroke="#f97316"
+                    strokeWidth={1.5 / scale}
+                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    opacity={0.7}
+                  />
+                  {/* Exclamation badge */}
+                  <circle
+                    cx={sys.svgX + r + 4}
+                    cy={sys.svgY + r + 4}
+                    r={4}
+                    fill="#f97316"
+                    opacity={0.9}
+                  />
+                  <text
+                    x={sys.svgX + r + 4}
+                    y={sys.svgY + r + 7.5}
+                    textAnchor="middle"
+                    fontSize={6}
+                    fill="#1c0a00"
+                    fontWeight="bold"
+                    className="select-none"
+                  >
+                    !
+                  </text>
+                </g>
+              );
+            })}
           </g>
         </svg>
 
@@ -985,6 +1051,10 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />
             Territory
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />
+            Disputed
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
@@ -1279,6 +1349,38 @@ export function GalaxyMapClient({
                         [{b.allianceTag}]
                       </span>
                     ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Active disputes */}
+              {disputesInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Disputes</span>
+                    <span className="text-xs text-orange-400">
+                      {disputesInSelected.length} active
+                    </span>
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {disputesInSelected.map((d) => {
+                      const now = Date.now();
+                      const msleft = new Date(d.resolvesAt).getTime() - now;
+                      const hleft = Math.max(0, msleft / (1000 * 60 * 60));
+                      const timeStr = hleft < 1
+                        ? `${Math.ceil(hleft * 60)} min`
+                        : `${hleft.toFixed(1)} hr`;
+                      return (
+                        <div key={d.id} className="rounded border border-orange-900/50 bg-orange-950/30 px-2 py-1.5 text-xs">
+                          <div className="flex items-center gap-1 text-orange-300">
+                            <span className="font-mono">[{d.defendingAllianceTag}]</span>
+                            <span className="text-orange-600">vs</span>
+                            <span className="font-mono">[{d.attackingAllianceTag}]</span>
+                          </div>
+                          <div className="mt-0.5 text-orange-600">Resolves in ~{timeStr}</div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

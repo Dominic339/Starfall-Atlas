@@ -19,6 +19,7 @@ import type {
   InventoryLocationType,
   StewardshipMethod,
   ShipDispatchMode,
+  DisputeStatus,
 } from "./enums";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ export type ColonyId = string & { readonly _brand: "ColonyId" };
 export type LaneId = string & { readonly _brand: "LaneId" };
 export type GateId = string & { readonly _brand: "GateId" };
 export type AllianceId = string & { readonly _brand: "AllianceId" };
+export type DisputeId = string & { readonly _brand: "DisputeId" };
 /** Catalog-derived system identifier (e.g. HYG id as string) */
 export type SystemId = string & { readonly _brand: "SystemId" };
 /** Catalog-derived body identifier: "{system_id}:{body_index}" */
@@ -367,6 +369,11 @@ export interface Fleet {
   status: FleetStatus;
   /** System where ships are staged. NULL while traveling. */
   current_system_id: SystemId | null;
+  /**
+   * Non-null when the fleet is committed to an active beacon dispute (Phase 25).
+   * Fleet cannot be dispatched while this is set.
+   */
+  dispute_commit_id: DisputeId | null;
   disbanded_at: string | null;
   created_at: string;
   updated_at: string;
@@ -693,6 +700,47 @@ export interface WorldEvent {
   body_id: BodyId | null;
   metadata: Record<string, unknown>;
   occurred_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Disputes (Phase 25)
+// ---------------------------------------------------------------------------
+
+/** A beacon dispute challenge between two alliances. */
+export interface Dispute {
+  id: DisputeId;
+  beacon_id: string;
+  defending_alliance_id: AllianceId;
+  attacking_alliance_id: AllianceId;
+  status: DisputeStatus;
+  opened_at: string;
+  resolves_at: string;
+  resolved_at: string | null;
+  winner_alliance_id: AllianceId | null;
+  created_at: string;
+}
+
+/** A fleet commitment to a dispute (reinforcement). */
+export interface DisputeReinforcement {
+  id: string;
+  dispute_id: DisputeId;
+  alliance_id: AllianceId;
+  fleet_id: string;
+  player_id: PlayerId;
+  /** Combat score frozen at commit time. */
+  score_snapshot: number;
+  committed_at: string;
+  /** False once the dispute resolves and the fleet is unlocked. */
+  is_active: boolean;
+}
+
+/** Post-resolution cooldown preventing a beacon from being disputed again. */
+export interface BeaconCooldown {
+  id: string;
+  beacon_id: string;
+  dispute_id: DisputeId;
+  expires_at: string;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

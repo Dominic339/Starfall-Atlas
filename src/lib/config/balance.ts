@@ -577,6 +577,41 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
+  // Beacon disputes (Phase 25)
+  // -------------------------------------------------------------------------
+  disputes: {
+    /**
+     * Duration of the dispute window in hours.
+     * After this window expires, the side with the highest score wins.
+     */
+    windowHours: 8,
+
+    /**
+     * Cooldown applied to a disputed beacon (and nearby linked beacons) after
+     * a dispute resolves. During cooldown, the beacon cannot be challenged again.
+     */
+    cooldownHours: 48,
+
+    /**
+     * Maximum number of beacon-link hops from the disputed beacon to include
+     * in the post-resolution cooldown sweep.
+     * 1 = direct neighbors only.
+     */
+    cooldownNeighborhoodLinks: 1,
+
+    /**
+     * Score weights applied per ship when computing a fleet's dispute score.
+     * All weights must be non-negative integers.
+     * Score per ship = turret_level × turretWeight + hull_level × hullWeight + shield_level × shieldWeight.
+     */
+    scoreWeights: {
+      turret: 3,
+      hull:   1,
+      shield: 1,
+    },
+  },
+
+  // -------------------------------------------------------------------------
   // Core player station (GAME_RULES.md §21)
   // -------------------------------------------------------------------------
   station: {

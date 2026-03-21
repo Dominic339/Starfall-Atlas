@@ -153,6 +153,9 @@ export type InventoryLocationType =
 /** How stewardship was most recently acquired. */
 export type StewardshipMethod = "discovery" | "transfer" | "auction";
 
+/** Dispute lifecycle state (Phase 25). */
+export type DisputeStatus = "open" | "resolved" | "expired";
+
 /**
  * Ship dispatch mode — controls how a ship is assigned tasks.
  *

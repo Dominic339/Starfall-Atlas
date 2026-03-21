@@ -19,6 +19,7 @@ import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getAllCatalogEntries } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import { computeAllTerritories } from "@/lib/game/territory";
+import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import type { Player } from "@/lib/types/game";
 import type { AllianceRole } from "@/lib/types/enums";
 import { AlliancePanel } from "./_components/AlliancePanel";
@@ -38,6 +39,9 @@ export default async function AlliancePage() {
     await admin.from("players").select("id, handle").eq("auth_id", user.id).maybeSingle(),
   );
   if (!player) redirect("/login");
+
+  // ── Lazy dispute resolution ───────────────────────────────────────────────
+  await resolveOverdueDisputes(admin);
 
   // ── Fetch membership ──────────────────────────────────────────────────────
   type MembershipRow = { id: string; alliance_id: string; role: AllianceRole };
@@ -150,6 +154,78 @@ export default async function AlliancePage() {
     }));
   }
 
+  // ── Fetch disputes involving this alliance ────────────────────────────────
+  type DisputePanelRow = {
+    id: string;
+    beacon_id: string;
+    defending_alliance_id: string;
+    attacking_alliance_id: string;
+    status: string;
+    opened_at: string;
+    resolves_at: string;
+    resolved_at: string | null;
+    winner_alliance_id: string | null;
+  };
+  type DisputePanelEntry = {
+    id: string;
+    beaconId: string;
+    beaconSystemId: string;
+    beaconSystemName: string;
+    defendingAllianceId: string;
+    attackingAllianceId: string;
+    status: string;
+    openedAt: string;
+    resolvesAt: string;
+    resolvedAt: string | null;
+    winnerAllianceId: string | null;
+    isDefender: boolean;
+  };
+
+  let allianceDisputes: DisputePanelEntry[] = [];
+
+  if (membership) {
+    const { data: rawDisputes } = listResult<DisputePanelRow>(
+      await admin
+        .from("disputes")
+        .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, status, opened_at, resolves_at, resolved_at, winner_alliance_id")
+        .or(`defending_alliance_id.eq.${membership.alliance_id},attacking_alliance_id.eq.${membership.alliance_id}`)
+        .order("opened_at", { ascending: false })
+        .limit(20),
+    );
+
+    // Build a map of beacon_id → {system_id} for enrichment
+    const disputeBeaconIds = [...new Set((rawDisputes ?? []).map((d) => d.beacon_id))];
+    type BeaconSysRow = { id: string; system_id: string };
+    const beaconSysMap = new Map<string, string>();
+    if (disputeBeaconIds.length > 0) {
+      const { data: bRows } = listResult<BeaconSysRow>(
+        await admin.from("alliance_beacons").select("id, system_id").in("id", disputeBeaconIds),
+      );
+      for (const b of bRows ?? []) beaconSysMap.set(b.id, b.system_id);
+    }
+
+    const catalogLocal = getAllCatalogEntries();
+    const sysNameMapLocal = new Map(catalogLocal.map((e) => [e.id, e.properName ?? e.id]));
+
+    allianceDisputes = (rawDisputes ?? []).map((d) => {
+      const sysId = beaconSysMap.get(d.beacon_id) ?? "";
+      return {
+        id:                  d.id,
+        beaconId:            d.beacon_id,
+        beaconSystemId:      sysId,
+        beaconSystemName:    sysNameMapLocal.get(sysId) ?? sysId,
+        defendingAllianceId: d.defending_alliance_id,
+        attackingAllianceId: d.attacking_alliance_id,
+        status:              d.status,
+        openedAt:            d.opened_at,
+        resolvesAt:          d.resolves_at,
+        resolvedAt:          d.resolved_at,
+        winnerAllianceId:    d.winner_alliance_id,
+        isDefender:          d.defending_alliance_id === membership.alliance_id,
+      };
+    });
+  }
+
   // ── Catalog systems for beacon placement selector ─────────────────────────
   const catalog = getAllCatalogEntries();
   const catalogSystems = catalog.map((e) => ({
@@ -227,6 +303,7 @@ export default async function AlliancePage() {
           }),
           linkCount,
         }}
+        disputes={allianceDisputes}
       />
     </div>
   );
