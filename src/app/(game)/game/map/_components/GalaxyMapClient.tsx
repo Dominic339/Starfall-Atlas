@@ -468,8 +468,7 @@ export function GalaxyMapClient({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          shipId: dockedShip.id,
-          toSystemId: selectedSystem.id,
+          destinationSystemId: selectedSystem.id,
         }),
       });
       const json = await res.json();

@@ -56,6 +56,13 @@ export interface Player {
   last_active_at: string;
   created_at: string;
   updated_at: string;
+  // Phase 26 profile fields (nullable, added via migration 00029)
+  title: string | null;
+  bio: string | null;
+  banner_id: string | null;
+  logo_id: string | null;
+  /** Set when the player requests account deletion (soft delete). */
+  deactivated_at: string | null;
 }
 
 export interface Ship {

@@ -15,6 +15,7 @@
  * The navigation bar shows the player's handle and a sign-out button.
  */
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
 import { bootstrapPlayer } from "@/lib/actions/bootstrap";
@@ -36,6 +37,11 @@ export default async function GameLayout({
   // row immediately after the first call.
   const player = await bootstrapPlayer(user);
 
+  // Deactivated accounts land on a dedicated page instead of the game.
+  if (player.deactivated_at) {
+    redirect("/deactivated");
+  }
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Navigation bar */}
@@ -45,9 +51,12 @@ export default async function GameLayout({
             Starfall Atlas
           </span>
           <div className="flex items-center gap-5">
-            <span className="font-mono text-sm text-zinc-400">
+            <Link
+              href="/game/profile"
+              className="font-mono text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
               {player.handle}
-            </span>
+            </Link>
             <form action={signOut}>
               <button
                 type="submit"

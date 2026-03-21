@@ -234,6 +234,50 @@ export default async function SystemPage({
     (systemColonies ?? []).map((c) => [c.body_id, c]),
   );
 
+  // ── Phase 26: Fetch owner handles for other players' active colonies ───────
+  const otherOwnerIds = [
+    ...new Set(
+      (systemColonies ?? [])
+        .filter((c) => c.owner_id !== player.id && c.status !== "collapsed")
+        .map((c) => c.owner_id),
+    ),
+  ];
+  const colonyOwnerHandles = new Map<string, string>();
+  if (otherOwnerIds.length > 0) {
+    const { data: ownerRows } = listResult<{ id: string; handle: string }>(
+      await admin
+        .from("players")
+        .select("id, handle")
+        .in("id", otherOwnerIds),
+    );
+    for (const row of ownerRows ?? []) {
+      colonyOwnerHandles.set(row.id, row.handle);
+    }
+  }
+
+  // ── Phase 26: Fetch first discoverer info for this system ─────────────────
+  let firstDiscovererHandle: string | null = null;
+  if (!isSol && !myDiscovery?.is_first) {
+    const { data: firstDisc } = maybeSingleResult<{ player_id: string }>(
+      await admin
+        .from("system_discoveries")
+        .select("player_id")
+        .eq("system_id", systemId)
+        .eq("is_first", true)
+        .maybeSingle(),
+    );
+    if (firstDisc) {
+      const { data: discPlayer } = maybeSingleResult<{ handle: string }>(
+        await admin
+          .from("players")
+          .select("handle")
+          .eq("id", firstDisc.player_id)
+          .maybeSingle(),
+      );
+      firstDiscovererHandle = discPlayer?.handle ?? null;
+    }
+  }
+
   // ── Phase 7: Colony inventory for player's colonies in this system ─────────
   // Used to display load actions when a ship is present.
   const myColonyIds = (systemColonies ?? [])
@@ -451,11 +495,25 @@ export default async function SystemPage({
               <p className="mt-0.5 text-xs text-zinc-600">
                 {new Date(myDiscovery.discovered_at).toLocaleDateString()}
               </p>
+              {!myDiscovery.is_first && firstDiscovererHandle && (
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  First discovered by{" "}
+                  <span className="text-zinc-400">{firstDiscovererHandle}</span>
+                </p>
+              )}
             </div>
           ) : (
-            <p className="mt-1 text-sm text-zinc-400">
-              Not yet discovered by you
-            </p>
+            <div>
+              <p className="mt-1 text-sm text-zinc-400">
+                Not yet discovered by you
+              </p>
+              {firstDiscovererHandle && (
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  First discovered by{" "}
+                  <span className="text-zinc-400">{firstDiscovererHandle}</span>
+                </p>
+              )}
+            </div>
           )}
         </div>
 
@@ -656,9 +714,12 @@ export default async function SystemPage({
                         Your colony · Tier {colony.population_tier}
                       </span>
                     )}
-                    {bodyIsOccupied && !myColonyHere && (
+                    {bodyIsOccupied && !myColonyHere && colony && (
                       <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-400">
                         Occupied
+                        {colonyOwnerHandles.get(colony.owner_id) && (
+                          <> · {colonyOwnerHandles.get(colony.owner_id)}</>
+                        )}
                       </span>
                     )}
                   </div>
