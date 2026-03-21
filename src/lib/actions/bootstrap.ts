@@ -130,14 +130,15 @@ async function reconcileStarterAssets(
   admin: any,
   playerId: string,
 ): Promise<void> {
-  // Check for existing ships
-  const { data: existingShips } = await admin
+  // Check for existing ships (ships table has no status column — filter by owner only)
+  const { data: existingShips, error: shipsError } = await admin
     .from("ships")
     .select("id")
-    .eq("owner_id", playerId)
-    .eq("status", "active");
+    .eq("owner_id", playerId);
 
-  if (!existingShips || existingShips.length === 0) {
+  // Only create ships if the query succeeded AND returned no rows.
+  // If the query errored, skip creation to avoid unbounded duplication.
+  if (!shipsError && (!existingShips || existingShips.length === 0)) {
     // No ships — create starter ships
     await admin.from("ships").insert(
       STARTER_SHIPS.map((ship) => ({
@@ -151,14 +152,15 @@ async function reconcileStarterAssets(
     );
   }
 
-  // Check for existing station
-  const { data: existingStation } = await admin
+  // Check for existing station (use limit(1) to handle potential duplicate rows gracefully)
+  const { data: stationRows, error: stationError } = await admin
     .from("player_stations")
     .select("id")
     .eq("owner_id", playerId)
-    .maybeSingle();
+    .limit(1);
 
-  if (!existingStation) {
+  const hasStation = !stationError && stationRows && stationRows.length > 0;
+  if (!stationError && !hasStation) {
     // No station — create starter station
     await admin.from("player_stations").insert({
       owner_id: playerId,
