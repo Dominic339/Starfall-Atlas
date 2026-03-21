@@ -255,34 +255,58 @@ export async function POST(request: NextRequest) {
   const now = new Date();
   const growthAt = nextGrowthAt(1, now);
 
-  const { data: colony } = maybeSingleResult<Colony>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("colonies")
-      .insert({
-        owner_id: player.id,
-        system_id: systemId,
-        body_id: bodyId,
-        status: "active",
-        population_tier: 1,
-        next_growth_at: growthAt?.toISOString() ?? null,
-        last_tax_collected_at: now.toISOString(),
-        last_extract_at: now.toISOString(),
-        last_upkeep_at: now.toISOString(),
-        upkeep_missed_periods: 0,
-        storage_cap: BALANCE.colony.defaultStorageCap,
-      })
-      .select("*")
-      .maybeSingle(),
-  );
+  const colonyFields = {
+    owner_id: player.id,
+    system_id: systemId,
+    body_id: bodyId,
+    status: "active",
+    population_tier: 1,
+    next_growth_at: growthAt?.toISOString() ?? null,
+    last_tax_collected_at: now.toISOString(),
+    last_extract_at: now.toISOString(),
+    last_upkeep_at: now.toISOString(),
+    upkeep_missed_periods: 0,
+    storage_cap: BALANCE.colony.defaultStorageCap,
+  };
+
+  let colony: Colony | null = null;
+
+  if (existingColony?.status === "collapsed") {
+    // Reuse the collapsed row — UPDATE avoids a UNIQUE constraint violation on body_id.
+    const { data: updated } = maybeSingleResult<Colony>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from("colonies")
+        .update(colonyFields)
+        .eq("id", existingColony.id)
+        .select("*")
+        .maybeSingle(),
+    );
+    colony = updated ?? null;
+  } else {
+    const { data: inserted } = maybeSingleResult<Colony>(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (admin as any)
+        .from("colonies")
+        .insert(colonyFields)
+        .select("*")
+        .maybeSingle(),
+    );
+    if (!inserted) {
+      // UNIQUE conflict on body_id — a concurrent request won the race.
+      return toErrorResponse(
+        fail(
+          "already_exists",
+          "This body was just claimed by another player.",
+        ).error,
+      );
+    }
+    colony = inserted;
+  }
 
   if (!colony) {
-    // UNIQUE conflict on body_id — a concurrent request won the race.
     return toErrorResponse(
-      fail(
-        "already_exists",
-        "This body was just claimed by another player.",
-      ).error,
+      fail("already_exists", "This body was just claimed by another player.").error,
     );
   }
 

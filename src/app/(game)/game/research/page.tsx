@@ -136,7 +136,7 @@ export default async function ResearchPage() {
           </p>
         </div>
         <Link
-          href="/game"
+          href="/game/command"
           className="shrink-0 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
         >
           ← Command Centre

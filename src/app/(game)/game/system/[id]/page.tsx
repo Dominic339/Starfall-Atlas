@@ -385,7 +385,7 @@ export default async function SystemPage({
     <div className="space-y-6">
       {/* Breadcrumb */}
       <nav className="text-xs text-zinc-600">
-        <Link href="/game" className="hover:text-zinc-400">
+        <Link href="/game/command" className="hover:text-zinc-400">
           Command Centre
         </Link>
         {" › "}
@@ -673,9 +673,13 @@ export default async function SystemPage({
                           key={node.type}
                           className="text-xs text-zinc-500"
                         >
-                          {node.type}{" "}
+                          {node.is_rare ? (
+                            <span className="text-amber-500">{node.type}</span>
+                          ) : (
+                            node.type
+                          )}{" "}
                           <span className="text-zinc-600">
-                            ×{node.quantity.toLocaleString()}
+                            {node.quantity > 1 ? `${node.quantity} nodes` : "1 node"}
                           </span>
                         </span>
                       ),
