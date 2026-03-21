@@ -1,16 +1,21 @@
 /**
- * Colony upkeep helpers — Phase 9.
+ * Colony upkeep helpers — Phase 9 (reworked Phase 16).
  *
  * Pure functions only (no DB access). The resolution loop lives in the
  * dashboard page component, similar to growth and ship-automation resolution.
  *
- * Upkeep cycle (every BALANCE.upkeep.periodHours hours):
- *   - Draw `ironPerTierPerPeriod × population_tier` iron from station inventory.
- *   - If iron available: upkeep_missed_periods decrements by 1 (min 0).
- *   - If iron unavailable: upkeep_missed_periods increments by 1.
- *   - Every `tierLossMissedPeriods` consecutive misses: tier − 1, counter resets.
+ * Phase 16 upkeep model:
+ *   ALL colonies consume food each period (population sustain resource).
+ *   Harsh colonies (volcanic, toxic) also consume iron for dome maintenance.
  *
- * Health status derived from upkeep_missed_periods:
+ * Period resolution:
+ *   1. Compute food required: foodPerTierPerPeriod × tier × (1 − reductionFraction)
+ *   2. For harsh colonies, compute iron required: ironPerTierPerPeriod × tier × (1 − reductionFraction)
+ *   3. Consume what is available (partial consumption does NOT count as paid)
+ *   4. Period is "paid" only if ALL required resources were fully supplied
+ *   5. Health / tier degradation tracks consecutive missed periods as before
+ *
+ * Health status derived from upkeep_missed_periods (same thresholds as before):
  *   0           → "well_supplied"
  *   1–2         → "struggling"
  *   3+          → "neglected"
@@ -27,8 +32,9 @@ import type { Colony } from "@/lib/types/game";
 export type ColonyHealthStatus = "well_supplied" | "struggling" | "neglected";
 
 export interface UpkeepPeriodResult {
+  foodConsumed: number;
   ironConsumed: number;
-  /** true = iron was available and consumed; false = missed (no iron). */
+  /** true = all required resources available and consumed. */
   paid: boolean;
   /** New upkeep_missed_periods after this period. */
   missedPeriods: number;
@@ -45,10 +51,40 @@ export interface UpkeepPeriodResult {
 // ---------------------------------------------------------------------------
 
 /**
- * How many iron units the colony needs for one upkeep period.
+ * Food units required per period for all colonies (before reduction).
+ */
+export function upkeepFoodRequired(tier: number): number {
+  return BALANCE.upkeep.foodPerTierPerPeriod * tier;
+}
+
+/**
+ * Iron units required per period for harsh colonies (before reduction).
+ * Returns 0 for non-harsh colonies.
  */
 export function upkeepIronRequired(tier: number): number {
   return BALANCE.upkeep.ironPerTierPerPeriod * tier;
+}
+
+/**
+ * Effective food cost after applying habitat_module / sustainability research reduction.
+ */
+export function effectiveUpkeepFoodRequired(
+  tier: number,
+  reductionFraction: number,
+): number {
+  const base = upkeepFoodRequired(tier);
+  return Math.max(0, Math.ceil(base * (1 - reductionFraction)));
+}
+
+/**
+ * Effective iron cost after reduction (harsh colonies only).
+ */
+export function effectiveUpkeepIronRequired(
+  tier: number,
+  reductionFraction: number,
+): number {
+  const base = upkeepIronRequired(tier);
+  return Math.max(0, Math.ceil(base * (1 - reductionFraction)));
 }
 
 /**
@@ -110,21 +146,33 @@ export function upkeepPeriodsToResolve(
 /**
  * Apply one upkeep period to a colony.
  *
- * @param tier            current population_tier
- * @param missedPeriods   current upkeep_missed_periods
- * @param ironAvailable   iron units in station inventory (may be partial/0)
- * @param periodEndAt     timestamp to use as the new last_upkeep_at
- * @returns UpkeepPeriodResult with updated fields and iron consumed
+ * @param tier              current population_tier
+ * @param missedPeriods     current upkeep_missed_periods
+ * @param foodAvailable     food units available at station
+ * @param ironAvailable     iron units available at station (harsh colonies only)
+ * @param isHarshColony     true for volcanic/toxic — requires iron dome maintenance
+ * @param periodEndAt       timestamp to use as the new last_upkeep_at
+ * @param reductionFraction fraction of upkeep saved by structures/research (0–1)
  */
 export function applyUpkeepPeriod(
   tier: number,
   missedPeriods: number,
+  foodAvailable: number,
   ironAvailable: number,
+  isHarshColony: boolean,
   periodEndAt: Date,
+  reductionFraction = 0,
 ): UpkeepPeriodResult {
-  const required = upkeepIronRequired(tier);
-  const paid = ironAvailable >= required;
-  const ironConsumed = paid ? required : 0;
+  const foodRequired = effectiveUpkeepFoodRequired(tier, reductionFraction);
+  const ironRequired = isHarshColony ? effectiveUpkeepIronRequired(tier, reductionFraction) : 0;
+
+  const foodPaid = foodAvailable >= foodRequired;
+  const ironPaid = !isHarshColony || ironAvailable >= ironRequired;
+  const paid = foodPaid && ironPaid;
+
+  // Consume what is available (up to required), regardless of whether period is paid.
+  const foodConsumed = Math.min(foodAvailable, foodRequired);
+  const ironConsumed = isHarshColony ? Math.min(ironAvailable, ironRequired) : 0;
 
   let newMissed: number;
   let newTier = tier;
@@ -147,22 +195,38 @@ export function applyUpkeepPeriod(
     }
   }
 
-  return { ironConsumed, paid, missedPeriods: newMissed, tierLost, newTier, newNextGrowthAt };
+  return {
+    foodConsumed,
+    ironConsumed,
+    paid,
+    missedPeriods: newMissed,
+    tierLost,
+    newTier,
+    newNextGrowthAt,
+  };
 }
 
 /**
- * Resolve all overdue upkeep periods for a colony, given the current iron
- * balance available at the station. Processes periods sequentially —
- * iron drawn from each period reduces what is available for the next.
+ * Resolve all overdue upkeep periods for a colony.
  *
- * Returns the DB fields to update and the total iron consumed.
+ * @param colony               - Colony snapshot
+ * @param periodsToResolve     - Number of periods to process
+ * @param foodAvailableAtStart - Station food at start of resolution
+ * @param ironAvailableAtStart - Station iron at start (for harsh colonies)
+ * @param isHarshColony        - True for volcanic/toxic (dome maintenance required)
+ * @param periodEndAt          - Timestamp for last_upkeep_at update
+ * @param reductionFraction    - Fraction of upkeep saved (0–1, default 0)
  */
 export function resolveColonyUpkeep(
   colony: Pick<Colony, "population_tier" | "upkeep_missed_periods" | "last_upkeep_at" | "next_growth_at">,
   periodsToResolve: number,
+  foodAvailableAtStart: number,
   ironAvailableAtStart: number,
+  isHarshColony: boolean,
   periodEndAt: Date,
+  reductionFraction = 0,
 ): {
+  foodConsumed: number;
   ironConsumed: number;
   newTier: number;
   newMissedPeriods: number;
@@ -170,16 +234,28 @@ export function resolveColonyUpkeep(
   newNextGrowthAt: string | null;
   tierLostCount: number;
 } {
+  let foodRemaining = foodAvailableAtStart;
   let ironRemaining = ironAvailableAtStart;
   let tier = colony.population_tier;
   let missed = colony.upkeep_missed_periods;
   let nextGrowth = colony.next_growth_at;
+  let totalFoodConsumed = 0;
   let totalIronConsumed = 0;
   let tierLostCount = 0;
 
   for (let i = 0; i < periodsToResolve; i++) {
-    const result = applyUpkeepPeriod(tier, missed, ironRemaining, periodEndAt);
+    const result = applyUpkeepPeriod(
+      tier,
+      missed,
+      foodRemaining,
+      ironRemaining,
+      isHarshColony,
+      periodEndAt,
+      reductionFraction,
+    );
+    totalFoodConsumed += result.foodConsumed;
     totalIronConsumed += result.ironConsumed;
+    foodRemaining -= result.foodConsumed;
     ironRemaining -= result.ironConsumed;
     missed = result.missedPeriods;
     if (result.tierLost) {
@@ -190,6 +266,7 @@ export function resolveColonyUpkeep(
   }
 
   return {
+    foodConsumed: totalFoodConsumed,
     ironConsumed: totalIronConsumed,
     newTier: tier,
     newMissedPeriods: missed,
@@ -197,4 +274,24 @@ export function resolveColonyUpkeep(
     newNextGrowthAt: nextGrowth ?? null,
     tierLostCount,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Upkeep description helpers (for UI)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return a human-readable description of what a colony needs each period.
+ */
+export function upkeepDescription(
+  tier: number,
+  isHarshColony: boolean,
+  reductionFraction: number,
+): string {
+  const food = effectiveUpkeepFoodRequired(tier, reductionFraction);
+  if (!isHarshColony) {
+    return `${food} food / period`;
+  }
+  const iron = effectiveUpkeepIronRequired(tier, reductionFraction);
+  return `${food} food + ${iron} iron / period (dome maintenance)`;
 }

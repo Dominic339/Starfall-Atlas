@@ -263,7 +263,23 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     ],
   ),
 
-  // ── Category 4: Colony & Station Technology (scaffold) ───────────────────
+  // ── Category 4: Colony & Station Technology ──────────────────────────────
+
+  // Phase 16: unlock volcanic/toxic colonization + iron dome maintenance.
+  {
+    id: "harsh_colony_environment",
+    name: "Harsh Colony Environment",
+    description:
+      "Pressurized habitat domes, thermal-regulation systems, and chemical " +
+      "shielding allow colonization of volcanic and toxic worlds. " +
+      "Required before founding colonies on these planet types. " +
+      "Harsh colonies consume additional iron each period for dome maintenance.",
+    category: "colony_tech",
+    cost: [{ resource_type: "iron", quantity: 80 }],
+    requires: ["sustainability_1"],
+    milestones: [{ type: "min_active_colonies", count: 1 }],
+  },
+
   ...buildSequentialDefs(
     "colony_tech",
     "Extraction",

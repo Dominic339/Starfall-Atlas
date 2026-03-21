@@ -17,6 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, getNearbySystems, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
+import { isHarshPlanetType } from "@/lib/game/habitability";
 import { distanceBetween } from "@/lib/game/travel";
 import { BALANCE } from "@/lib/config/balance";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
@@ -38,6 +39,9 @@ import {
   FoundColonyButton,
   LoadButton,
 } from "./_components/SystemActions";
+import { CreateRouteForm, DeleteRouteButton } from "./_components/RouteControls";
+import { TransportPanel } from "./_components/TransportControls";
+import type { ColonyRoute, ColonyTransport } from "@/lib/types/game";
 
 export const dynamic = "force-dynamic";
 
@@ -83,6 +87,17 @@ export default async function SystemPage({
   );
 
   if (!player) redirect("/login");
+
+  // Phase 16: fetch player research to check harsh colony gating.
+  const { data: researchData } = listResult<{ research_id: string }>(
+    await admin
+      .from("player_research")
+      .select("research_id")
+      .eq("player_id", player.id),
+  );
+  const hasHarshColonyResearch = (researchData ?? []).some(
+    (r) => r.research_id === "harsh_colony_environment",
+  );
 
   // Fetch all ships — players start with 2 (Phase 5.5).
   const { data: shipsData } = listResult<Ship>(
@@ -251,6 +266,103 @@ export default async function SystemPage({
 
   // Ship present here for load actions (first docked ship in system)
   const loadingShip = shipList.find((s) => s.current_system_id === systemId) ?? null;
+
+  // ── Phase 15: supply routes and transports for this system's colonies ──────
+  // Fetch all player's active colonies (for route destination selector).
+  type AllColonyRow = { id: string; body_id: string; system_id: string };
+  const { data: allPlayerColonies } = listResult<AllColonyRow>(
+    await admin
+      .from("colonies")
+      .select("id, body_id, system_id")
+      .eq("owner_id", player.id)
+      .eq("status", "active"),
+  );
+  const allActiveColonies = allPlayerColonies ?? [];
+
+  // Fetch existing routes for player's colonies in this system.
+  type RouteRow = Pick<ColonyRoute,
+    "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes"
+  >;
+  const colonyRoutesRows: RouteRow[] =
+    myColonyIds.length > 0
+      ? (listResult<RouteRow>(
+          await admin
+            .from("colony_routes")
+            .select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes")
+            .eq("player_id", player.id)
+            .or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`)
+            .order("from_colony_id"),
+        ).data ?? [])
+      : [];
+
+  // Fetch transports for player's colonies in this system.
+  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
+  const transportRows: TransportRow[] =
+    myColonyIds.length > 0
+      ? (listResult<TransportRow>(
+          await admin
+            .from("colony_transports")
+            .select("id, colony_id, tier")
+            .in("colony_id", myColonyIds),
+        ).data ?? [])
+      : [];
+
+  // Build lookup maps.
+  const routesByFromColonyId = new Map<string, RouteRow[]>();
+  const routesByToColonyId   = new Map<string, RouteRow[]>();
+  for (const r of colonyRoutesRows) {
+    const fl = routesByFromColonyId.get(r.from_colony_id) ?? [];
+    fl.push(r);
+    routesByFromColonyId.set(r.from_colony_id, fl);
+    const tl = routesByToColonyId.get(r.to_colony_id) ?? [];
+    tl.push(r);
+    routesByToColonyId.set(r.to_colony_id, tl);
+  }
+  const transportsByColonyId = new Map<string, TransportRow[]>();
+  for (const t of transportRows) {
+    const list = transportsByColonyId.get(t.colony_id) ?? [];
+    list.push(t);
+    transportsByColonyId.set(t.colony_id, list);
+  }
+
+  // ── Phase 18: station inventory (for transport purchase/upgrade affordability) ──
+  const { data: stationRow } = maybeSingleResult<{ id: string }>(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (admin as any)
+      .from("player_stations")
+      .select("id")
+      .eq("owner_id", player.id)
+      .maybeSingle(),
+  );
+
+  type StationInvRow = { resource_type: string; quantity: number };
+  const stationInvRes = stationRow
+    ? await admin
+        .from("resource_inventory")
+        .select("resource_type, quantity")
+        .eq("location_type", "station")
+        .eq("location_id", stationRow.id)
+        .in("resource_type", ["iron", "carbon", "steel"])
+    : { data: [] as StationInvRow[], error: null };
+  const { data: stationInvRows } = listResult<StationInvRow>(stationInvRes);
+  const stationInvMap = new Map((stationInvRows ?? []).map((r) => [r.resource_type, r.quantity]));
+  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
+  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
+  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
+
+  // Build destination colony selector options (exclude current colony, already-routed ones per resource).
+  const colonyLabelById = new Map<string, string>(
+    allActiveColonies.map((c) => [
+      c.id,
+      `${systemDisplayName(c.system_id)} · Body ${c.body_id.slice(c.body_id.lastIndexOf(":") + 1)}`,
+    ]),
+  );
+
+  // All resources that could appear in colony inventory (for the form).
+  const ALL_RESOURCE_TYPES = [
+    "iron", "carbon", "ice", "silica", "water", "biomass", "sulfur", "rare_crystal",
+    "food", "steel", "glass",
+  ];
 
   // ── Conditions for per-body actions ──────────────────────────────────────
   // Player can act on bodies if ship is here AND system is accessible.
@@ -459,12 +571,19 @@ export default async function SystemPage({
             // Per-body action conditions
             const canSurveyThis =
               canActOnBodies && survey === null;
+
+            // Phase 16: harsh planets need research; others need habitability score.
+            const isHarshBody = isHarshPlanetType(body.type);
+            const harshGateMet = !isHarshBody || hasHarshColonyResearch;
+            const habitabilityGateMet = isHarshBody ? true : body.canHostColony;
+
             // Sol bodies can never be colonized (GAME_RULES.md §1.1).
             const canFoundColonyHere =
               canActOnBodies &&
               !isSol &&
               survey !== null &&
-              body.canHostColony &&
+              habitabilityGateMet &&
+              harshGateMet &&
               !bodyIsOccupied;
 
             return (
@@ -475,24 +594,52 @@ export default async function SystemPage({
                 {/* Body header row */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">
-                      {bodyLabel(body.type)}
-                      {body.index === system.anchorBodyIndex && (
-                        <span className="ml-2 text-xs text-zinc-500">
-                          (anchor)
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className={`text-sm font-medium ${
+                        isHarshBody
+                          ? "text-red-300"
+                          : body.type === "lush" || body.type === "ocean" || body.type === "habitable"
+                            ? "text-emerald-300"
+                            : "text-zinc-200"
+                      }`}>
+                        {bodyLabel(body.type)}
+                      </p>
+                      {isHarshBody && (
+                        <span className="rounded-full bg-red-950/60 px-1.5 py-0.5 text-xs text-red-400">
+                          Harsh
                         </span>
                       )}
-                    </p>
+                      {body.index === system.anchorBodyIndex && (
+                        <span className="text-xs text-zinc-500">(anchor)</span>
+                      )}
+                    </div>
                     <p className="text-xs capitalize text-zinc-600">
                       {body.size} · index {body.index}
                     </p>
+                    {/* Upkeep hint for harsh planets */}
+                    {isHarshBody && (
+                      <p className="mt-0.5 text-xs text-amber-700">
+                        Dome maintenance: food + iron per period
+                      </p>
+                    )}
                   </div>
 
                   {/* Right-side badges */}
                   <div className="flex shrink-0 flex-wrap justify-end gap-1.5">
-                    {body.canHostColony ? (
+                    {/* Colonization status badge */}
+                    {isHarshBody ? (
+                      hasHarshColonyResearch ? (
+                        <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">
+                          Research unlocked
+                        </span>
+                      ) : (
+                        <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-xs text-zinc-500">
+                          Needs research
+                        </span>
+                      )
+                    ) : body.canHostColony ? (
                       <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400">
-                        Habitable
+                        Colonizable
                       </span>
                     ) : (
                       <span className="text-xs text-zinc-700">
@@ -583,6 +730,72 @@ export default async function SystemPage({
                     </div>
                   );
                 })()}
+
+                {/* Supply routes (Phase 15) — shown for player's active colonies */}
+                {myColonyHere && colony && (
+                  <div className="mt-2 border-t border-zinc-800 pt-2">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <div className="flex items-center gap-2">
+                        <p className="text-xs font-medium uppercase tracking-wider text-zinc-600">
+                          Supply Routes
+                        </p>
+                        <Link
+                          href="/game/routes"
+                          className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
+                        >
+                          Map →
+                        </Link>
+                      </div>
+                    </div>
+
+                    {/* Phase 18: Transport summary + purchase/upgrade controls */}
+                    <div className="mb-2">
+                      <TransportPanel
+                        colonyId={colony.id}
+                        transports={transportsByColonyId.get(colony.id) ?? []}
+                        stationIron={stationIronForTransports}
+                        stationCarbon={stationCarbonForTransports}
+                        stationSteel={stationSteelForTransports}
+                      />
+                    </div>
+
+                    {/* Outgoing routes */}
+                    {(routesByFromColonyId.get(colony.id) ?? []).map((route) => (
+                      <div key={route.id} className="flex items-center justify-between gap-2 py-0.5">
+                        <span className="text-xs text-zinc-500">
+                          → {colonyLabelById.get(route.to_colony_id) ?? route.to_colony_id.slice(0, 8)}
+                          <span className="text-zinc-700 ml-1">
+                            {route.resource_type} · {route.mode}
+                            {route.mode === "fixed" ? ` ×${route.fixed_amount}` : ""}
+                            {" "}every {route.interval_minutes}m
+                          </span>
+                        </span>
+                        <DeleteRouteButton routeId={route.id} />
+                      </div>
+                    ))}
+
+                    {/* Incoming routes */}
+                    {(routesByToColonyId.get(colony.id) ?? []).map((route) => (
+                      <div key={route.id} className="py-0.5">
+                        <span className="text-xs text-zinc-700">
+                          ← {colonyLabelById.get(route.from_colony_id) ?? route.from_colony_id.slice(0, 8)}
+                          {" "}{route.resource_type} inbound
+                        </span>
+                      </div>
+                    ))}
+
+                    {/* Create new route */}
+                    <div className="mt-1.5">
+                      <CreateRouteForm
+                        fromColonyId={colony.id}
+                        destColonies={allActiveColonies
+                          .filter((c) => c.id !== colony.id)
+                          .map((c) => ({ id: c.id, label: colonyLabelById.get(c.id) ?? c.id }))}
+                        resourceTypes={ALL_RESOURCE_TYPES}
+                      />
+                    </div>
+                  </div>
+                )}
 
                 {/* Per-body actions */}
                 {(canSurveyThis || canFoundColonyHere) && (

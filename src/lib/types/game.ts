@@ -343,11 +343,75 @@ export interface TravelJob {
   from_system_id: SystemId;
   to_system_id: SystemId;
   lane_id: LaneId | null;
+  /** Non-null when the job was created by a fleet dispatch. */
+  fleet_id: string | null;
   depart_at: string;
   arrive_at: string;
   transit_tax_paid: number;
   status: JobStatus;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleets
+// ---------------------------------------------------------------------------
+
+export type FleetStatus = "active" | "traveling" | "disbanded";
+
+/** Fleet header row — a named, temporary grouping of co-located ships. */
+export interface Fleet {
+  id: string;
+  player_id: PlayerId;
+  name: string;
+  /** 'active' = staged at current_system_id. 'traveling' = ships in transit. 'disbanded' = dissolved. */
+  status: FleetStatus;
+  /** System where ships are staged. NULL while traveling. */
+  current_system_id: SystemId | null;
+  disbanded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Join row linking a ship to its current fleet. */
+export interface FleetShip {
+  fleet_id: string;
+  ship_id: ShipId;
+  joined_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleet slots (Phase 13)
+// ---------------------------------------------------------------------------
+
+export type FleetSlotMode = "manual" | "auto_collect_nearest" | "auto_collect_highest";
+export type FleetSlotAutoState = "idle" | "going_to_colony" | "going_to_station" | null;
+
+/**
+ * Persistent fleet-slot configuration.
+ * Each player starts with 2 slots (Fleet 1, Fleet 2), lazy-created on first
+ * dashboard load. Slots are the automation unit for fleet dispatch.
+ *
+ *   manual                 = player controls this slot's fleet directly.
+ *   auto_collect_nearest   = slot auto-forms a fleet and collects from the
+ *                            nearest colony that has inventory.
+ *   auto_collect_highest   = slot collects from the colony with the most
+ *                            accumulated resources.
+ */
+export interface FleetSlot {
+  id: string;
+  player_id: PlayerId;
+  slot_number: number;
+  /** Display name, e.g. "Fleet 1". */
+  name: string;
+  mode: FleetSlotMode;
+  /** Active fleet currently assigned to this slot. NULL when slot is idle. */
+  current_fleet_id: string | null;
+  /** Current step in the auto cycle. NULL when mode is manual or slot is idle. */
+  auto_state: FleetSlotAutoState;
+  /** Colony being targeted in the current auto cycle. */
+  auto_target_colony_id: ColonyId | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +425,43 @@ export interface ResourceInventoryRow {
   resource_type: string;
   quantity: number;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Colony supply routes (Phase 15)
+// ---------------------------------------------------------------------------
+
+export type ColonyRouteMode = "all" | "excess" | "fixed";
+
+/**
+ * Automated resource transfer route between two player-owned colonies.
+ * Resolved lazily on dashboard load.
+ */
+export interface ColonyRoute {
+  id: string;
+  player_id: PlayerId;
+  from_colony_id: ColonyId;
+  to_colony_id: ColonyId;
+  resource_type: string;
+  mode: ColonyRouteMode;
+  /** Only used when mode = 'fixed'. */
+  fixed_amount: number | null;
+  /** Minutes between each transfer attempt. */
+  interval_minutes: number;
+  /** Timestamp of last resolved period. Advances by interval per period. */
+  last_run_at: string;
+  created_at: string;
+}
+
+/**
+ * Transport unit stationed at a colony. At least one is required for
+ * outgoing supply routes to execute.
+ */
+export interface ColonyTransport {
+  id: string;
+  colony_id: ColonyId;
+  tier: number;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

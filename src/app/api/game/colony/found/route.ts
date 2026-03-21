@@ -35,6 +35,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
+import { isHarshPlanetType } from "@/lib/game/habitability";
 import { nextGrowthAt } from "@/lib/game/taxes";
 import { BALANCE } from "@/lib/config/balance";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
@@ -178,7 +179,34 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!generatedBody.canHostColony) {
+  // ── Phase 16: harsh planet colonization gate ─────────────────────────────
+  // Volcanic and toxic worlds require explicit research before founding.
+  // Even with research, they count as harsh colonies (iron dome maintenance).
+  const isHarsh = isHarshPlanetType(generatedBody.type);
+
+  if (isHarsh) {
+    // Check player has harsh_colony_environment research unlocked.
+    const { data: harshResearch } = maybeSingleResult<{ research_id: string }>(
+      await admin
+        .from("player_research")
+        .select("research_id")
+        .eq("player_id", player.id)
+        .eq("research_id", "harsh_colony_environment")
+        .maybeSingle(),
+    );
+
+    if (!harshResearch) {
+      return toErrorResponse(
+        fail(
+          "forbidden",
+          `This ${generatedBody.type} world requires 'Harsh Colony Environment' research to colonize. ` +
+            "Unlock it in the Research Lab first (requires Sustainability I + 1 active colony).",
+        ).error,
+      );
+    }
+    // Harsh worlds bypass the standard habitability score check.
+    // Their dome maintenance cost (iron) will apply each upkeep period.
+  } else if (!generatedBody.canHostColony) {
     return toErrorResponse(
       fail(
         "invalid_target",
