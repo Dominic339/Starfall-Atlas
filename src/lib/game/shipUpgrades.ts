@@ -43,12 +43,12 @@ export function shipTotalUpgrades(ship: Pick<Ship,
   "engine_level" | "turret_level" | "utility_level"
 >): number {
   return (
-    ship.hull_level +
-    ship.shield_level +
-    ship.cargo_level +
-    ship.engine_level +
-    ship.turret_level +
-    ship.utility_level
+    (ship.hull_level ?? 0) +
+    (ship.shield_level ?? 0) +
+    (ship.cargo_level ?? 0) +
+    (ship.engine_level ?? 0) +
+    (ship.turret_level ?? 0) +
+    (ship.utility_level ?? 0)
   );
 }
 
@@ -88,7 +88,7 @@ export function remainingUpgrades(
 export function effectiveCargoCap(cargoLevel: number): number {
   return (
     BALANCE.shipUpgrades.baseCargoCapacity +
-    cargoLevel * BALANCE.shipUpgrades.cargoCapPerLevel
+    (cargoLevel ?? 0) * BALANCE.shipUpgrades.cargoCapPerLevel
   );
 }
 
@@ -100,7 +100,7 @@ export function effectiveSpeed(engineLevel: number): number {
   return parseFloat(
     (
       BALANCE.shipUpgrades.baseSpeedLyPerHr +
-      engineLevel * BALANCE.shipUpgrades.speedPerLevel
+      (engineLevel ?? 0) * BALANCE.shipUpgrades.speedPerLevel
     ).toFixed(4),
   );
 }

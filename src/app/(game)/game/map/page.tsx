@@ -1,5 +1,5 @@
 /**
- * /game/map — 2D Galaxy Navigation Map (Phase 19)
+ * /game/map — 2D Galaxy Navigation Map (Phase 19 + Phase 20)
  *
  * Server component. Fetches all player-relevant state and passes it to
  * the client-side GalaxyMapClient for interactive SVG rendering.
@@ -10,6 +10,7 @@
  *   - Colony presence
  *   - Ship / fleet locations
  *   - Active travel target
+ *   - Asteroid event nodes (Phase 20)
  */
 
 import { redirect } from "next/navigation";
@@ -20,8 +21,9 @@ import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getAllCatalogEntries } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
+import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet } from "./_components/GalaxyMapClient";
 
 export const dynamic = "force-dynamic";
 
@@ -75,7 +77,8 @@ export default async function GalaxyMapPage() {
   const user = await getUser();
   if (!user) redirect("/login");
 
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   const { data: player } = maybeSingleResult<Player>(
@@ -84,63 +87,112 @@ export default async function GalaxyMapPage() {
   if (!player) redirect("/login");
 
   // ── Parallel data fetches ─────────────────────────────────────────────────
-  const [shipsRes, coloniesRes, discoveriesRes, fleetsRes, travelJobsRes, stewardshipsRes] =
-    await Promise.all([
-      // Ships — need id, current_system_id, name, speed
-      admin
-        .from("ships")
-        .select("id, name, current_system_id, speed_ly_per_hr")
-        .eq("owner_id", player.id)
-        .order("created_at", { ascending: true }),
+  const [
+    shipsRes,
+    coloniesRes,
+    discoveriesRes,
+    fleetsRes,
+    travelJobsRes,
+    stewardshipsRes,
+    asteroidsRes,
+    myHarvestsRes,
+  ] = await Promise.all([
+    // Ships — need id, current_system_id, name, speed
+    admin
+      .from("ships")
+      .select("id, name, current_system_id, speed_ly_per_hr")
+      .eq("owner_id", player.id)
+      .order("created_at", { ascending: true }),
 
-      // Active colonies — need system_id
-      admin
-        .from("colonies")
-        .select("system_id")
-        .eq("owner_id", player.id)
-        .eq("status", "active"),
+    // Active colonies — need system_id
+    admin
+      .from("colonies")
+      .select("system_id")
+      .eq("owner_id", player.id)
+      .eq("status", "active"),
 
-      // Player's system discoveries
-      admin
-        .from("system_discoveries")
-        .select("system_id")
-        .eq("player_id", player.id),
+    // Player's system discoveries
+    admin
+      .from("system_discoveries")
+      .select("system_id")
+      .eq("player_id", player.id),
 
-      // Non-disbanded fleets with location
-      admin
-        .from("fleets")
-        .select("id, current_system_id, status")
-        .eq("player_id", player.id)
-        .neq("status", "disbanded"),
+    // Non-disbanded fleets with location (include name and id for dispatch UI)
+    admin
+      .from("fleets")
+      .select("id, name, current_system_id, status")
+      .eq("player_id", player.id)
+      .neq("status", "disbanded"),
 
-      // Active travel jobs (in-transit target)
-      admin
-        .from("travel_jobs")
-        .select("ship_id, to_system_id")
-        .eq("player_id", player.id)
-        .eq("status", "pending"),
+    // Active travel jobs (in-transit target)
+    admin
+      .from("travel_jobs")
+      .select("ship_id, to_system_id")
+      .eq("player_id", player.id)
+      .eq("status", "pending"),
 
-      // All system stewardships (to show who owns each system)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (admin as any)
-        .from("system_stewardship")
-        .select("system_id, steward_id"),
-    ]);
+    // All system stewardships (to show who owns each system)
+    admin
+      .from("system_stewardship")
+      .select("system_id, steward_id"),
+
+    // Active asteroid nodes (world objects — all players see them)
+    admin
+      .from("asteroid_nodes")
+      .select("id, system_id, display_offset_x, display_offset_y, resource_type, total_amount, remaining_amount, status, last_resolved_at, spawned_at, expires_at")
+      .eq("status", "active"),
+
+    // Player's own active harvests (to show which asteroids they're harvesting)
+    admin
+      .from("asteroid_harvests")
+      .select("id, asteroid_id, fleet_id, harvest_power_per_hr, status, started_at, last_resolved_at")
+      .eq("player_id", player.id)
+      .eq("status", "active"),
+  ]);
 
   // ── Parse results ─────────────────────────────────────────────────────────
   type ShipRow = { id: string; name: string; current_system_id: string | null; speed_ly_per_hr: number };
   type ColonyRow = { system_id: string };
   type DiscoveryRow = { system_id: string };
-  type FleetRow = { id: string; current_system_id: string | null; status: string };
+  type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
   type TravelRow = { ship_id: string; to_system_id: string };
   type StewardRow = { system_id: string; steward_id: string };
+  type AsteroidRow = {
+    id: string; system_id: string;
+    display_offset_x: number; display_offset_y: number;
+    resource_type: string; total_amount: number; remaining_amount: number;
+    status: string; last_resolved_at: string; spawned_at: string; expires_at: string | null;
+  };
+  type HarvestRow = {
+    id: string; asteroid_id: string; fleet_id: string;
+    harvest_power_per_hr: number; status: string;
+    started_at: string; last_resolved_at: string;
+  };
 
-  const ships      = listResult<ShipRow>(shipsRes).data ?? [];
-  const colonies   = listResult<ColonyRow>(coloniesRes).data ?? [];
-  const discoveries = listResult<DiscoveryRow>(discoveriesRes).data ?? [];
-  const fleets     = listResult<FleetRow>(fleetsRes).data ?? [];
-  const travelJobs = listResult<TravelRow>(travelJobsRes).data ?? [];
-  const stewardships = listResult<StewardRow>(stewardshipsRes).data ?? [];
+  const ships         = listResult<ShipRow>(shipsRes).data ?? [];
+  const colonies      = listResult<ColonyRow>(coloniesRes).data ?? [];
+  const discoveries   = listResult<DiscoveryRow>(discoveriesRes).data ?? [];
+  const fleets        = listResult<FleetRow>(fleetsRes).data ?? [];
+  const travelJobs    = listResult<TravelRow>(travelJobsRes).data ?? [];
+  const stewardships  = listResult<StewardRow>(stewardshipsRes).data ?? [];
+  const asteroidRows  = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  const myHarvests    = listResult<HarvestRow>(myHarvestsRes).data ?? [];
+
+  // ── Lazy resolve asteroids that have active harvests ──────────────────────
+  // Find which active asteroids have ANY active harvest (not just this player's)
+  // We only resolve if there are active harvests to process.
+  const activeAsteroidIds = new Set(asteroidRows.map((a) => a.id));
+  const asteroidsBeingHarvested = new Set(myHarvests.map((h) => h.asteroid_id));
+
+  // Resolve all asteroids that have active harvests from this player.
+  // This ensures the map shows up-to-date remaining_amount.
+  const resolvedAmounts = new Map<string, number>();
+  for (const asteroidId of asteroidsBeingHarvested) {
+    if (activeAsteroidIds.has(asteroidId)) {
+      const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
+      resolvedAmounts.set(asteroidId, newRemaining);
+    }
+  }
 
   // ── Build lookup sets ─────────────────────────────────────────────────────
   const discoveredSystemIds = new Set(discoveries.map((d) => d.system_id));
@@ -148,10 +200,15 @@ export default async function GalaxyMapPage() {
   for (const c of colonies) {
     colonySystemIds.set(c.system_id, (colonySystemIds.get(c.system_id) ?? 0) + 1);
   }
-  const shipSystemIds   = new Set(ships.filter((s) => s.current_system_id).map((s) => s.current_system_id!));
-  const fleetSystemIds  = new Set(fleets.filter((f) => f.current_system_id).map((f) => f.current_system_id!));
+  const shipSystemIds    = new Set(ships.filter((s) => s.current_system_id).map((s) => s.current_system_id!));
+  const fleetSystemIds   = new Set(fleets.filter((f) => f.current_system_id).map((f) => f.current_system_id!));
   const inTransitTargets = new Set(travelJobs.map((t) => t.to_system_id));
-  const stewardMap      = new Map(stewardships.map((s) => [s.system_id, s.steward_id]));
+  const stewardMap       = new Map(stewardships.map((s) => [s.system_id, s.steward_id]));
+
+  // Set of fleet IDs that are currently harvesting
+  const harvestingFleetIds = new Set(myHarvests.map((h) => h.fleet_id));
+  // Map: asteroidId → harvestId (player's active harvest on this asteroid)
+  const myHarvestByAsteroid = new Map(myHarvests.map((h) => [h.asteroid_id, h.id]));
 
   // Sol is always "discovered" (starting system — no discovery needed)
   discoveredSystemIds.add("sol");
@@ -164,6 +221,11 @@ export default async function GalaxyMapPage() {
   const catalogEntries = getAllCatalogEntries();
   const projected = projectCatalog([...catalogEntries]);
   const pixelsPerLy = projected[0]?.pixelsPerLy ?? 34;
+
+  // Build a map from system id → projected coordinates for asteroid positioning
+  const systemSvgMap = new Map(
+    catalogEntries.map((entry, i) => [entry.id, { svgX: projected[i].svgX, svgY: projected[i].svgY }]),
+  );
 
   const systems: GalaxySystem[] = catalogEntries.map((entry, i) => ({
     id: entry.id,
@@ -192,21 +254,55 @@ export default async function GalaxyMapPage() {
     speedLyPerHr: s.speed_ly_per_hr,
   }));
 
+  // ── Build fleet list for client (needed for dispatch UI) ─────────────────
+  const galaxyFleets: GalaxyFleet[] = fleets.map((f) => ({
+    id: f.id,
+    name: f.name,
+    systemId: f.current_system_id,
+    isHarvesting: harvestingFleetIds.has(f.id),
+  }));
+
+  // ── Build asteroid list for client ────────────────────────────────────────
+  const galaxyAsteroids: GalaxyAsteroid[] = asteroidRows
+    .filter((a) => {
+      // Filter out depleted ones that resolved to 0 during this load
+      const resolved = resolvedAmounts.get(a.id);
+      return resolved === undefined ? true : resolved > 0;
+    })
+    .map((a) => {
+      const systemPos = systemSvgMap.get(a.system_id);
+      const remaining = resolvedAmounts.get(a.id) ?? a.remaining_amount;
+      return {
+        id: a.id,
+        systemId: a.system_id,
+        svgX: (systemPos?.svgX ?? 500) + a.display_offset_x,
+        svgY: (systemPos?.svgY ?? 350) + a.display_offset_y,
+        resourceType: a.resource_type,
+        totalAmount: a.total_amount,
+        remainingAmount: remaining,
+        status: a.status as "active" | "depleted" | "expired",
+        myHarvestId: myHarvestByAsteroid.get(a.id) ?? null,
+      };
+    });
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* Header */}
       <header className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2">
         <Link
-          href="/game"
+          href="/game/command"
           className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
         >
-          ← Dashboard
+          ← Command
         </Link>
         <h1 className="text-sm font-semibold text-zinc-200">Galaxy Map</h1>
         <span className="text-xs text-zinc-600">
           {systems.filter((s) => s.isDiscovered).length}/{systems.length} systems discovered
           {colonies.length > 0 && (
             <> · {colonies.length} {colonies.length === 1 ? "colony" : "colonies"}</>
+          )}
+          {galaxyAsteroids.length > 0 && (
+            <> · {galaxyAsteroids.length} {galaxyAsteroids.length === 1 ? "asteroid" : "asteroids"}</>
           )}
         </span>
         <div className="ml-auto flex items-center gap-3 text-xs text-zinc-600">
@@ -220,6 +316,8 @@ export default async function GalaxyMapPage() {
       <GalaxyMapClient
         systems={systems}
         ships={galaxyShips}
+        fleets={galaxyFleets}
+        asteroids={galaxyAsteroids}
         pixelsPerLy={pixelsPerLy}
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}

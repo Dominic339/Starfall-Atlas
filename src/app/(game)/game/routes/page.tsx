@@ -150,10 +150,10 @@ export default async function RoutesPage() {
       {/* Header bar */}
       <header className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2">
         <Link
-          href="/game"
+          href="/game/command"
           className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
         >
-          ← Dashboard
+          ← Command
         </Link>
         <h1 className="text-sm font-semibold text-zinc-200">Supply Route Map</h1>
         <span className="text-xs text-zinc-600">
@@ -171,7 +171,7 @@ export default async function RoutesPage() {
               Found your first colony to start building supply routes.
             </p>
             <Link
-              href="/game"
+              href="/game/command"
               className="mt-3 inline-block rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-400 hover:border-zinc-500 hover:text-zinc-200 transition-colors"
             >
               Go to Dashboard

@@ -57,9 +57,33 @@ export interface GalaxyShip {
   speedLyPerHr: number;
 }
 
+export interface GalaxyFleet {
+  id: string;
+  name: string;
+  systemId: string | null;
+  /** True if this fleet currently has an active asteroid harvest job. */
+  isHarvesting: boolean;
+}
+
+export interface GalaxyAsteroid {
+  id: string;
+  systemId: string;
+  /** Pre-computed SVG coordinates (system position + display offset). */
+  svgX: number;
+  svgY: number;
+  resourceType: string;
+  totalAmount: number;
+  remainingAmount: number;
+  status: "active" | "depleted" | "expired";
+  /** Player's active harvest id on this asteroid, or null if none. */
+  myHarvestId: string | null;
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
+  fleets: GalaxyFleet[];
+  asteroids: GalaxyAsteroid[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -100,6 +124,28 @@ function formatDist(ly: number): string {
   return ly < 1 ? `${(ly * 1000).toFixed(0)} mly` : `${ly.toFixed(2)} ly`;
 }
 
+/** Color for asteroid nodes by resource type. */
+function asteroidColor(resourceType: string): string {
+  switch (resourceType) {
+    case "iron":         return "#f87171"; // red-400
+    case "carbon":       return "#9ca3af"; // gray-400
+    case "silica":       return "#67e8f9"; // cyan-300
+    case "sulfur":       return "#fde047"; // yellow-300
+    case "rare_crystal": return "#c084fc"; // purple-400
+    default:             return "#d1d5db"; // gray-300
+  }
+}
+
+/** Human-readable resource type label. */
+function resourceLabel(resourceType: string): string {
+  return resourceType.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/** SVG polygon points for a diamond centered at (cx, cy) with half-size r. */
+function diamondPoints(cx: number, cy: number, r: number): string {
+  return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -107,6 +153,8 @@ function formatDist(ly: number): string {
 export function GalaxyMapClient({
   systems,
   ships,
+  fleets,
+  asteroids,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -126,11 +174,21 @@ export function GalaxyMapClient({
   const [travelLoading, setTravelLoading] = useState(false);
   const [travelError, setTravelError] = useState<string | null>(null);
 
+  // ── Asteroid interaction state ─────────────────────────────────────────────
+  const [selectedAsteroidId, setSelectedAsteroidId] = useState<string | null>(null);
+  const [hoveredAsteroidId, setHoveredAsteroidId] = useState<string | null>(null);
+  const [dispatchFleetId, setDispatchFleetId] = useState<string>("");
+  const [dispatchLoading, setDispatchLoading] = useState(false);
+  const [dispatchError, setDispatchError] = useState<string | null>(null);
+  const [recallLoading, setRecallLoading] = useState(false);
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
+  const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
   const currentSystem = systems.find((s) => s.isCurrentLocation) ?? null;
   const dockedShip = ships.find((s) => s.systemId != null) ?? null;
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
+  const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
 
   // Travel range circle radius in SVG base coords
   const rangeRadius = baseRangeLy * pixelsPerLy;
@@ -251,12 +309,24 @@ export function GalaxyMapClient({
   function handleStarClick(e: React.MouseEvent, systemId: string) {
     e.stopPropagation();
     setSelectedId((prev) => (prev === systemId ? null : systemId));
+    setSelectedAsteroidId(null);
+    setTravelError(null);
+    setDispatchError(null);
+  }
+
+  function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
+    e.stopPropagation();
+    setSelectedAsteroidId((prev) => (prev === asteroidId ? null : asteroidId));
+    setSelectedId(null);
+    setDispatchError(null);
     setTravelError(null);
   }
 
   function handleMapClick() {
     setSelectedId(null);
+    setSelectedAsteroidId(null);
     setTravelError(null);
+    setDispatchError(null);
   }
 
   // ── Travel action ─────────────────────────────────────────────────────────
@@ -283,6 +353,53 @@ export function GalaxyMapClient({
       setTravelError("Network error.");
     } finally {
       setTravelLoading(false);
+    }
+  }
+
+  // ── Asteroid dispatch / recall ────────────────────────────────────────────
+  async function handleDispatch() {
+    if (!selectedAsteroid || !dispatchFleetId) return;
+    setDispatchLoading(true);
+    setDispatchError(null);
+    try {
+      const res = await fetch("/api/game/asteroid/dispatch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ asteroidId: selectedAsteroid.id, fleetId: dispatchFleetId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setDispatchError(json.error?.message ?? "Dispatch failed.");
+      }
+    } catch {
+      setDispatchError("Network error.");
+    } finally {
+      setDispatchLoading(false);
+    }
+  }
+
+  async function handleRecall() {
+    if (!selectedAsteroid?.myHarvestId) return;
+    setRecallLoading(true);
+    setDispatchError(null);
+    try {
+      const res = await fetch("/api/game/asteroid/recall", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ harvestId: selectedAsteroid.myHarvestId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setDispatchError(json.error?.message ?? "Recall failed.");
+      }
+    } catch {
+      setDispatchError("Network error.");
+    } finally {
+      setRecallLoading(false);
     }
   }
 
@@ -548,6 +665,85 @@ export function GalaxyMapClient({
                 </g>
               );
             })}
+
+            {/* ── Asteroid nodes ──────────────────────────────────────────────── */}
+            {asteroids.map((ast) => {
+              const color = asteroidColor(ast.resourceType);
+              const isHovered  = ast.id === hoveredAsteroidId;
+              const isSelected = ast.id === selectedAsteroidId;
+              const isMine     = ast.myHarvestId !== null;
+              // Depletion fraction dims the node as it runs out
+              const fraction   = ast.totalAmount > 0 ? ast.remainingAmount / ast.totalAmount : 0;
+              const opacity    = 0.5 + fraction * 0.5; // 50%–100%
+              const r = 5;
+
+              return (
+                <g
+                  key={ast.id}
+                  className="cursor-pointer"
+                  onClick={(e) => handleAsteroidClick(e, ast.id)}
+                  onMouseEnter={() => setHoveredAsteroidId(ast.id)}
+                  onMouseLeave={() => setHoveredAsteroidId(null)}
+                  opacity={opacity}
+                >
+                  {/* Selection ring */}
+                  {isSelected && (
+                    <polygon
+                      points={diamondPoints(ast.svgX, ast.svgY, r + 7)}
+                      fill="none"
+                      stroke="#818cf8"
+                      strokeWidth={1.5 / scale}
+                    />
+                  )}
+
+                  {/* Hover ring */}
+                  {isHovered && !isSelected && (
+                    <polygon
+                      points={diamondPoints(ast.svgX, ast.svgY, r + 5)}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1 / scale}
+                      opacity={0.5}
+                    />
+                  )}
+
+                  {/* "My fleet is harvesting" pulse ring */}
+                  {isMine && (
+                    <polygon
+                      points={diamondPoints(ast.svgX, ast.svgY, r + 9)}
+                      fill="none"
+                      stroke={color}
+                      strokeWidth={1 / scale}
+                      strokeDasharray={`${3 / scale} ${3 / scale}`}
+                      opacity={0.4}
+                    />
+                  )}
+
+                  {/* Diamond body */}
+                  <polygon
+                    points={diamondPoints(ast.svgX, ast.svgY, r)}
+                    fill={color}
+                    stroke="#06060a"
+                    strokeWidth={0.8 / scale}
+                  />
+
+                  {/* Label at high zoom or when selected/hovered */}
+                  {(isSelected || isHovered || transform.scale >= 3) && (
+                    <text
+                      x={ast.svgX}
+                      y={ast.svgY + r + 9}
+                      textAnchor="middle"
+                      fontSize={9 / scale < 7 ? 7 : 9 / scale > 11 ? 11 : 9 / scale}
+                      fill={color}
+                      opacity={0.8}
+                      className="select-none pointer-events-none"
+                    >
+                      {resourceLabel(ast.resourceType)}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
           </g>
         </svg>
 
@@ -594,6 +790,10 @@ export function GalaxyMapClient({
             <span className="h-2 w-2 rounded-full bg-amber-400" />
             Steward
           </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
+            Asteroid
+          </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
             Travel range
@@ -620,11 +820,138 @@ export function GalaxyMapClient({
             );
           })()
         )}
+        {hoveredAsteroidId && hoveredAsteroidId !== selectedAsteroidId && (
+          (() => {
+            const a = asteroidMap.get(hoveredAsteroidId);
+            if (!a) return null;
+            const pct = a.totalAmount > 0 ? Math.round((a.remainingAmount / a.totalAmount) * 100) : 0;
+            return (
+              <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-3 py-1.5 text-xs shadow-lg">
+                <span className="font-medium" style={{ color: asteroidColor(a.resourceType) }}>
+                  {resourceLabel(a.resourceType)}
+                </span>
+                <span className="ml-2 text-zinc-500">Asteroid</span>
+                <span className="ml-2 text-zinc-400">{a.remainingAmount} / {a.totalAmount} u</span>
+                <span className="ml-2 text-zinc-600">{pct}% remaining</span>
+                {a.myHarvestId && <span className="ml-2 text-yellow-400">Harvesting</span>}
+              </div>
+            );
+          })()
+        )}
       </div>
 
-      {/* ── Right panel: selected system ─────────────────────────────────── */}
+      {/* ── Right panel: selected system or asteroid ──────────────────────── */}
       <div className="flex w-72 shrink-0 flex-col border-l border-zinc-800 bg-zinc-950">
-        {selectedSystem ? (
+        {selectedAsteroid ? (
+          (() => {
+            const a = selectedAsteroid;
+            const color = asteroidColor(a.resourceType);
+            const pct = a.totalAmount > 0 ? Math.round((a.remainingAmount / a.totalAmount) * 100) : 0;
+            // Fleets in this asteroid's system that are NOT already harvesting
+            const eligibleFleets = fleets.filter(
+              (f) => f.systemId === a.systemId && !f.isHarvesting,
+            );
+            return (
+              <>
+                {/* Header */}
+                <div className="border-b border-zinc-800 px-4 py-3">
+                  <div className="flex items-center gap-2">
+                    <span className="inline-block h-3 w-3 rotate-45 shrink-0" style={{ background: color }} />
+                    <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                      {resourceLabel(a.resourceType)} Asteroid
+                    </h2>
+                  </div>
+                  <p className="mt-0.5 text-xs text-zinc-600">
+                    Near {a.systemId} system
+                  </p>
+                </div>
+
+                {/* Stats */}
+                <div className="divide-y divide-zinc-800/50 px-4 py-1">
+                  <div className="flex items-center justify-between py-2">
+                    <span className="text-xs text-zinc-600">Resource</span>
+                    <span className="text-xs font-medium" style={{ color }}>
+                      {resourceLabel(a.resourceType)}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between py-2">
+                    <span className="text-xs text-zinc-600">Remaining</span>
+                    <span className="text-xs text-zinc-300">
+                      {a.remainingAmount} / {a.totalAmount} u ({pct}%)
+                    </span>
+                  </div>
+                  {/* Depletion bar */}
+                  <div className="py-2">
+                    <div className="h-1.5 w-full rounded-full bg-zinc-800">
+                      <div
+                        className="h-1.5 rounded-full transition-all"
+                        style={{ width: `${pct}%`, background: color }}
+                      />
+                    </div>
+                  </div>
+                  {a.myHarvestId && (
+                    <div className="flex items-center justify-between py-2">
+                      <span className="text-xs text-zinc-600">Your fleet</span>
+                      <span className="text-xs text-yellow-400">Harvesting</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Actions */}
+                <div className="mt-auto border-t border-zinc-800 p-4 space-y-2">
+                  {dispatchError && (
+                    <p className="text-xs text-red-400">{dispatchError}</p>
+                  )}
+
+                  {/* Recall own fleet */}
+                  {a.myHarvestId && (
+                    <button
+                      onClick={handleRecall}
+                      disabled={recallLoading}
+                      className="w-full rounded border border-zinc-600 bg-zinc-900 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800 hover:text-zinc-100 transition-colors disabled:opacity-50"
+                    >
+                      {recallLoading ? "Recalling…" : "Recall Fleet"}
+                    </button>
+                  )}
+
+                  {/* Dispatch a fleet */}
+                  {!a.myHarvestId && eligibleFleets.length > 0 && (
+                    <div className="space-y-1.5">
+                      <select
+                        value={dispatchFleetId}
+                        onChange={(e) => setDispatchFleetId(e.target.value)}
+                        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                      >
+                        <option value="">Select fleet…</option>
+                        {eligibleFleets.map((f) => (
+                          <option key={f.id} value={f.id}>
+                            {f.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={handleDispatch}
+                        disabled={dispatchLoading || !dispatchFleetId}
+                        className="w-full rounded border border-yellow-700 bg-yellow-950/60 px-3 py-2 text-xs font-medium text-yellow-300 hover:bg-yellow-900/60 hover:text-yellow-200 transition-colors disabled:opacity-50"
+                      >
+                        {dispatchLoading ? "Dispatching…" : "Dispatch Fleet"}
+                      </button>
+                    </div>
+                  )}
+
+                  {/* No eligible fleets */}
+                  {!a.myHarvestId && eligibleFleets.length === 0 && (
+                    <p className="text-xs text-zinc-700 text-center">
+                      No fleets available in {a.systemId}.
+                      <br />
+                      Travel a fleet here first.
+                    </p>
+                  )}
+                </div>
+              </>
+            );
+          })()
+        ) : selectedSystem ? (
           <>
             {/* Header */}
             <div className="border-b border-zinc-800 px-4 py-3">
@@ -753,13 +1080,18 @@ export function GalaxyMapClient({
         ) : (
           /* Empty state */
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <p className="text-xs text-zinc-600">Click a star to select it.</p>
+            <p className="text-xs text-zinc-600">Click a star or asteroid to select it.</p>
             {currentSystem && (
               <p className="mt-2 text-xs text-zinc-700">
                 You are at{" "}
                 <span className="text-emerald-600">{currentSystem.name}</span>.
                 <br />
                 Travel range: {baseRangeLy} ly.
+              </p>
+            )}
+            {asteroids.length > 0 && (
+              <p className="mt-2 text-xs text-zinc-700">
+                {asteroids.length} active asteroid{asteroids.length !== 1 ? "s" : ""} in the region.
               </p>
             )}
           </div>
