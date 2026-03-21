@@ -38,14 +38,20 @@ export interface GalaxySystem {
   svgY: number;
   isDiscovered: boolean;
   isPlayerSteward: boolean;
+  /** Human-readable discoverer handle, if known. */
+  discovererHandle: string | null;
   /** Player's active colony count in this system */
   colonyCount: number;
+  /** Number of planetary/stellar bodies in this system */
+  bodyCount: number;
   /** Player ship is docked here */
   hasDockedShip: boolean;
   /** Player fleet is docked here */
   hasDockedFleet: boolean;
   /** This is where the primary docked ship is (travel source) */
   isCurrentLocation: boolean;
+  /** Player's station is located here */
+  isStationLocation: boolean;
   /** A ship is currently traveling to this system */
   isInTransitTarget: boolean;
 }
@@ -79,15 +85,27 @@ export interface GalaxyAsteroid {
   myHarvestId: string | null;
 }
 
+/** One alliance beacon visible on the galaxy map. */
+export interface GalaxyBeacon {
+  id: string;
+  systemId: string;
+  allianceId: string;
+  allianceTag: string;
+  allianceName: string;
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
   fleets: GalaxyFleet[];
   asteroids: GalaxyAsteroid[];
+  beacons: GalaxyBeacon[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
   viewboxH: number;
+  /** Station 3D coordinates for distance-from-station computation. */
+  stationCoords: { x: number; y: number; z: number } | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -124,6 +142,25 @@ function formatDist(ly: number): string {
   return ly < 1 ? `${(ly * 1000).toFixed(0)} mly` : `${ly.toFixed(2)} ly`;
 }
 
+function formatEta(hours: number): string {
+  if (hours < 1 / 60) return "<1 min";
+  if (hours < 1) return `~${Math.ceil(hours * 60)} min`;
+  return `~${hours.toFixed(1)} hr`;
+}
+
+function spectralName(cls: string): string {
+  switch (cls) {
+    case "O": return "O-class (blue supergiant)";
+    case "B": return "B-class (blue-white)";
+    case "A": return "A-class (white)";
+    case "F": return "F-class (yellow-white)";
+    case "G": return "G-class (yellow dwarf)";
+    case "K": return "K-class (orange dwarf)";
+    case "M": return "M-class (red dwarf)";
+    default:  return `${cls}-class`;
+  }
+}
+
 /** Color for asteroid nodes by resource type. */
 function asteroidColor(resourceType: string): string {
   switch (resourceType) {
@@ -155,10 +192,12 @@ export function GalaxyMapClient({
   ships,
   fleets,
   asteroids,
+  beacons,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
   viewboxH,
+  stationCoords,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -186,6 +225,7 @@ export function GalaxyMapClient({
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
   const currentSystem = systems.find((s) => s.isCurrentLocation) ?? null;
+  const stationSystem = systems.find((s) => s.isStationLocation) ?? null;
   const dockedShip = ships.find((s) => s.systemId != null) ?? null;
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
@@ -204,6 +244,31 @@ export function GalaxyMapClient({
     selectedSystem !== null &&
     !selectedSystem.isCurrentLocation &&
     !selectedSystem.isInTransitTarget;
+
+  // Distance from station to selected system
+  const distFromStation = selectedSystem && stationCoords
+    ? dist3D(stationCoords, selectedSystem)
+    : null;
+
+  // ETA for travel to selected system (hours) for primary docked ship
+  const travelEtaHours = distToSelected !== null && dockedShip
+    ? distToSelected / dockedShip.speedLyPerHr
+    : null;
+
+  // Asteroids in the selected system
+  const asteroidCountInSelected = selectedSystem
+    ? asteroids.filter((a) => a.systemId === selectedSystem.id).length
+    : 0;
+
+  // Beacons grouped by system (for SVG markers)
+  const beaconsBySystem = new Map<string, GalaxyBeacon[]>();
+  for (const b of beacons) {
+    const list = beaconsBySystem.get(b.systemId) ?? [];
+    list.push(b);
+    beaconsBySystem.set(b.systemId, list);
+  }
+  // Beacons in the selected system
+  const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -744,6 +809,42 @@ export function GalaxyMapClient({
                 </g>
               );
             })}
+
+            {/* ── Alliance beacons ─────────────────────────────────────────── */}
+            {systems.map((sys) => {
+              const sysBeacons = beaconsBySystem.get(sys.id);
+              if (!sysBeacons || sysBeacons.length === 0) return null;
+              const r = sys.spectralClass === "O" || sys.spectralClass === "B" ? 8
+                : sys.spectralClass === "G" || sys.spectralClass === "K" ? 7
+                : 6;
+              // Show a small flag/diamond in top-left, one per alliance (stacked)
+              return sysBeacons.map((b, i) => (
+                <g key={b.id} pointerEvents="none">
+                  <rect
+                    x={sys.svgX - r - 9 - i * 5}
+                    y={sys.svgY - r - 9}
+                    width={7}
+                    height={7}
+                    rx={1}
+                    fill="#6366f1"
+                    opacity={0.85}
+                  />
+                  {(transform.scale >= 2.5 || i === 0) && (
+                    <text
+                      x={sys.svgX - r - 5 - i * 5}
+                      y={sys.svgY - r - 12}
+                      textAnchor="middle"
+                      fontSize={8 / scale < 6 ? 6 : 8 / scale > 10 ? 10 : 8 / scale}
+                      fill="#818cf8"
+                      opacity={0.9}
+                      className="select-none"
+                    >
+                      {b.allianceTag}
+                    </text>
+                  )}
+                </g>
+              ));
+            })}
           </g>
         </svg>
 
@@ -793,6 +894,10 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
             Asteroid
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
+            Beacon
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
@@ -964,32 +1069,64 @@ export function GalaxyMapClient({
                   {selectedSystem.name}
                 </h2>
               </div>
-              <p className="mt-0.5 text-xs text-zinc-600">
-                {selectedSystem.spectralClass}-class · {formatDist(selectedSystem.distanceFromSol)} from Sol
+              <p className="mt-0.5 text-xs text-zinc-500">
+                {spectralName(selectedSystem.spectralClass)}
+              </p>
+              <p className="mt-0.5 text-xs text-zinc-700">
+                {formatDist(selectedSystem.distanceFromSol)} from Sol
               </p>
             </div>
 
             {/* Stats */}
-            <div className="divide-y divide-zinc-800/50 px-4 py-1">
-              {/* Discovery */}
+            <div className="divide-y divide-zinc-800/50 px-4 py-1 overflow-y-auto">
+
+              {/* Bodies */}
               <div className="flex items-center justify-between py-2">
-                <span className="text-xs text-zinc-600">Discovery</span>
+                <span className="text-xs text-zinc-600">Bodies</span>
+                <span className="text-xs text-zinc-400">{selectedSystem.bodyCount}</span>
+              </div>
+
+              {/* Discovery / steward */}
+              <div className="flex items-center justify-between py-2">
+                <span className="text-xs text-zinc-600">Status</span>
                 <span className={`text-xs ${selectedSystem.isDiscovered ? "text-emerald-400" : "text-zinc-600"}`}>
                   {selectedSystem.isDiscovered
                     ? selectedSystem.isPlayerSteward
                       ? "Steward ★"
-                      : "Discovered"
+                      : selectedSystem.discovererHandle
+                        ? `Discovered · ${selectedSystem.discovererHandle}`
+                        : "Discovered"
                     : "Unexplored"}
                 </span>
               </div>
 
-              {/* Distance from current */}
-              {currentSystem && !selectedSystem.isCurrentLocation && (
+              {/* Station anchor */}
+              {selectedSystem.isStationLocation && (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">From you</span>
+                  <span className="text-xs text-zinc-600">Station</span>
+                  <span className="text-xs text-amber-400">Your hub</span>
+                </div>
+              )}
+
+              {/* Distance from station */}
+              {distFromStation !== null && !selectedSystem.isStationLocation && stationSystem && (
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs text-zinc-600">From station</span>
+                  <span className="text-xs text-zinc-500">{formatDist(distFromStation)}</span>
+                </div>
+              )}
+
+              {/* Distance from current ship / ETA */}
+              {currentSystem && !selectedSystem.isCurrentLocation && distToSelected !== null && (
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs text-zinc-600">From ship</span>
                   <span className={`text-xs ${isReachable ? "text-zinc-300" : "text-zinc-600"}`}>
-                    {formatDist(distToSelected!)}
-                    {isReachable ? "" : " — out of range"}
+                    {formatDist(distToSelected)}
+                    {isReachable && travelEtaHours !== null
+                      ? ` · ${formatEta(travelEtaHours)}`
+                      : isReachable
+                        ? ""
+                        : " — out of range"}
                   </span>
                 </div>
               )}
@@ -997,8 +1134,8 @@ export function GalaxyMapClient({
               {/* Current location badge */}
               {selectedSystem.isCurrentLocation && (
                 <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Status</span>
-                  <span className="text-xs text-emerald-400">You are here</span>
+                  <span className="text-xs text-zinc-600">Ship</span>
+                  <span className="text-xs text-emerald-400">Docked here</span>
                 </div>
               )}
 
@@ -1018,17 +1155,44 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* Ships/Fleet */}
-              {selectedSystem.hasDockedShip && (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Ships</span>
-                  <span className="text-xs text-zinc-400">Docked</span>
-                </div>
-              )}
+              {/* Fleet present */}
               {selectedSystem.hasDockedFleet && (
                 <div className="flex items-center justify-between py-2">
                   <span className="text-xs text-zinc-600">Fleet</span>
                   <span className="text-xs text-violet-400">Present</span>
+                </div>
+              )}
+
+              {/* Asteroid activity */}
+              {asteroidCountInSelected > 0 && (
+                <div className="flex items-center justify-between py-2">
+                  <span className="text-xs text-zinc-600">Asteroids</span>
+                  <span className="text-xs text-yellow-400">
+                    {asteroidCountInSelected} active
+                  </span>
+                </div>
+              )}
+
+              {/* Alliance beacons */}
+              {beaconsInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Beacons</span>
+                    <span className="text-xs text-indigo-400">
+                      {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
+                    </span>
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-1">
+                    {beaconsInSelected.map((b) => (
+                      <span
+                        key={b.id}
+                        title={b.allianceName}
+                        className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
+                      >
+                        [{b.allianceTag}]
+                      </span>
+                    ))}
+                  </div>
                 </div>
               )}
             </div>
@@ -1039,14 +1203,18 @@ export function GalaxyMapClient({
                 <p className="text-xs text-red-400">{travelError}</p>
               )}
 
-              {/* Travel Here */}
+              {/* Travel Here — with ETA preview */}
               {canTravel && (
                 <button
                   onClick={handleTravel}
                   disabled={travelLoading}
                   className="w-full rounded border border-indigo-700 bg-indigo-950/60 px-3 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 transition-colors disabled:opacity-50"
                 >
-                  {travelLoading ? "Dispatching…" : `Travel Here · ${formatDist(distToSelected!)}`}
+                  {travelLoading
+                    ? "Dispatching…"
+                    : travelEtaHours !== null
+                      ? `Travel Here · ${formatEta(travelEtaHours)}`
+                      : `Travel Here · ${formatDist(distToSelected!)}`}
                 </button>
               )}
 
@@ -1080,18 +1248,23 @@ export function GalaxyMapClient({
         ) : (
           /* Empty state */
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <p className="text-xs text-zinc-600">Click a star or asteroid to select it.</p>
+            <p className="text-xs text-zinc-600">Click a star or asteroid to inspect it.</p>
             {currentSystem && (
               <p className="mt-2 text-xs text-zinc-700">
-                You are at{" "}
-                <span className="text-emerald-600">{currentSystem.name}</span>.
-                <br />
-                Travel range: {baseRangeLy} ly.
+                Ship at{" "}
+                <span className="text-emerald-600">{currentSystem.name}</span>.{" "}
+                Range: {baseRangeLy} ly.
+              </p>
+            )}
+            {stationSystem && !currentSystem && (
+              <p className="mt-2 text-xs text-zinc-700">
+                Station at{" "}
+                <span className="text-amber-600">{stationSystem.name}</span>.
               </p>
             )}
             {asteroids.length > 0 && (
               <p className="mt-2 text-xs text-zinc-700">
-                {asteroids.length} active asteroid{asteroids.length !== 1 ? "s" : ""} in the region.
+                {asteroids.length} active asteroid{asteroids.length !== 1 ? "s" : ""} in range.
               </p>
             )}
           </div>

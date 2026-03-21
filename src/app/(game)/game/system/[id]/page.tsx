@@ -671,22 +671,22 @@ export default async function SystemPage({
                       (node: { type: string; quantity: number; is_rare: boolean }) => (
                         <span
                           key={node.type}
-                          className="text-xs text-zinc-500"
+                          className="text-xs"
                         >
                           {node.is_rare ? (
-                            <span className="text-amber-500">{node.type}</span>
+                            <span className="text-amber-400">{node.type}</span>
                           ) : (
-                            node.type
+                            <span className="text-zinc-400">{node.type}</span>
                           )}{" "}
                           <span className="text-zinc-600">
-                            {node.quantity > 1 ? `${node.quantity} nodes` : "1 node"}
+                            {node.quantity > 1 ? `×${node.quantity} yield` : "base yield"}
                           </span>
                         </span>
                       ),
                     )}
                     {survey.has_deep_nodes && (
-                      <span className="text-xs text-zinc-600 italic">
-                        + rare nodes (deep survey required)
+                      <span className="text-xs text-zinc-700 italic">
+                        + rare deposits (deep survey)
                       </span>
                     )}
                   </div>
