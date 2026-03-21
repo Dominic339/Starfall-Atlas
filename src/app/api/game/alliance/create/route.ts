@@ -101,7 +101,17 @@ export async function POST(request: NextRequest) {
       .maybeSingle(),
   );
   if (!station) {
-    return toErrorResponse(fail("not_found", "Station not found.").error);
+    // Station should always exist (created by bootstrap on first login).
+    // If missing, the player likely logged in before migration 00016/00030
+    // was applied, or the bootstrap reconciliation failed. Surfacing a
+    // clear actionable message is better than a generic "not found".
+    return toErrorResponse(
+      fail(
+        "not_found",
+        "Your station could not be found. Please refresh the page — " +
+          "bootstrap will create it automatically. If this persists, contact support.",
+      ).error,
+    );
   }
 
   const cost = BALANCE.alliance.createCostIron;
