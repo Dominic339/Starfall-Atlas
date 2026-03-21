@@ -278,21 +278,34 @@ export const BALANCE = {
   },
 
   // -------------------------------------------------------------------------
-  // Colony upkeep (GAME_RULES.md §7.2 — iron supply keeps colonies healthy)
+  // Colony upkeep (GAME_RULES.md §7.2 — Phase 16 food + iron dome model)
+  //
+  // All colonies consume food each period (population sustain resource).
+  // Harsh colonies (volcanic, toxic) additionally consume iron for dome
+  // maintenance. Health is determined by whether both required resources
+  // were available.
   // -------------------------------------------------------------------------
   upkeep: {
     /** Hours between upkeep resolution periods. */
     periodHours: 24,
 
     /**
-     * Iron units consumed per tier per period.
-     * A tier-3 colony needs 6 iron per 24-hour period.
+     * Food units consumed per tier per period (ALL colonies).
+     * A tier-3 colony needs 6 food per 24-hour period.
+     * Food is produced by refining biomass+water at the station.
+     */
+    foodPerTierPerPeriod: 2,
+
+    /**
+     * Iron units consumed per tier per period for harsh colonies ONLY
+     * (volcanic and toxic planet types — dome/maintenance upkeep).
+     * Non-harsh colonies do not consume iron for upkeep.
      */
     ironPerTierPerPeriod: 2,
 
     /**
      * Maximum number of overdue periods resolved in a single page load.
-     * Caps the iron draw per session and prevents runaway catch-up loops.
+     * Caps resource draw per session and prevents runaway catch-up loops.
      */
     maxCatchupPeriods: 14,
 
@@ -313,6 +326,289 @@ export const BALANCE = {
      * Counter resets after each tier loss. Minimum tier is 1.
      */
     tierLossMissedPeriods: 5,
+  },
+
+  // -------------------------------------------------------------------------
+  // Colony structures and wired research effects (Phase 14)
+  // -------------------------------------------------------------------------
+  structures: {
+    /** Maximum structure tier buildable in alpha. */
+    maxTier: 3,
+
+    /**
+     * Iron and carbon cost to build or upgrade to each tier.
+     * buildCostByTier[1] = build tier 1, buildCostByTier[2] = upgrade to tier 2, etc.
+     * Index 0 is unused.
+     */
+    buildCostByTier: [
+      null,                        // 0: unused
+      { iron: 20, carbon: 10 },   // 1: initial build
+      { iron: 50, carbon: 25 },   // 2: upgrade to tier 2
+      { iron: 100, carbon: 50 },  // 3: upgrade to tier 3
+    ] as (null | { iron: number; carbon: number })[],
+
+    /** Extractor: additional extraction multiplier per tier (additive). */
+    extractor: {
+      extractionBonusPerTier: 0.25,
+    },
+
+    /** Warehouse: additional colony storage cap per tier. */
+    warehouse: {
+      storageCapPerTier: 500,
+    },
+
+    /** Habitat module: upkeep iron reduction fraction per tier (additive, capped at 1.0). */
+    habitat_module: {
+      upkeepReductionPerTier: 0.20,
+    },
+
+    /**
+     * Wired colony research effects (extraction_N, sustainability_N, storage_N).
+     * Each unlocked research level adds this much bonus.
+     */
+    researchEffects: {
+      /** Per extraction research level: +bonusPerLevel to the extraction multiplier. */
+      extractionBonusPerLevel: 0.10,
+      /** Per sustainability research level: fraction of upkeep iron saved. */
+      sustainabilityBonusPerLevel: 0.10,
+      /** Per storage research level: additional storage cap units. */
+      storageCapPerLevel: 200,
+    },
+  },
+
+  // -------------------------------------------------------------------------
+  // Ship upgrades (Phase 11)
+  // -------------------------------------------------------------------------
+  shipUpgrades: {
+    /**
+     * Iron cost to upgrade a stat to level N = ironCostPerLevel[stat] * N.
+     * (Level 1 costs 1×, level 2 costs 2×, …)
+     */
+    ironCostPerLevel: {
+      hull:    8,
+      shield:  8,
+      cargo:   10,
+      engine:  15,
+      turret:  12,
+      utility: 8,
+    } as Record<string, number>,
+
+    /**
+     * Base cargo capacity at level 0.
+     * Must match the ships table DEFAULT (00002_players_ships.sql).
+     */
+    baseCargoCapacity: 100,
+
+    /** Additional cargo_cap units per cargo upgrade level. */
+    cargoCapPerLevel: 50,
+
+    /**
+     * Base ship speed at level 0 (ly/hr).
+     * Must match the ships table DEFAULT (00002_players_ships.sql).
+     */
+    baseSpeedLyPerHr: 1.0,
+
+    /** Additional speed (ly/hr) per engine upgrade level. */
+    speedPerLevel: 0.2,
+
+    /**
+     * Ship tier thresholds — minimum total upgrades (inclusive) to reach each tier.
+     * Index = tier (1-based). Index 0 is unused.
+     *   Tier 1: 0–3   Tier 2: 4–11  Tier 3: 12–23
+     *   Tier 4: 24–59  Tier 5: 60
+     */
+    tierMinUpgrades: [0, 0, 4, 12, 24, 60] as number[],
+  },
+
+  // -------------------------------------------------------------------------
+  // Station refining (Phase 15)
+  // -------------------------------------------------------------------------
+  refining: {
+    /**
+     * Refining recipes. Key = output resource type.
+     * Each recipe defines how many input units are consumed per output unit.
+     * All conversions are 1:1 per unit of output.
+     */
+    recipes: {
+      steel: {
+        inputs: [
+          { resource_type: "iron",   quantity: 1 },
+          { resource_type: "carbon", quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+      glass: {
+        inputs: [
+          { resource_type: "silica", quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+      food: {
+        inputs: [
+          { resource_type: "biomass", quantity: 1 },
+          { resource_type: "water",   quantity: 1 },
+        ],
+        outputPerBatch: 1,
+      },
+    } as Record<string, { inputs: { resource_type: string; quantity: number }[]; outputPerBatch: number }>,
+  },
+
+  // -------------------------------------------------------------------------
+  // Colony transports (Phase 15 / Phase 18)
+  // -------------------------------------------------------------------------
+  colonyTransport: {
+    /**
+     * Speed of colony transport units in light-years per hour.
+     * Used to compute minimum route intervals.
+     */
+    speedLyPerHr: 2.0,
+
+    /** Minimum route interval regardless of distance. */
+    minIntervalMinutes: 30,
+
+    /** Maximum periods to resolve per dashboard load (prevents runaway catch-up). */
+    maxCatchupPeriods: 24,
+
+    /**
+     * Threshold for 'excess' mode: resources above this quantity are transferred.
+     * e.g. if colony has 150 iron and threshold = 100, transfer 50.
+     */
+    excessThreshold: 100,
+
+    // ── Phase 18: transport purchasing and throughput ───────────────────────
+
+    /**
+     * Iron cost to purchase a new tier-1 colony transport unit.
+     * Deducted from player station inventory.
+     */
+    purchaseCostIron: 20,
+
+    /**
+     * Cost to upgrade a transport from tier (N-1) to tier N.
+     * Index = target tier (1-based; index 0 unused).
+     * All costs deducted from station inventory.
+     */
+    upgradeCosts: [
+      null,                                      // [0] unused
+      null,                                      // [1] purchase (use purchaseCostIron)
+      { iron: 40,  carbon: 10, steel: 0  },      // [2] T1 → T2
+      { iron: 80,  carbon: 20, steel: 0  },      // [3] T2 → T3
+      { iron: 150, carbon: 40, steel: 20 },      // [4] T3 → T4
+      { iron: 250, carbon: 80, steel: 50 },      // [5] T4 → T5
+    ] as (null | { iron: number; carbon: number; steel: number })[],
+
+    /**
+     * Maximum resources a single transport can carry per route resolution period.
+     * Index = tier (1-based). Index 0 unused.
+     * Total colony capacity = sum of capacityPerTier[tier] for each transport row.
+     */
+    capacityPerTier: [0, 100, 200, 350, 500, 750] as number[],
+  },
+
+  // -------------------------------------------------------------------------
+  // Asteroid events and shared harvest nodes (Phase 20)
+  // -------------------------------------------------------------------------
+  asteroids: {
+    /**
+     * Base units harvested per hour when the fleet has 0 turret levels.
+     * Ensures every fleet contributes something even before upgrades.
+     */
+    baseHarvestUnitsPerHr: 2,
+
+    /**
+     * Additional units per hour per point of total turret_level across
+     * all ships in the dispatched fleet.
+     * Example: a fleet with 3 ships each at turret_level 2 = 6 total → 30 u/hr bonus.
+     */
+    harvestUnitsPerHrPerTurretLevel: 5,
+
+    /**
+     * Maximum hours of harvest accumulation that can be resolved in a single
+     * page-load pass. Prevents enormous single-session catch-up yields.
+     */
+    maxHarvestAccumulationHours: 24,
+
+    /**
+     * Starting total_amount (units) seeded per resource type.
+     * Also used for any future asteroid spawning logic.
+     */
+    initialAmountByResource: {
+      iron:         500,
+      carbon:       400,
+      silica:       350,
+      sulfur:       300,
+      rare_crystal: 150,
+    } as Record<string, number>,
+  },
+
+  // -------------------------------------------------------------------------
+  // Alliances and beacons (Phase 23)
+  // -------------------------------------------------------------------------
+  alliance: {
+    /**
+     * Iron cost (deducted from station inventory) to found a new alliance.
+     * Represents a meaningful commitment while remaining achievable early-game.
+     */
+    createCostIron: 100,
+
+    /**
+     * Iron cost (deducted from station inventory) to place a single beacon
+     * on a catalog system. Officer or founder only.
+     */
+    beaconPlaceCostIron: 50,
+
+    /**
+     * Maximum 2D catalog-space distance (light-years, ignoring z) for two
+     * beacons to be considered "linked".  Also the maximum allowed length of
+     * any convex-hull edge — hull edges longer than this invalidate the
+     * territory polygon even if the hull has ≥ 3 vertices.
+     *
+     * At 10 ly the following alpha-catalog triangles are achievable:
+     *   Sol + Wolf 359 + Lalande 21185  (edges ≈ 7.72, 6.73, 1.02 ly)
+     *   Sol + Barnard's Star + Ross 154 (edges ≈ 5.95, 8.85, 3.32 ly)
+     */
+    beaconLinkMaxDistanceLy: 10,
+
+    /**
+     * Maximum number of simultaneously active beacons an alliance may hold.
+     * Prevents beacon spam; intended as a soft territory cap for alpha.
+     */
+    maxActiveBeacons: 20,
+  },
+
+  // -------------------------------------------------------------------------
+  // Beacon disputes (Phase 25)
+  // -------------------------------------------------------------------------
+  disputes: {
+    /**
+     * Duration of the dispute window in hours.
+     * After this window expires, the side with the highest score wins.
+     */
+    windowHours: 8,
+
+    /**
+     * Cooldown applied to a disputed beacon (and nearby linked beacons) after
+     * a dispute resolves. During cooldown, the beacon cannot be challenged again.
+     */
+    cooldownHours: 48,
+
+    /**
+     * Maximum number of beacon-link hops from the disputed beacon to include
+     * in the post-resolution cooldown sweep.
+     * 1 = direct neighbors only.
+     */
+    cooldownNeighborhoodLinks: 1,
+
+    /**
+     * Score weights applied per ship when computing a fleet's dispute score.
+     * All weights must be non-negative integers.
+     * Score per ship = turret_level × turretWeight + hull_level × hullWeight + shield_level × shieldWeight.
+     */
+    scoreWeights: {
+      turret: 3,
+      hull:   1,
+      shield: 1,
+    },
   },
 
   // -------------------------------------------------------------------------

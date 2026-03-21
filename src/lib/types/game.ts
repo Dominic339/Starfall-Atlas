@@ -19,6 +19,7 @@ import type {
   InventoryLocationType,
   StewardshipMethod,
   ShipDispatchMode,
+  DisputeStatus,
 } from "./enums";
 
 // ---------------------------------------------------------------------------
@@ -32,6 +33,7 @@ export type ColonyId = string & { readonly _brand: "ColonyId" };
 export type LaneId = string & { readonly _brand: "LaneId" };
 export type GateId = string & { readonly _brand: "GateId" };
 export type AllianceId = string & { readonly _brand: "AllianceId" };
+export type DisputeId = string & { readonly _brand: "DisputeId" };
 /** Catalog-derived system identifier (e.g. HYG id as string) */
 export type SystemId = string & { readonly _brand: "SystemId" };
 /** Catalog-derived body identifier: "{system_id}:{body_index}" */
@@ -54,6 +56,13 @@ export interface Player {
   last_active_at: string;
   created_at: string;
   updated_at: string;
+  // Phase 26 profile fields (nullable, added via migration 00029)
+  title: string | null;
+  bio: string | null;
+  banner_id: string | null;
+  logo_id: string | null;
+  /** Set when the player requests account deletion (soft delete). */
+  deactivated_at: string | null;
 }
 
 export interface Ship {
@@ -80,6 +89,13 @@ export interface Ship {
   /** The colony being targeted in the current automation cycle. NULL when idle or manual. */
   auto_target_colony_id: ColonyId | null;
   skin_entitlement_id: string | null;
+  /** Per-stat upgrade levels (0–10). Research controls soft caps. */
+  hull_level: number;
+  shield_level: number;
+  cargo_level: number;
+  engine_level: number;
+  turret_level: number;
+  utility_level: number;
   created_at: string;
   updated_at: string;
 }
@@ -336,11 +352,80 @@ export interface TravelJob {
   from_system_id: SystemId;
   to_system_id: SystemId;
   lane_id: LaneId | null;
+  /** Non-null when the job was created by a fleet dispatch. */
+  fleet_id: string | null;
   depart_at: string;
   arrive_at: string;
   transit_tax_paid: number;
   status: JobStatus;
   created_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleets
+// ---------------------------------------------------------------------------
+
+export type FleetStatus = "active" | "traveling" | "disbanded";
+
+/** Fleet header row — a named, temporary grouping of co-located ships. */
+export interface Fleet {
+  id: string;
+  player_id: PlayerId;
+  name: string;
+  /** 'active' = staged at current_system_id. 'traveling' = ships in transit. 'disbanded' = dissolved. */
+  status: FleetStatus;
+  /** System where ships are staged. NULL while traveling. */
+  current_system_id: SystemId | null;
+  /**
+   * Non-null when the fleet is committed to an active beacon dispute (Phase 25).
+   * Fleet cannot be dispatched while this is set.
+   */
+  dispute_commit_id: DisputeId | null;
+  disbanded_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Join row linking a ship to its current fleet. */
+export interface FleetShip {
+  fleet_id: string;
+  ship_id: ShipId;
+  joined_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Fleet slots (Phase 13)
+// ---------------------------------------------------------------------------
+
+export type FleetSlotMode = "manual" | "auto_collect_nearest" | "auto_collect_highest";
+export type FleetSlotAutoState = "idle" | "going_to_colony" | "going_to_station" | null;
+
+/**
+ * Persistent fleet-slot configuration.
+ * Each player starts with 2 slots (Fleet 1, Fleet 2), lazy-created on first
+ * dashboard load. Slots are the automation unit for fleet dispatch.
+ *
+ *   manual                 = player controls this slot's fleet directly.
+ *   auto_collect_nearest   = slot auto-forms a fleet and collects from the
+ *                            nearest colony that has inventory.
+ *   auto_collect_highest   = slot collects from the colony with the most
+ *                            accumulated resources.
+ */
+export interface FleetSlot {
+  id: string;
+  player_id: PlayerId;
+  slot_number: number;
+  /** Display name, e.g. "Fleet 1". */
+  name: string;
+  mode: FleetSlotMode;
+  /** Active fleet currently assigned to this slot. NULL when slot is idle. */
+  current_fleet_id: string | null;
+  /** Current step in the auto cycle. NULL when mode is manual or slot is idle. */
+  auto_state: FleetSlotAutoState;
+  /** Colony being targeted in the current auto cycle. */
+  auto_target_colony_id: ColonyId | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -354,6 +439,43 @@ export interface ResourceInventoryRow {
   resource_type: string;
   quantity: number;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Colony supply routes (Phase 15)
+// ---------------------------------------------------------------------------
+
+export type ColonyRouteMode = "all" | "excess" | "fixed";
+
+/**
+ * Automated resource transfer route between two player-owned colonies.
+ * Resolved lazily on dashboard load.
+ */
+export interface ColonyRoute {
+  id: string;
+  player_id: PlayerId;
+  from_colony_id: ColonyId;
+  to_colony_id: ColonyId;
+  resource_type: string;
+  mode: ColonyRouteMode;
+  /** Only used when mode = 'fixed'. */
+  fixed_amount: number | null;
+  /** Minutes between each transfer attempt. */
+  interval_minutes: number;
+  /** Timestamp of last resolved period. Advances by interval per period. */
+  last_run_at: string;
+  created_at: string;
+}
+
+/**
+ * Transport unit stationed at a colony. At least one is required for
+ * outgoing supply routes to execute.
+ */
+export interface ColonyTransport {
+  id: string;
+  colony_id: ColonyId;
+  tier: number;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -446,8 +568,12 @@ export interface AuctionBid {
 export interface Alliance {
   id: AllianceId;
   name: string;
+  /** Short display tag (2–5 chars) shown on map beacons. */
+  tag: string;
   founder_id: PlayerId;
   member_count: number;
+  /** Short random token used for alpha direct-join flow. */
+  invite_code: string;
   emblem_entitlement_id: string | null;
   dissolved_at: string | null;
   created_at: string;
@@ -459,9 +585,20 @@ export interface AllianceMember {
   alliance_id: AllianceId;
   player_id: PlayerId;
   role: AllianceRole;
-  alliance_credits: number;
   joined_at: string;
   updated_at: string;
+}
+
+/** A beacon placed by an alliance officer/founder on a catalog system. */
+export interface AllianceBeacon {
+  id: string;
+  alliance_id: AllianceId;
+  /** Alpha-catalog system id. */
+  system_id: string;
+  placed_by: PlayerId;
+  is_active: boolean;
+  placed_at: string;
+  removed_at: string | null;
 }
 
 export interface AllianceGoal {
@@ -505,6 +642,60 @@ export interface PremiumEntitlement {
 }
 
 // ---------------------------------------------------------------------------
+// Research
+// ---------------------------------------------------------------------------
+
+/**
+ * A single research entry that a player has unlocked.
+ * Definitions live in src/lib/config/research.ts.
+ */
+export interface PlayerResearch {
+  id: string;
+  player_id: PlayerId;
+  /** Matches a ResearchDefinition.id from research.ts */
+  research_id: string;
+  unlocked_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Asteroid events (Phase 20)
+// ---------------------------------------------------------------------------
+
+/** A shared, persistent asteroid resource node visible on the galaxy map. */
+export interface AsteroidNode {
+  id: string;
+  /** Alpha-catalog system id this asteroid is associated with (backend region). */
+  system_id: string;
+  /** SVG-space pixel offset from the associated system's star node (for display). */
+  display_offset_x: number;
+  display_offset_y: number;
+  resource_type: string;
+  total_amount: number;
+  remaining_amount: number;
+  status: "active" | "depleted" | "expired";
+  /** Last time remaining_amount was lazily reconciled from active harvests. */
+  last_resolved_at: string;
+  spawned_at: string;
+  expires_at: string | null;
+}
+
+/**
+ * Tracks a fleet dispatched to harvest an asteroid node.
+ * harvest_power_per_hr is frozen at dispatch time for deterministic lazy resolution.
+ */
+export interface AsteroidHarvest {
+  id: string;
+  asteroid_id: string;
+  fleet_id: string;
+  player_id: string;
+  /** Units per hour this fleet contributes, computed from ship turret levels at dispatch. */
+  harvest_power_per_hr: number;
+  status: "active" | "completed" | "cancelled";
+  started_at: string;
+  last_resolved_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // Logs
 // ---------------------------------------------------------------------------
 
@@ -516,6 +707,47 @@ export interface WorldEvent {
   body_id: BodyId | null;
   metadata: Record<string, unknown>;
   occurred_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Disputes (Phase 25)
+// ---------------------------------------------------------------------------
+
+/** A beacon dispute challenge between two alliances. */
+export interface Dispute {
+  id: DisputeId;
+  beacon_id: string;
+  defending_alliance_id: AllianceId;
+  attacking_alliance_id: AllianceId;
+  status: DisputeStatus;
+  opened_at: string;
+  resolves_at: string;
+  resolved_at: string | null;
+  winner_alliance_id: AllianceId | null;
+  created_at: string;
+}
+
+/** A fleet commitment to a dispute (reinforcement). */
+export interface DisputeReinforcement {
+  id: string;
+  dispute_id: DisputeId;
+  alliance_id: AllianceId;
+  fleet_id: string;
+  player_id: PlayerId;
+  /** Combat score frozen at commit time. */
+  score_snapshot: number;
+  committed_at: string;
+  /** False once the dispute resolves and the fleet is unlocked. */
+  is_active: boolean;
+}
+
+/** Post-resolution cooldown preventing a beacon from being disputed again. */
+export interface BeaconCooldown {
+  id: string;
+  beacon_id: string;
+  dispute_id: DisputeId;
+  expires_at: string;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

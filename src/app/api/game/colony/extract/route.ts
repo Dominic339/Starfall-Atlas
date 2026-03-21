@@ -29,8 +29,14 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult, maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
 import { extractionMultiplier } from "@/lib/game/colonyUpkeep";
+import {
+  getStructureTier,
+  researchLevel,
+  extractionBonusMultiplier,
+} from "@/lib/game/colonyStructures";
 import type {
   Colony,
+  Structure,
   SurveyResult,
   ResourceInventoryRow,
 } from "@/lib/types/game";
@@ -101,6 +107,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // ── Fetch colony structures and player research for extraction bonus ────────
+  const [structuresRes, researchRes] = await Promise.all([
+    admin
+      .from("structures")
+      .select("type, tier, is_active")
+      .eq("colony_id", colonyId)
+      .eq("is_active", true),
+    admin
+      .from("player_research")
+      .select("research_id")
+      .eq("player_id", player.id),
+  ]);
+
+  type StructureRow = Pick<Structure, "type" | "tier" | "is_active">;
+  const colonyStructures = ((structuresRes.data ?? []) as StructureRow[]);
+  const unlockedIds = new Set(
+    ((researchRes.data ?? []) as { research_id: string }[]).map((r) => r.research_id),
+  );
+  const extractorTier = getStructureTier(colonyStructures as Structure[], "extractor");
+  const extractionResLvl = researchLevel(unlockedIds, "extraction");
+  const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResLvl);
+
   // ── Calculate accumulated extraction ──────────────────────────────────────
   const now = new Date();
   // Fall back to now (= 0 yield) if last_extract_at is somehow null.
@@ -111,6 +139,7 @@ export async function POST(request: NextRequest) {
     colony.population_tier,
     lastExtractAt,
     now,
+    extBonusMult,
   );
 
   // Apply health multiplier (struggling = 50%, neglected = 25% of base yield).

@@ -49,7 +49,11 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
       .maybeSingle(),
   );
 
-  if (existing) return existing;
+  if (existing) {
+    // Reconcile legacy accounts that may be missing starter assets
+    await reconcileStarterAssets(admin, existing.id);
+    return existing;
+  }
 
   // ── New player: derive handle and insert ──────────────────────────────────
   const preferredHandle = sanitizeHandle(user.user_metadata?.handle);
@@ -115,6 +119,54 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
 // ---------------------------------------------------------------------------
 // Internal helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Reconcile starter assets for existing players.
+ * Creates any missing ships or station without creating duplicates.
+ * Safe to call on every request — no-ops if all assets already exist.
+ */
+async function reconcileStarterAssets(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  playerId: string,
+): Promise<void> {
+  // Check for existing ships
+  const { data: existingShips } = await admin
+    .from("ships")
+    .select("id")
+    .eq("owner_id", playerId)
+    .eq("status", "active");
+
+  if (!existingShips || existingShips.length === 0) {
+    // No ships — create starter ships
+    await admin.from("ships").insert(
+      STARTER_SHIPS.map((ship) => ({
+        owner_id: playerId,
+        name: ship.name,
+        speed_ly_per_hr: ship.speedLyPerHr,
+        cargo_cap: ship.cargoCap,
+        current_system_id: SOL_SYSTEM_ID,
+        current_body_id: null,
+      })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    );
+  }
+
+  // Check for existing station
+  const { data: existingStation } = await admin
+    .from("player_stations")
+    .select("id")
+    .eq("owner_id", playerId)
+    .maybeSingle();
+
+  if (!existingStation) {
+    // No station — create starter station
+    await admin.from("player_stations").insert({
+      owner_id: playerId,
+      name: STARTER_STATION_NAME,
+      current_system_id: SOL_SYSTEM_ID,
+    } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+  }
+}
 
 async function createStarterAssets(playerId: string): Promise<void> {
   const admin = createAdminClient();
