@@ -121,6 +121,16 @@ import { CreateFleetForm, DispatchFleetForm, DisbandFleetButton } from "../_comp
 import { FleetSlotModeSelector } from "../_components/FleetSlotControls";
 import { BuildStructureButton } from "../_components/ColonyStructures";
 import { RefineForm } from "../_components/RefineControls";
+import { RESEARCH_DEFS } from "@/lib/config/research";
+import {
+  researchStatus,
+  arePrerequisitesMet,
+  areMilestonesMet,
+  milestoneLabel,
+  allStatCaps,
+  type MilestoneData,
+} from "@/lib/game/researchHelpers";
+import { PurchaseButton } from "../research/_components/PurchaseButton";
 
 export const dynamic = "force-dynamic";
 
@@ -146,7 +156,7 @@ export default async function GameDashboard() {
   if (!player) redirect("/login");
 
   // ── Step 2: parallel fetches that only need player.id ─────────────────────
-  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes, slotsRes, routesRes] = await Promise.all([
+  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes, slotsRes, routesRes, discoveryCountRes] = await Promise.all([
     admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
     // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
     admin
@@ -190,10 +200,16 @@ export default async function GameDashboard() {
       .select("*")
       .eq("player_id", player.id)
       .order("created_at", { ascending: true }),
+    // Phase 27: discovery count for research milestone checks
+    admin
+      .from("system_discoveries")
+      .select("id", { count: "exact", head: true })
+      .eq("player_id", player.id),
   ]);
 
   const shipList = listResult<Ship>(shipsRes).data ?? [];
   const allTravelJobs = listResult<TravelJob>(jobsRes).data ?? [];
+  const discoveryCount = discoveryCountRes.count ?? 0;
   // Research unlock set — used for per-ship upgrade cap computation (Phase 11).
   const unlockedResearchIds = new Set(
     (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
@@ -1435,6 +1451,17 @@ export default async function GameDashboard() {
   // ── Derived state ─────────────────────────────────────────────────────────
   const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
 
+  // Phase 27: milestone data and station inventory map for embedded research.
+  const maxColonyTier = colonyList
+    .filter((c) => c.status === "active")
+    .reduce((max, c) => Math.max(max, c.population_tier), 0);
+  const milestoneData: MilestoneData = {
+    activeColonyCount,
+    systemsDiscovered: discoveryCount,
+    maxColonyTier,
+  };
+  const stationInvMap = new Map(stationInventory.map((r) => [r.resource_type, r.quantity]));
+
   const currentSystemId =
     resolvedShipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
 
@@ -1655,12 +1682,6 @@ export default async function GameDashboard() {
             Route Map →
           </Link>
           <Link
-            href="/game/research"
-            className="rounded-lg border border-indigo-800 bg-indigo-950/50 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 hover:text-indigo-200 transition-colors"
-          >
-            Research →
-          </Link>
-          <Link
             href="/game/alliance"
             className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
           >
@@ -1668,6 +1689,11 @@ export default async function GameDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* ── 2-column landscape grid ─────────────────────────────────────── */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        {/* ── LEFT column: Station · Fleet Slots · Ships ────────────────── */}
+        <div className="space-y-6">
 
       {/* ── Station (primary section) ────────────────────────────────────── */}
       {station && (
@@ -1959,6 +1985,11 @@ export default async function GameDashboard() {
         )}
       </section>
 
+        </div>{/* end left column */}
+
+        {/* ── RIGHT column: Colonies · Research ─────────────────────────── */}
+        <div className="space-y-6">
+
       {/* Colonies */}
       {colonyList.length > 0 && (
         <section>
@@ -1987,6 +2018,100 @@ export default async function GameDashboard() {
           </div>
         </section>
       )}
+
+      {/* ── Research (compact) ─────────────────────────────────────────────── */}
+      <section>
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Research
+          </h2>
+          <span className="text-xs text-zinc-600">
+            Budget: <span className="font-mono text-zinc-400">{allStatCaps(unlockedResearchIds).cargo}</span> cargo cap ·{" "}
+            Iron: <span className="font-mono text-zinc-400">{(stationInvMap.get("iron") ?? 0).toLocaleString()}</span>
+          </span>
+        </div>
+        <div className="space-y-1.5">
+          {RESEARCH_DEFS.filter((def) => {
+            const s = researchStatus(def, unlockedResearchIds, milestoneData);
+            return s !== "unlocked";
+          }).slice(0, 8).map((def) => {
+            const status = researchStatus(def, unlockedResearchIds, milestoneData);
+            const prereqsMet = arePrerequisitesMet(def, unlockedResearchIds);
+            const milestonesMet = areMilestonesMet(def.milestones ?? [], milestoneData);
+            const canAfford = def.cost.every(
+              (c) => (stationInvMap.get(c.resource_type) ?? 0) >= c.quantity,
+            );
+            const isPurchasable = status === "purchasable" && canAfford;
+            const costLabel = def.cost.map((c) => `${c.quantity} ${c.resource_type}`).join(", ");
+            const borderClass =
+              status === "purchasable" && canAfford
+                ? "border-indigo-800"
+                : "border-zinc-800";
+
+            return (
+              <div
+                key={def.id}
+                className={`rounded border bg-zinc-900/70 px-3 py-2 ${borderClass}`}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className={`text-xs font-medium ${
+                      status === "purchasable" && canAfford ? "text-zinc-100" : "text-zinc-500"
+                    }`}>
+                      {def.name}
+                      {def.scaffoldOnly && (
+                        <span className="ml-1.5 text-zinc-700">(Future)</span>
+                      )}
+                    </p>
+                    {status === "locked" && (
+                      <p className="text-xs text-zinc-700 mt-0.5">
+                        {!prereqsMet
+                          ? `Req: ${def.requires
+                              .filter((id) => !unlockedResearchIds.has(id))
+                              .map((id) => RESEARCH_DEFS.find((r) => r.id === id)?.name ?? id)
+                              .join(", ")}`
+                          : !milestonesMet
+                            ? (def.milestones ?? [])
+                                .filter((m) => {
+                                  switch (m.type) {
+                                    case "min_active_colonies": return milestoneData.activeColonyCount < m.count;
+                                    case "min_systems_discovered": return milestoneData.systemsDiscovered < m.count;
+                                    case "min_colony_tier": return milestoneData.maxColonyTier < m.tier;
+                                  }
+                                })
+                                .map(milestoneLabel)
+                                .join(", ")
+                            : ""}
+                      </p>
+                    )}
+                    {status === "purchasable" && !canAfford && (
+                      <p className="text-xs text-zinc-700 mt-0.5">Need {costLabel}</p>
+                    )}
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-xs text-zinc-600">{costLabel}</p>
+                    {isPurchasable && (
+                      <PurchaseButton researchId={def.id} costLabel={costLabel} />
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          {RESEARCH_DEFS.every((def) => researchStatus(def, unlockedResearchIds, milestoneData) === "unlocked") && (
+            <p className="text-xs text-emerald-600 py-2">All research unlocked.</p>
+          )}
+          {RESEARCH_DEFS.filter((def) => researchStatus(def, unlockedResearchIds, milestoneData) !== "unlocked").length > 8 && (
+            <p className="text-xs text-zinc-700 py-1">
+              +{RESEARCH_DEFS.filter((def) => researchStatus(def, unlockedResearchIds, milestoneData) !== "unlocked").length - 8} more —{" "}
+              <Link href="/game/research" className="text-indigo-600 hover:text-indigo-400">view all</Link>
+            </p>
+          )}
+        </div>
+      </section>
+
+        </div>{/* end right column */}
+      </div>{/* end 2-column grid */}
 
       {/* Nearby systems */}
       {nearbySystems.length > 0 && dockedSystemId && (
@@ -2143,7 +2268,7 @@ function ShipRow({
         </div>
         <div className="text-right shrink-0 space-y-1">
           <p className="text-xs text-zinc-500">
-            {ship.speed_ly_per_hr} ly/hr · {cargoUsed}/{ship.cargo_cap} cargo
+            {Number(ship.speed_ly_per_hr).toFixed(2)} ly/hr · {cargoUsed}/{ship.cargo_cap} cargo
           </p>
           {/* Mode selector */}
           <ShipModeSelector shipId={ship.id} currentMode={ship.dispatch_mode} />

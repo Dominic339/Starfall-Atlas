@@ -218,17 +218,16 @@ export async function POST(request: NextRequest) {
 
   // ── Occupation check ──────────────────────────────────────────────────────
   // A body with an active or abandoned colony cannot be claimed again.
-  // A collapsed colony body is available.
-  const { data: existingColony } = maybeSingleResult<{
-    id: string;
-    status: string;
-  }>(
+  // A collapsed colony body is available for re-founding (UPDATE path below).
+  // Use limit(1) instead of maybeSingle() to avoid throwing on multiple rows.
+  const { data: existingColonyRows } = listResult<{ id: string; status: string }>(
     await admin
       .from("colonies")
       .select("id, status")
       .eq("body_id", bodyId)
-      .maybeSingle(),
+      .limit(1),
   );
+  const existingColony = existingColonyRows?.[0] ?? null;
 
   if (existingColony && existingColony.status !== "collapsed") {
     return toErrorResponse(
@@ -273,40 +272,52 @@ export async function POST(request: NextRequest) {
 
   if (existingColony?.status === "collapsed") {
     // Reuse the collapsed row — UPDATE avoids a UNIQUE constraint violation on body_id.
-    const { data: updated } = maybeSingleResult<Colony>(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any)
-        .from("colonies")
-        .update(colonyFields)
-        .eq("id", existingColony.id)
-        .select("*")
-        .maybeSingle(),
-    );
-    colony = updated ?? null;
-  } else {
-    const { data: inserted } = maybeSingleResult<Colony>(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any)
-        .from("colonies")
-        .insert(colonyFields)
-        .select("*")
-        .maybeSingle(),
-    );
-    if (!inserted) {
-      // UNIQUE conflict on body_id — a concurrent request won the race.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateRes = await (admin as any)
+      .from("colonies")
+      .update(colonyFields)
+      .eq("id", existingColony.id)
+      .select("*")
+      .maybeSingle();
+    if (updateRes.error) {
       return toErrorResponse(
         fail(
-          "already_exists",
-          "This body was just claimed by another player.",
+          "internal_error",
+          `Colony update failed: ${String(updateRes.error.message ?? updateRes.error)}.`,
         ).error,
       );
     }
-    colony = inserted;
+    colony = (updateRes.data as Colony) ?? null;
+  } else {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const insertRes = await (admin as any)
+      .from("colonies")
+      .insert(colonyFields)
+      .select("*")
+      .maybeSingle();
+    if (insertRes.error) {
+      // Distinguish a genuine unique-conflict (concurrent claim) from other errors.
+      const isConflict =
+        insertRes.error.code === "23505" ||
+        String(insertRes.error.message).toLowerCase().includes("unique");
+      if (isConflict) {
+        return toErrorResponse(
+          fail("already_exists", "This body was just claimed by another player.").error,
+        );
+      }
+      return toErrorResponse(
+        fail(
+          "internal_error",
+          `Colony founding failed: ${String(insertRes.error.message ?? insertRes.error)}.`,
+        ).error,
+      );
+    }
+    colony = (insertRes.data as Colony) ?? null;
   }
 
   if (!colony) {
     return toErrorResponse(
-      fail("already_exists", "This body was just claimed by another player.").error,
+      fail("internal_error", "Colony row was not returned after insert; please retry.").error,
     );
   }
 

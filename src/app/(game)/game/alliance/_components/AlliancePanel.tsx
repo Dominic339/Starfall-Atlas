@@ -299,76 +299,89 @@ export function AlliancePanel({
   const otherMembers = members.filter((m) => m.playerId !== playerId);
 
   return (
-    <div className="space-y-6">
-      {/* Feedback */}
-      {actionError && <p className="text-sm text-red-400">{actionError}</p>}
-
-      {/* Alliance info */}
-      <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
+    <div className="space-y-4">
+      {/* ── Guild header ──────────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-indigo-900/60 bg-zinc-900 px-5 py-4">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-mono text-xs font-bold text-indigo-400 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded">
+            <div className="flex items-center gap-2.5">
+              <span className="font-mono text-sm font-bold text-indigo-300 bg-indigo-950/70 border border-indigo-700/60 px-2 py-0.5 rounded">
                 [{alliance.tag}]
               </span>
-              <h2 className="text-base font-semibold text-zinc-100">{alliance.name}</h2>
+              <h2 className="text-lg font-semibold text-zinc-100">{alliance.name}</h2>
             </div>
-            <p className="mt-1 text-xs text-zinc-500">
-              {alliance.memberCount} {alliance.memberCount === 1 ? "member" : "members"} ·{" "}
-              {activeBeaconCount} {activeBeaconCount === 1 ? "beacon" : "beacons"} active
+            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500">
+              <span>{alliance.memberCount} {alliance.memberCount === 1 ? "member" : "members"}</span>
+              <span>{activeBeaconCount} {activeBeaconCount === 1 ? "beacon" : "beacons"}</span>
               {territory.hasValidTerritory && (
-                <> · <span className="text-indigo-400">{territory.systemCount} system{territory.systemCount !== 1 ? "s" : ""} claimed</span></>
+                <span className="text-indigo-400">{territory.systemCount} system{territory.systemCount !== 1 ? "s" : ""} claimed</span>
               )}
-            </p>
+            </div>
           </div>
-          <span className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400">
-            {roleLabel(membership.role)}
-          </span>
+          <div className="shrink-0 flex flex-col items-end gap-1.5">
+            <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+              membership.role === "founder"
+                ? "bg-amber-900/40 text-amber-400"
+                : membership.role === "officer"
+                  ? "bg-indigo-900/40 text-indigo-400"
+                  : "bg-zinc-800 text-zinc-400"
+            }`}>
+              {roleLabel(membership.role)}
+            </span>
+            {!isFounder && (
+              <button
+                onClick={handleLeave}
+                disabled={actionLoading}
+                className="text-xs text-zinc-700 hover:text-red-400 transition-colors disabled:opacity-50"
+              >
+                Leave
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Invite code (founder only) */}
         {isFounder && (
-          <div className="mt-4 rounded border border-zinc-800 bg-zinc-950 px-3 py-2">
-            <p className="text-xs text-zinc-600">Invite code — share with players you want to recruit:</p>
+          <div className="mt-3 rounded border border-zinc-800 bg-zinc-950 px-3 py-2">
+            <p className="text-xs text-zinc-600">Invite code:</p>
             <p className="mt-0.5 font-mono text-sm text-zinc-300 select-all">{alliance.inviteCode}</p>
           </div>
         )}
+      </div>
 
-        {/* Leave */}
-        {!isFounder && (
-          <button
-            onClick={handleLeave}
-            disabled={actionLoading}
-            className="mt-4 text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
-          >
-            Leave alliance
-          </button>
-        )}
-      </section>
-
-      {/* Members */}
-      <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-        <h2 className="mb-3 text-sm font-semibold text-zinc-200">Members ({members.length})</h2>
+      {/* ── Members ───────────────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+          Members ({members.length})
+        </h3>
         <div className="divide-y divide-zinc-800/50">
           {members.map((m) => (
             <div key={m.id} className="flex items-center justify-between py-2">
-              <span className="text-sm text-zinc-300">{m.handle}</span>
+              <span className={`text-sm ${m.playerId === playerId ? "text-zinc-200 font-medium" : "text-zinc-400"}`}>
+                {m.handle}
+                {m.playerId === playerId && <span className="ml-1.5 text-xs text-zinc-600">(you)</span>}
+              </span>
               <span className={`text-xs ${
                 m.role === "founder" ? "text-amber-400" :
                 m.role === "officer" ? "text-indigo-400" :
-                "text-zinc-500"
+                "text-zinc-600"
               }`}>
                 {roleLabel(m.role)}
               </span>
             </div>
           ))}
         </div>
-      </section>
+      </div>
 
-      {/* Promote (founder only) */}
+      {/* Feedback */}
+      {actionError && <p className="text-sm text-red-400">{actionError}</p>}
+
+      {/* ── Management actions (founder only) ─────────────────────────────── */}
       {isFounder && otherMembers.length > 0 && (
-        <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-zinc-200">Manage Roles</h2>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
+            Manage Roles
+          </h3>
           {promoteError && <p className="mb-2 text-xs text-red-400">{promoteError}</p>}
           <div className="flex flex-wrap gap-2">
             <select
@@ -398,12 +411,12 @@ export function AlliancePanel({
               {promoteLoading ? "Saving…" : "Apply"}
             </button>
           </div>
-        </section>
+        </div>
       )}
 
-      {/* Beacons */}
-      <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-        <h2 className="mb-1 text-sm font-semibold text-zinc-200">Beacons</h2>
+      {/* ── Beacons ───────────────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Beacons</h3>
         <p className="mb-3 text-xs text-zinc-600">
           {activeBeaconCount} active · max 20
         </p>
@@ -461,11 +474,11 @@ export function AlliancePanel({
             ))}
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Territory summary */}
-      <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-        <h2 className="mb-1 text-sm font-semibold text-zinc-200">Territory</h2>
+      {/* ── Territory ─────────────────────────────────────────────────────── */}
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Territory</h3>
         {activeBeaconCount < 3 ? (
           <p className="text-xs text-zinc-600">
             Place at least 3 beacons to form a territory loop.{" "}
@@ -501,12 +514,12 @@ export function AlliancePanel({
             </p>
           </div>
         )}
-      </section>
+      </div>
 
-      {/* Disputes */}
+      {/* ── Disputes ──────────────────────────────────────────────────────── */}
       {disputes.length > 0 && (
-        <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-zinc-200">Disputes</h2>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Disputes</h3>
           {disputeError && <p className="mb-2 text-xs text-red-400">{disputeError}</p>}
           <div className="space-y-3">
             {disputes.map((d) => {
@@ -598,7 +611,7 @@ export function AlliancePanel({
               );
             })}
           </div>
-        </section>
+        </div>
       )}
     </div>
   );

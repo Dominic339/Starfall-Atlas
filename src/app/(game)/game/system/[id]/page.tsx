@@ -198,9 +198,10 @@ export default async function SystemPage({
     }
   }
 
+  // Guard: speed_ly_per_hr is a NUMERIC column; Supabase may return it as a string.
   const travelHours =
     travelableShip && travelDistance !== null
-      ? travelDistance / travelableShip.speed_ly_per_hr
+      ? travelDistance / Number(travelableShip.speed_ly_per_hr)
       : null;
 
   // ── Nearby systems from this system ───────────────────────────────────────
