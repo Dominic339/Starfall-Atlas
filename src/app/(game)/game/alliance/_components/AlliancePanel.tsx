@@ -15,6 +15,22 @@ import type { AllianceRole } from "@/lib/types/enums";
 // Prop types
 // ---------------------------------------------------------------------------
 
+export interface DisputePanelEntry {
+  id: string;
+  beaconId: string;
+  beaconSystemId: string;
+  beaconSystemName: string;
+  defendingAllianceId: string;
+  attackingAllianceId: string;
+  status: string;
+  openedAt: string;
+  resolvesAt: string;
+  resolvedAt: string | null;
+  winnerAllianceId: string | null;
+  /** True if this alliance is the defender (owns the beacon). */
+  isDefender: boolean;
+}
+
 export interface AlliancePanelProps {
   // null when player has no alliance
   alliance: {
@@ -33,6 +49,13 @@ export interface AlliancePanelProps {
     handle: string;
     role: AllianceRole;
   }[];
+  /** Territory summary computed server-side. */
+  territory: {
+    hasValidTerritory: boolean;
+    systemCount: number;
+    systemNames: string[];
+    linkCount: number;
+  };
   beacons: {
     id: string;
     systemId: string;
@@ -42,6 +65,8 @@ export interface AlliancePanelProps {
   activeBeaconCount: number;
   catalogSystems: { id: string; name: string }[];
   playerId: string;
+  /** Recent disputes involving this alliance (up to 20, newest first). */
+  disputes: DisputePanelEntry[];
 }
 
 // ---------------------------------------------------------------------------
@@ -72,6 +97,8 @@ export function AlliancePanel({
   activeBeaconCount,
   catalogSystems,
   playerId,
+  territory,
+  disputes,
 }: AlliancePanelProps) {
   const router = useRouter();
 
@@ -93,6 +120,11 @@ export function AlliancePanel({
   const [promoteRole, setPromoteRole]     = useState<"officer" | "member" | "founder">("officer");
   const [promoteLoading, setPromoteLoading] = useState(false);
   const [promoteError, setPromoteError]   = useState<string | null>(null);
+
+  // ── Dispute actions ───────────────────────────────────────────────────────
+  const [disputeFleetId, setDisputeFleetId] = useState<Record<string, string>>({});
+  const [disputeLoading, setDisputeLoading] = useState<Record<string, boolean>>({});
+  const [disputeError, setDisputeError]     = useState<string | null>(null);
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   async function callApi(url: string, body: object): Promise<string | null> {
@@ -169,6 +201,17 @@ export function AlliancePanel({
     setPromoteLoading(false);
     if (err) { setPromoteError(err); return; }
     setPromoteTarget("");
+    router.refresh();
+  }
+
+  async function handleReinforce(disputeId: string) {
+    const fleetId = disputeFleetId[disputeId];
+    if (!fleetId) return;
+    setDisputeLoading((prev) => ({ ...prev, [disputeId]: true }));
+    setDisputeError(null);
+    const err = await callApi("/api/game/dispute/reinforce", { disputeId, fleetId });
+    setDisputeLoading((prev) => ({ ...prev, [disputeId]: false }));
+    if (err) { setDisputeError(err); return; }
     router.refresh();
   }
 
@@ -273,6 +316,9 @@ export function AlliancePanel({
             <p className="mt-1 text-xs text-zinc-500">
               {alliance.memberCount} {alliance.memberCount === 1 ? "member" : "members"} ·{" "}
               {activeBeaconCount} {activeBeaconCount === 1 ? "beacon" : "beacons"} active
+              {territory.hasValidTerritory && (
+                <> · <span className="text-indigo-400">{territory.systemCount} system{territory.systemCount !== 1 ? "s" : ""} claimed</span></>
+              )}
             </p>
           </div>
           <span className="shrink-0 rounded border border-zinc-700 px-2 py-0.5 text-xs text-zinc-400">
@@ -416,6 +462,144 @@ export function AlliancePanel({
           </div>
         )}
       </section>
+
+      {/* Territory summary */}
+      <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
+        <h2 className="mb-1 text-sm font-semibold text-zinc-200">Territory</h2>
+        {activeBeaconCount < 3 ? (
+          <p className="text-xs text-zinc-600">
+            Place at least 3 beacons to form a territory loop.{" "}
+            {activeBeaconCount > 0 && `(${activeBeaconCount}/3 placed)`}
+          </p>
+        ) : !territory.hasValidTerritory ? (
+          <p className="text-xs text-zinc-600">
+            {activeBeaconCount} beacons placed, but no valid territory loop detected.
+            Ensure beacon systems are within 10 ly of each other (2D map distance).
+          </p>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs text-zinc-400">
+              Active territory loop · {territory.linkCount} beacon links ·{" "}
+              <span className="text-indigo-400">
+                {territory.systemCount} {territory.systemCount === 1 ? "system" : "systems"} claimed
+              </span>
+            </p>
+            {territory.systemNames.length > 0 && (
+              <div className="flex flex-wrap gap-1">
+                {territory.systemNames.map((name) => (
+                  <span
+                    key={name}
+                    className="rounded bg-indigo-950/60 border border-indigo-800/40 px-1.5 py-0.5 text-xs text-indigo-300"
+                  >
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-zinc-700">
+              Beacons inside your territory loop are protected from disputes.
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* Disputes */}
+      {disputes.length > 0 && (
+        <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
+          <h2 className="mb-3 text-sm font-semibold text-zinc-200">Disputes</h2>
+          {disputeError && <p className="mb-2 text-xs text-red-400">{disputeError}</p>}
+          <div className="space-y-3">
+            {disputes.map((d) => {
+              const isOpen       = d.status === "open";
+              const now          = Date.now();
+              const msLeft       = new Date(d.resolvesAt).getTime() - now;
+              const hLeft        = Math.max(0, msLeft / (1000 * 60 * 60));
+              const timeStr      = hLeft < 1
+                ? `${Math.ceil(hLeft * 60)} min`
+                : `${hLeft.toFixed(1)} hr`;
+              const loading      = disputeLoading[d.id] ?? false;
+              const selectedFleet = disputeFleetId[d.id] ?? "";
+
+              return (
+                <div
+                  key={d.id}
+                  className={`rounded border p-3 ${
+                    isOpen
+                      ? "border-orange-800/50 bg-orange-950/20"
+                      : "border-zinc-800 bg-zinc-900/30"
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-medium text-zinc-300 truncate">
+                        {d.beaconSystemName}
+                        {d.isDefender
+                          ? <span className="ml-1.5 text-orange-400">(your beacon)</span>
+                          : <span className="ml-1.5 text-indigo-400">(challenge)</span>}
+                      </div>
+                      <div className="mt-0.5 text-xs text-zinc-600">
+                        {d.isDefender ? "Attacker challenging you" : "You are challenging"}
+                      </div>
+                    </div>
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
+                        isOpen
+                          ? "bg-orange-900/60 text-orange-300"
+                          : d.status === "resolved"
+                            ? d.winnerAllianceId === alliance?.id
+                              ? "bg-emerald-900/60 text-emerald-300"
+                              : "bg-red-900/60 text-red-400"
+                            : "bg-zinc-800 text-zinc-500"
+                      }`}
+                    >
+                      {isOpen
+                        ? "Open"
+                        : d.status === "resolved"
+                          ? d.winnerAllianceId === alliance?.id
+                            ? "Won"
+                            : "Lost"
+                          : "Expired"}
+                    </span>
+                  </div>
+
+                  {isOpen && (
+                    <div className="mt-1.5 text-xs text-orange-600">
+                      Resolves in ~{timeStr}
+                    </div>
+                  )}
+                  {!isOpen && d.resolvedAt && (
+                    <div className="mt-1 text-xs text-zinc-700">
+                      Resolved {new Date(d.resolvedAt).toLocaleDateString()}
+                    </div>
+                  )}
+
+                  {/* Reinforce button (only for open disputes) */}
+                  {isOpen && (
+                    <div className="mt-2 flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Fleet ID to commit…"
+                        value={selectedFleet}
+                        onChange={(e) =>
+                          setDisputeFleetId((prev) => ({ ...prev, [d.id]: e.target.value }))
+                        }
+                        className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                      />
+                      <button
+                        onClick={() => handleReinforce(d.id)}
+                        disabled={loading || !selectedFleet}
+                        className="shrink-0 rounded border border-orange-700 bg-orange-950/60 px-2.5 py-1 text-xs text-orange-300 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+                      >
+                        {loading ? "…" : "Reinforce"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

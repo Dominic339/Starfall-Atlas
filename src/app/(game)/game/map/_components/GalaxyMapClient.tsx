@@ -94,12 +94,43 @@ export interface GalaxyBeacon {
   allianceName: string;
 }
 
+/** An active beacon dispute visible on the galaxy map. */
+export interface GalaxyDispute {
+  id: string;
+  beaconId: string;
+  beaconSystemId: string;
+  defendingAllianceId: string;
+  defendingAllianceTag: string;
+  attackingAllianceId: string;
+  attackingAllianceTag: string;
+  resolvesAt: string;
+}
+
+/**
+ * Pre-computed territory data for one alliance.
+ * SVG-space coordinates are computed server-side and passed directly to avoid
+ * duplicate projection logic in the client component.
+ */
+export interface GalaxyTerritory {
+  allianceId: string;
+  allianceTag: string;
+  allianceName: string;
+  /** SVG-space polygon vertices for the territory fill. Empty = no valid territory. */
+  svgPolygon: { x: number; y: number }[];
+  /** Catalog system IDs whose centers lie inside the territory polygon. */
+  systemIds: string[];
+  /** SVG-space link lines between connected beacon systems. */
+  links: { x1: number; y1: number; x2: number; y2: number }[];
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
   fleets: GalaxyFleet[];
   asteroids: GalaxyAsteroid[];
   beacons: GalaxyBeacon[];
+  territories: GalaxyTerritory[];
+  disputes: GalaxyDispute[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -183,6 +214,23 @@ function diamondPoints(cx: number, cy: number, r: number): string {
   return `${cx},${cy - r} ${cx + r},${cy} ${cx},${cy + r} ${cx - r},${cy}`;
 }
 
+/**
+ * Deterministic hue (0–359) derived from an alliance tag string.
+ * Different alliances get visually distinct territory colors.
+ */
+function allianceHue(tag: string): number {
+  let h = 0;
+  for (let i = 0; i < tag.length; i++) {
+    h = (tag.charCodeAt(i) + ((h << 5) - h)) | 0;
+  }
+  return Math.abs(h) % 360;
+}
+
+/** HSL color string for territory fill/stroke from an alliance tag. */
+function allianceColor(tag: string): string {
+  return `hsl(${allianceHue(tag)}, 65%, 60%)`;
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -193,6 +241,8 @@ export function GalaxyMapClient({
   fleets,
   asteroids,
   beacons,
+  territories,
+  disputes,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -269,6 +319,20 @@ export function GalaxyMapClient({
   }
   // Beacons in the selected system
   const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
+
+  // Territories that contain the selected system
+  const territoriesInSelected = selectedSystem
+    ? territories.filter((t) => t.systemIds.includes(selectedSystem.id))
+    : [];
+
+  // Disputes indexed by beacon system id
+  const disputesBySystem = new Map<string, GalaxyDispute[]>();
+  for (const d of disputes) {
+    const list = disputesBySystem.get(d.beaconSystemId) ?? [];
+    list.push(d);
+    disputesBySystem.set(d.beaconSystemId, list);
+  }
+  const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -543,6 +607,48 @@ export function GalaxyMapClient({
 
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
+
+            {/* ── Alliance territory polygons (rendered first — under everything) ── */}
+            {territories.map((t) => {
+              if (t.svgPolygon.length < 3) return null;
+              const color = allianceColor(t.allianceTag);
+              const pts = t.svgPolygon.map((p) => `${p.x},${p.y}`).join(" ");
+              return (
+                <polygon
+                  key={t.allianceId}
+                  points={pts}
+                  fill={color}
+                  fillOpacity={0.08}
+                  stroke={color}
+                  strokeOpacity={0.30}
+                  strokeWidth={1.5 / scale}
+                  strokeDasharray={`${5 / scale} ${3 / scale}`}
+                  pointerEvents="none"
+                />
+              );
+            })}
+
+            {/* ── Alliance beacon link lines (under system nodes, above territory fill) ── */}
+            {territories.flatMap((t) =>
+              t.links.map((lnk, i) => {
+                const color = allianceColor(t.allianceTag);
+                return (
+                  <line
+                    key={`${t.allianceId}-link-${i}`}
+                    x1={lnk.x1}
+                    y1={lnk.y1}
+                    x2={lnk.x2}
+                    y2={lnk.y2}
+                    stroke={color}
+                    strokeOpacity={0.35}
+                    strokeWidth={1 / scale}
+                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    pointerEvents="none"
+                  />
+                );
+              }),
+            )}
+
             {/* ── Travel range circle ─────────────────────────────────────── */}
             {currentSystem && (
               <circle
@@ -845,6 +951,49 @@ export function GalaxyMapClient({
                 </g>
               ));
             })}
+
+            {/* ── Active dispute markers ───────────────────────────────────── */}
+            {systems.map((sys) => {
+              const sysDisputes = disputesBySystem.get(sys.id);
+              if (!sysDisputes || sysDisputes.length === 0) return null;
+              const r = sys.spectralClass === "O" || sys.spectralClass === "B" ? 8
+                : sys.spectralClass === "G" || sys.spectralClass === "K" ? 7
+                : 6;
+              return (
+                <g key={`dispute-${sys.id}`} pointerEvents="none">
+                  {/* Pulsing orange ring around disputed systems */}
+                  <circle
+                    cx={sys.svgX}
+                    cy={sys.svgY}
+                    r={r + 10}
+                    fill="none"
+                    stroke="#f97316"
+                    strokeWidth={1.5 / scale}
+                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    opacity={0.7}
+                  />
+                  {/* Exclamation badge */}
+                  <circle
+                    cx={sys.svgX + r + 4}
+                    cy={sys.svgY + r + 4}
+                    r={4}
+                    fill="#f97316"
+                    opacity={0.9}
+                  />
+                  <text
+                    x={sys.svgX + r + 4}
+                    y={sys.svgY + r + 7.5}
+                    textAnchor="middle"
+                    fontSize={6}
+                    fill="#1c0a00"
+                    fontWeight="bold"
+                    className="select-none"
+                  >
+                    !
+                  </text>
+                </g>
+              );
+            })}
           </g>
         </svg>
 
@@ -898,6 +1047,14 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
             Beacon
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />
+            Territory
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />
+            Disputed
           </span>
           <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
             <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
@@ -1193,6 +1350,70 @@ export function GalaxyMapClient({
                       </span>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Active disputes */}
+              {disputesInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Disputes</span>
+                    <span className="text-xs text-orange-400">
+                      {disputesInSelected.length} active
+                    </span>
+                  </div>
+                  <div className="mt-1 space-y-1">
+                    {disputesInSelected.map((d) => {
+                      const now = Date.now();
+                      const msleft = new Date(d.resolvesAt).getTime() - now;
+                      const hleft = Math.max(0, msleft / (1000 * 60 * 60));
+                      const timeStr = hleft < 1
+                        ? `${Math.ceil(hleft * 60)} min`
+                        : `${hleft.toFixed(1)} hr`;
+                      return (
+                        <div key={d.id} className="rounded border border-orange-900/50 bg-orange-950/30 px-2 py-1.5 text-xs">
+                          <div className="flex items-center gap-1 text-orange-300">
+                            <span className="font-mono">[{d.defendingAllianceTag}]</span>
+                            <span className="text-orange-600">vs</span>
+                            <span className="font-mono">[{d.attackingAllianceTag}]</span>
+                          </div>
+                          <div className="mt-0.5 text-orange-600">Resolves in ~{timeStr}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Alliance territory */}
+              {territoriesInSelected.length > 0 && (
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Territory</span>
+                    <span className="text-xs" style={{ color: allianceColor(territoriesInSelected[0].allianceTag) }}>
+                      {territoriesInSelected.length === 1
+                        ? territoriesInSelected[0].allianceName
+                        : `${territoriesInSelected.length} alliances`}
+                    </span>
+                  </div>
+                  {territoriesInSelected.length > 1 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {territoriesInSelected.map((t) => (
+                        <span
+                          key={t.allianceId}
+                          title={t.allianceName}
+                          className="font-mono text-xs px-1.5 py-0.5 rounded border"
+                          style={{
+                            color: allianceColor(t.allianceTag),
+                            borderColor: allianceColor(t.allianceTag) + "40",
+                            background: allianceColor(t.allianceTag) + "15",
+                          }}
+                        >
+                          [{t.allianceTag}]
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>

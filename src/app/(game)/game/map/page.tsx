@@ -23,8 +23,10 @@ import { generateSystem } from "@/lib/game/generation";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
+import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute } from "./_components/GalaxyMapClient";
+import { computeAllTerritories } from "@/lib/game/territory";
 
 export const dynamic = "force-dynamic";
 
@@ -100,6 +102,7 @@ export default async function GalaxyMapPage() {
     stationRes,
     firstDiscoveriesRes,
     beaconsRes,
+    disputesRes,
   ] = await Promise.all([
     // Ships — need id, current_system_id, name, speed
     admin
@@ -171,7 +174,16 @@ export default async function GalaxyMapPage() {
       .from("alliance_beacons")
       .select("id, alliance_id, system_id")
       .eq("is_active", true),
+
+    // Active disputes (world-visible — all players can see ongoing disputes)
+    admin
+      .from("disputes")
+      .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, resolves_at")
+      .eq("status", "open"),
   ]);
+
+  // ── Lazy dispute resolution ───────────────────────────────────────────────
+  await resolveOverdueDisputes(admin);
 
   // ── Parse results ─────────────────────────────────────────────────────────
   type ShipRow = { id: string; name: string; current_system_id: string | null; speed_ly_per_hr: number };
@@ -194,6 +206,13 @@ export default async function GalaxyMapPage() {
 
   type FirstDiscoveryRow = { system_id: string; player_id: string };
   type RawBeaconRow = { id: string; alliance_id: string; system_id: string };
+  type RawDisputeRow = {
+    id: string;
+    beacon_id: string;
+    defending_alliance_id: string;
+    attacking_alliance_id: string;
+    resolves_at: string;
+  };
 
   const ships              = listResult<ShipRow>(shipsRes).data ?? [];
   const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
@@ -205,6 +224,7 @@ export default async function GalaxyMapPage() {
   const myHarvests         = listResult<HarvestRow>(myHarvestsRes).data ?? [];
   const firstDiscoveries   = listResult<FirstDiscoveryRow>(firstDiscoveriesRes).data ?? [];
   const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];
+  const rawDisputeRows     = listResult<RawDisputeRow>(disputesRes).data ?? [];
   const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
 
   // Fetch discoverer handles for first-discovery systems (so panel can show names)
@@ -369,6 +389,86 @@ export default async function GalaxyMapPage() {
       };
     });
 
+  // ── Compute alliance territories ──────────────────────────────────────────
+  // Build catalog lookup: systemId → { x, y }
+  const catalogBySystem = new Map(
+    catalogEntries.map((e) => [e.id, { x: e.x, y: e.y }]),
+  );
+  // All catalog systems as 2D points for PIP classification
+  const allCatalogSystems = catalogEntries.map((e) => ({
+    systemId: e.id,
+    x: e.x,
+    y: e.y,
+  }));
+
+  const territoryResults = computeAllTerritories({
+    beacons: rawBeaconRows.map((b) => ({
+      id: b.id,
+      allianceId: b.alliance_id,
+      systemId: b.system_id,
+    })),
+    alliances: allianceTagMap,
+    catalogBySystem,
+    allSystems: allCatalogSystems,
+    maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
+  });
+
+  // ── Build dispute list for client ─────────────────────────────────────────
+  // Map beacon_id → system_id from beacon rows we already have
+  const beaconSystemMap = new Map(rawBeaconRows.map((b) => [b.id, b.system_id]));
+
+  // Collect all unique alliance IDs involved in disputes (may not be in beaconAllianceIds)
+  const disputeAllianceIds = [
+    ...new Set(
+      rawDisputeRows.flatMap((d) => [d.defending_alliance_id, d.attacking_alliance_id]),
+    ),
+  ].filter((id) => !allianceTagMap.has(id));
+
+  if (disputeAllianceIds.length > 0) {
+    type AllianceTagRow2 = { id: string; name: string; tag: string };
+    const { data: extraAllianceRows } = listResult<AllianceTagRow2>(
+      await admin.from("alliances").select("id, name, tag").in("id", disputeAllianceIds),
+    );
+    for (const a of extraAllianceRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
+  }
+
+  const galaxyDisputes: GalaxyDispute[] = rawDisputeRows
+    .filter((d) => beaconSystemMap.has(d.beacon_id))
+    .map((d) => ({
+      id:                    d.id,
+      beaconId:              d.beacon_id,
+      beaconSystemId:        beaconSystemMap.get(d.beacon_id)!,
+      defendingAllianceId:   d.defending_alliance_id,
+      defendingAllianceTag:  allianceTagMap.get(d.defending_alliance_id)?.tag ?? "?",
+      attackingAllianceId:   d.attacking_alliance_id,
+      attackingAllianceTag:  allianceTagMap.get(d.attacking_alliance_id)?.tag ?? "?",
+      resolvesAt:            d.resolves_at,
+    }));
+
+  // Convert territory results to SVG-space GalaxyTerritory objects
+  const galaxyTerritories: GalaxyTerritory[] = territoryResults.map((t) => ({
+    allianceId: t.allianceId,
+    allianceTag: t.allianceTag,
+    allianceName: t.allianceName,
+    // Convert hull catalog positions → SVG coords
+    svgPolygon: t.hullCatalog.map((p) => {
+      const pos = systemSvgMap.get(p.systemId);
+      return { x: pos?.svgX ?? 0, y: pos?.svgY ?? 0 };
+    }),
+    systemIds: t.systemsInTerritory,
+    // Convert links to SVG line endpoints
+    links: t.links.map((lnk) => {
+      const from = systemSvgMap.get(lnk.fromSystemId);
+      const to   = systemSvgMap.get(lnk.toSystemId);
+      return {
+        x1: from?.svgX ?? 0,
+        y1: from?.svgY ?? 0,
+        x2: to?.svgX ?? 0,
+        y2: to?.svgY ?? 0,
+      };
+    }),
+  }));
+
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* Header */}
@@ -406,6 +506,8 @@ export default async function GalaxyMapPage() {
         fleets={galaxyFleets}
         asteroids={galaxyAsteroids}
         beacons={galaxyBeacons}
+        territories={galaxyTerritories}
+        disputes={galaxyDisputes}
         pixelsPerLy={pixelsPerLy}
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}
