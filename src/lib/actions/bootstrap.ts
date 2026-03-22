@@ -12,6 +12,10 @@
  * Sol handling: Sol is a canonical starter system defined as a constant.
  * It is NOT represented as a normal player discovery or stewardship row.
  * Starter ships are simply placed at SOL_SYSTEM_ID.
+ *
+ * Phase 28: reconcileStarterAssets now also detects and cleans up
+ * duplicate ships created by the Phase 26 bootstrap bug. Any ships
+ * beyond STARTER_SHIPS.length (oldest kept) are deleted.
  */
 
 import type { User } from "@supabase/supabase-js";
@@ -122,25 +126,38 @@ export async function bootstrapPlayer(user: User): Promise<Player> {
 
 /**
  * Reconcile starter assets for existing players.
- * Creates any missing ships or station without creating duplicates.
- * Safe to call on every request — no-ops if all assets already exist.
+ *
+ * Canonical asset counts:
+ *   - Ships: exactly STARTER_SHIPS.length (currently 2)
+ *   - Stations: exactly 1
+ *
+ * Actions taken:
+ *   - If 0 ships found (query success): create STARTER_SHIPS
+ *   - If >STARTER_SHIPS.length ships found: delete excess (keep oldest N)
+ *   - If 0 stations found: create starter station
+ *
+ * Safe to call on every request. All DB errors are swallowed to avoid
+ * breaking page loads — errors are logged to server console only.
  */
 async function reconcileStarterAssets(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: any,
   playerId: string,
 ): Promise<void> {
-  // Check for existing ships (ships table has no status column — filter by owner only)
+  // ── Ships ──────────────────────────────────────────────────────────────────
+  // Fetch ship IDs ordered by created_at so oldest are first (canonical).
   const { data: existingShips, error: shipsError } = await admin
     .from("ships")
-    .select("id")
-    .eq("owner_id", playerId);
+    .select("id, created_at")
+    .eq("owner_id", playerId)
+    .order("created_at", { ascending: true });
 
-  // Only create ships if the query succeeded AND returned no rows.
-  // If the query errored, skip creation to avoid unbounded duplication.
-  if (!shipsError && (!existingShips || existingShips.length === 0)) {
-    // No ships — create starter ships
-    await admin.from("ships").insert(
+  if (shipsError) {
+    // Schema error or DB unavailable — skip to avoid creating more duplicates.
+    console.error(`[bootstrap] ships query failed for player ${playerId}:`, shipsError);
+  } else if (!existingShips || existingShips.length === 0) {
+    // No ships at all — create canonical starter ships.
+    const { error: insertErr } = await admin.from("ships").insert(
       STARTER_SHIPS.map((ship) => ({
         owner_id: playerId,
         name: ship.name,
@@ -150,23 +167,57 @@ async function reconcileStarterAssets(
         current_body_id: null,
       })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
+    if (insertErr) {
+      console.error(`[bootstrap] ship insert failed for player ${playerId}:`, insertErr);
+    }
+  } else if (existingShips.length > STARTER_SHIPS.length) {
+    // More ships than the canonical count — Phase 26 bootstrap bug produced duplicates.
+    // Keep the oldest STARTER_SHIPS.length ships, delete the rest.
+    // The oldest ships are most likely to have had upgrades applied.
+    const surplusIds = (existingShips as { id: string }[])
+      .slice(STARTER_SHIPS.length)
+      .map((s) => s.id);
+    const { error: deleteErr } = await admin
+      .from("ships")
+      .delete()
+      .in("id", surplusIds);
+    if (deleteErr) {
+      console.error(`[bootstrap] duplicate ship cleanup failed for player ${playerId}:`, deleteErr);
+    } else {
+      console.info(
+        `[bootstrap] removed ${surplusIds.length} duplicate ship(s) for player ${playerId}`,
+      );
+    }
   }
+  // If existingShips.length === STARTER_SHIPS.length, nothing to do.
 
-  // Check for existing station (use limit(1) to handle potential duplicate rows gracefully)
+  // ── Station ────────────────────────────────────────────────────────────────
+  // player_stations has UNIQUE(owner_id) so at most one row can exist.
+  // Use limit(1) for defensive safety only.
   const { data: stationRows, error: stationError } = await admin
     .from("player_stations")
     .select("id")
     .eq("owner_id", playerId)
     .limit(1);
 
-  const hasStation = !stationError && stationRows && stationRows.length > 0;
-  if (!stationError && !hasStation) {
-    // No station — create starter station
-    await admin.from("player_stations").insert({
+  if (stationError) {
+    // player_stations table may not exist yet — log but do not throw.
+    console.error(`[bootstrap] station query failed for player ${playerId}:`, stationError);
+  } else if (!stationRows || stationRows.length === 0) {
+    // No station — create one. ON CONFLICT is not needed because the UNIQUE
+    // constraint will silently reject a concurrent duplicate insert.
+    const { error: stationInsertErr } = await admin.from("player_stations").insert({
       owner_id: playerId,
       name: STARTER_STATION_NAME,
       current_system_id: SOL_SYSTEM_ID,
     } as any); // eslint-disable-line @typescript-eslint/no-explicit-any
+    if (stationInsertErr) {
+      // 23505 = unique violation (concurrent request created it first) — acceptable.
+      const isRace = stationInsertErr.code === "23505";
+      if (!isRace) {
+        console.error(`[bootstrap] station insert failed for player ${playerId}:`, stationInsertErr);
+      }
+    }
   }
 }
 

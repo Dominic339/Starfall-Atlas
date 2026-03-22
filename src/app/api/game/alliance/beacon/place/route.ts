@@ -117,7 +117,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle(),
   );
   if (!station) {
-    return toErrorResponse(fail("not_found", "Station not found.").error);
+    return toErrorResponse(fail("not_found", "Station not found — refresh the page to rebuild it automatically.").error);
   }
 
   const cost = BALANCE.alliance.beaconPlaceCostIron;
