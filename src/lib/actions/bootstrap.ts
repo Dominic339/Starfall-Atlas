@@ -163,6 +163,10 @@ async function reconcileStarterAssets(
         name: ship.name,
         speed_ly_per_hr: ship.speedLyPerHr,
         cargo_cap: ship.cargoCap,
+        hull_level: 1,
+        engine_level: 1,
+        shield_level: 1,
+        utility_level: 1,
         current_system_id: SOL_SYSTEM_ID,
         current_body_id: null,
       })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -222,27 +226,48 @@ async function reconcileStarterAssets(
 }
 
 async function createStarterAssets(playerId: string): Promise<void> {
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
-  // Create 2 starter ships at Sol
+  // Create 2 starter ships at Sol (Phase 28: start at level 1 on key stats)
   await admin.from("ships").insert(
     STARTER_SHIPS.map((ship) => ({
       owner_id: playerId,
       name: ship.name,
       speed_ly_per_hr: ship.speedLyPerHr,
       cargo_cap: ship.cargoCap,
+      hull_level: 1,
+      engine_level: 1,
+      shield_level: 1,
+      utility_level: 1,
       current_system_id: SOL_SYSTEM_ID,
       current_body_id: null,
-    })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
+    })),
   );
 
-  // Create core station at Sol
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from("player_stations").insert({
-    owner_id: playerId,
-    name: STARTER_STATION_NAME,
-    current_system_id: SOL_SYSTEM_ID,
-  });
+  // Create core station at Sol and retrieve its ID
+  const { data: station } = await admin
+    .from("player_stations")
+    .insert({
+      owner_id: playerId,
+      name: STARTER_STATION_NAME,
+      current_system_id: SOL_SYSTEM_ID,
+    })
+    .select("id")
+    .single();
+
+  // Phase 28: grant 900 starting iron in station inventory
+  if (station?.id) {
+    await admin.from("resource_inventory").upsert(
+      {
+        location_type: "station",
+        location_id: station.id,
+        resource_type: "iron",
+        quantity: 900,
+      },
+      { onConflict: "location_type,location_id,resource_type" },
+    );
+  }
 }
 
 /**
