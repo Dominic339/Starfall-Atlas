@@ -38,6 +38,13 @@ type ResourceWeight = { value: ResourceType; weight: number };
 // Phase 28 (Resource Safety): All planet types include iron with at least
 // a small weight. This ensures every colony site produces some iron,
 // which is the primary construction resource for upgrades and founding.
+//
+// Phase 31: Colonizable types are also post-processed in generateResourceProfile
+// to guarantee at least one iron node is present (weight alone is probabilistic).
+const COLONIZABLE_TYPES = new Set<BodyType>([
+  "lush", "ocean", "desert", "ice_planet", "volcanic", "toxic", "habitable",
+]);
+
 const COMMON_RESOURCES: Record<BodyType, ResourceWeight[]> = {
   // ── Phase 16 named planet types ──────────────────────────────────────────
   lush: [
@@ -185,6 +192,16 @@ export function generateResourceProfile(
       quantity: randInt(rng, qRange.min, qRange.max),
       isRare: false,
     });
+  }
+
+  // Phase 31: guarantee at least one iron node for colonizable worlds.
+  if (COLONIZABLE_TYPES.has(bodyType) && !seenTypes.has("iron")) {
+    basicResourceNodes.push({
+      type: "iron",
+      quantity: randInt(rng, qRange.min, qRange.max),
+      isRare: false,
+    });
+    seenTypes.add("iron");
   }
 
   // Rare nodes: 20% chance of 1 rare node, 5% of 2 rare nodes

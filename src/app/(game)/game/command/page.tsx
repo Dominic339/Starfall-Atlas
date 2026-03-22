@@ -796,6 +796,12 @@ export default async function GameDashboard() {
                   .delete()
                   .eq("location_type", "ship")
                   .eq("location_id", ship.id);
+                // Reflect unloaded cargo in stationInventory so display is current.
+                for (const item of cargo) {
+                  const idx = stationInventory.findIndex((r) => r.resource_type === item.resource_type);
+                  if (idx >= 0) stationInventory[idx] = { resource_type: item.resource_type, quantity: stationInventory[idx].quantity + item.quantity };
+                  else stationInventory.push({ resource_type: item.resource_type, quantity: item.quantity });
+                }
                 cargoByShipId.set(ship.id, []);
               }
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -918,6 +924,13 @@ export default async function GameDashboard() {
               .delete()
               .eq("location_type", "ship")
               .eq("location_id", ship.id);
+
+            // Reflect unloaded cargo in stationInventory so display is current.
+            for (const item of cargo) {
+              const idx = stationInventory.findIndex((r) => r.resource_type === item.resource_type);
+              if (idx >= 0) stationInventory[idx] = { resource_type: item.resource_type, quantity: stationInventory[idx].quantity + item.quantity };
+              else stationInventory.push({ resource_type: item.resource_type, quantity: item.quantity });
+            }
 
             cargoByShipId.set(ship.id, []);
           }
@@ -2381,7 +2394,7 @@ function ShipRow({
                 <div key={stat} className="flex items-center justify-between gap-1 min-w-0">
                   <span className="text-xs text-zinc-500 shrink-0">
                     {SHIP_STAT_LABELS[stat]}{" "}
-                    <span className="font-mono text-zinc-300">Lv {s.currentLevel}</span>
+                    <span className="font-mono text-zinc-300">Lv {s.currentLevel ?? 0}</span>
                     <span className="text-zinc-600">{valueLabel}</span>
                   </span>
                   <span className="shrink-0">
