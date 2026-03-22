@@ -50,14 +50,18 @@ export const WORLD_EVENTS_PAGE_SIZE = 50;
  * Phase 28: ships start at engine_level=1.
  * effectiveSpeed(1) = BALANCE.shipUpgrades.baseSpeedLyPerHr + 1 × speedPerLevel
  *                   = 10.0 + 1 × 1.0 = 11.0 ly/hr.
+ *
+ * Phase 30: all six stats now start at level 1.
+ * effectiveCargoCap(1) = baseCargoCapacity + 1 × cargoCapPerLevel
+ *                      = 100 + 1 × 50 = 150 units.
  */
 export const STARTER_SHIPS: ReadonlyArray<{
   name: string;
   speedLyPerHr: number;
   cargoCap: number;
 }> = [
-  { name: "Pioneer I",  speedLyPerHr: 11.0, cargoCap: 100 },
-  { name: "Pioneer II", speedLyPerHr: 11.0, cargoCap: 100 },
+  { name: "Pioneer I",  speedLyPerHr: 11.0, cargoCap: 150 },
+  { name: "Pioneer II", speedLyPerHr: 11.0, cargoCap: 150 },
 ] as const;
 
 /** @deprecated Use STARTER_SHIPS[0] for the first ship. Kept for backwards compatibility. */

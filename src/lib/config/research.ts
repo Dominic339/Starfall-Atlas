@@ -87,11 +87,12 @@ export const RESEARCH_CATEGORY_META: Record<
 /**
  * Max total upgrades on a SINGLE ship when no hull research is unlocked.
  *
- * Phase 29 rebase: ships now start at level 1 in hull/engine/shield/utility
- * (total = 4). Set to 10 so 6 effective free upgrades remain above the
- * baseline — matching the old "6 free upgrades from zero" intent.
+ * Phase 29 rebase: ships start at level 1 in hull/engine/shield/utility (total = 4).
+ * Phase 30 rebase: cargo and turret are also normalized to level 1 (total = 6).
+ * Set to 12 so 6 effective free upgrades remain above the new 6-stat baseline —
+ * matching the "6 free upgrades above baseline" intent throughout.
  */
-export const BASE_TOTAL_SHIP_UPGRADES = 10;
+export const BASE_TOTAL_SHIP_UPGRADES = 12;
 
 /**
  * Per-stat upgrade cap when no stat research is unlocked.
@@ -188,7 +189,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 2 Hulls",
     description:
       "Advanced alloy frames allow ships to accept more installed modules. " +
-      "Raises the per-ship upgrade budget to 15 (6 above the level-1 baseline).",
+      "Raises the per-ship upgrade budget to 17 (6 above the level-1 baseline for all six stats).",
     category: "ship_hulls",
     cost: [{ resource_type: "iron", quantity: 300 }],
     requires: [],
@@ -198,7 +199,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 3 Hulls",
     description:
       "Reinforced composite hulls with integrated conduit routing. " +
-      "Raises the per-ship upgrade budget to 27.",
+      "Raises the per-ship upgrade budget to 29.",
     category: "ship_hulls",
     cost: [{ resource_type: "iron", quantity: 800 }],
     requires: ["ship_hull_t2"],
@@ -209,7 +210,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 4 Hulls",
     description:
       "High-density modular hull sections with redundant power feeds. " +
-      "Raises the per-ship upgrade budget to 63.",
+      "Raises the per-ship upgrade budget to 65.",
     category: "ship_hulls",
     cost: [{ resource_type: "iron", quantity: 2500 }],
     requires: ["ship_hull_t3"],
@@ -220,7 +221,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 5 Hulls",
     description:
       "Nano-lattice construction with exotic material bracing. " +
-      "Raises the per-ship upgrade budget to 64.",
+      "Raises the per-ship upgrade budget to 66.",
     category: "ship_hulls",
     cost: [{ resource_type: "iron", quantity: 8000 }],
     requires: ["ship_hull_t4"],

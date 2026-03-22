@@ -21,7 +21,11 @@ export function DevControls({ pendingTravelCount }: { pendingTravelCount: number
       const res = await fetch("/api/dev/travel/complete", { method: "POST" });
       const json = await res.json();
       if (json.ok) {
-        setMessage(`Completed ${json.data.completed} travel job${json.data.completed !== 1 ? "s" : ""}. Refresh to see ships.`);
+        const { completed, loaded, unloaded } = json.data;
+        const parts: string[] = [`${completed} trip${completed !== 1 ? "s" : ""} completed`];
+        if (loaded > 0) parts.push(`${loaded} loaded`);
+        if (unloaded > 0) parts.push(`${unloaded} unloaded to station`);
+        setMessage(parts.join(" · ") + ". Refresh to see updated state.");
       } else {
         setMessage(`Error: ${json.error?.message ?? "Unknown error"}`);
       }

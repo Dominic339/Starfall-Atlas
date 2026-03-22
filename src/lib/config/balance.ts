@@ -656,9 +656,17 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   station: {
     /**
-     * Station movement speed in light-years per hour.
-     * Stations move much more slowly than ships — relocation is a strategic
-     * long-horizon decision. Full station movement is a future feature.
+     * Station movement speed — INTENTIONALLY DISABLED (Phase 30).
+     *
+     * Station movement has never been implemented. The DB column
+     * `player_stations.current_system_id` is non-nullable; stations are always
+     * fixed at their founding location. There is no station travel_jobs table,
+     * no movement UI, and no movement API route.
+     *
+     * This config value is retained as a placeholder for when station movement
+     * is eventually built out, but it has zero effect on current gameplay.
+     * Do NOT add UI that implies stations can move until the full movement
+     * system (station travel_jobs, state machine, resolve route) is implemented.
      */
     baseSpeedLyPerHr: 0.1,
   },
