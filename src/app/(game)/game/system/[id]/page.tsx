@@ -581,6 +581,7 @@ export default async function SystemPage({
                   destinationName={system.name}
                   distanceLy={travelDistance}
                   travelHours={travelHours}
+                  shipName={travelableShip?.name}
                 />
               )}
 

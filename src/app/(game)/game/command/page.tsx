@@ -131,6 +131,7 @@ import {
   type MilestoneData,
 } from "@/lib/game/researchHelpers";
 import { PurchaseButton } from "../research/_components/PurchaseButton";
+import { DevControls } from "./_components/DevControls";
 
 export const dynamic = "force-dynamic";
 
@@ -1689,6 +1690,11 @@ export default async function GameDashboard() {
           </Link>
         </div>
       </div>
+
+      {/* ── Dev controls (non-production only) ──────────────────────────── */}
+      {process.env.NODE_ENV !== "production" && (
+        <DevControls pendingTravelCount={allTravelJobs.length} />
+      )}
 
       {/* ── 2-column landscape grid ─────────────────────────────────────── */}
       <div className="grid gap-6 lg:grid-cols-2">

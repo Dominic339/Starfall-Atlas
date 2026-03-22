@@ -102,20 +102,20 @@ export function milestoneLabel(m: MilestoneRequirement): string {
  * Maximum total upgrade points allowed on a SINGLE ship (not a global pool).
  * Each ship is an independent asset and enforces this cap individually.
  *
- * Baseline (no hull research): BASE_TOTAL_SHIP_UPGRADES (6)
- * T2 → 11, T3 → 23, T4 → 59, T5 → 60.
+ * Baseline (no hull research): BASE_TOTAL_SHIP_UPGRADES (10)
+ * T2 → 15, T3 → 27, T4 → 63, T5 → 64.
  *
- * Phase 11 note: this was clarified from Phase 10 — the limit is per-ship,
- * applied separately to each ship's own upgrade total.
+ * Phase 29 rebase: +4 to each tier to account for the level-1 baseline
+ * (ships start with 4 total upgrade points across hull/engine/shield/utility).
  */
 export function maxTotalShipUpgrades(
   unlockedIds: ReadonlySet<string> | string[],
 ): number {
   const set = Array.isArray(unlockedIds) ? new Set(unlockedIds) : unlockedIds;
-  if (set.has("ship_hull_t5")) return 60;
-  if (set.has("ship_hull_t4")) return 59;
-  if (set.has("ship_hull_t3")) return 23;
-  if (set.has("ship_hull_t2")) return 11;
+  if (set.has("ship_hull_t5")) return 64;
+  if (set.has("ship_hull_t4")) return 63;
+  if (set.has("ship_hull_t3")) return 27;
+  if (set.has("ship_hull_t2")) return 15;
   return BASE_TOTAL_SHIP_UPGRADES;
 }
 
@@ -123,8 +123,11 @@ export function maxTotalShipUpgrades(
  * Maximum allowed upgrade level for a specific ship stat ON A SINGLE SHIP.
  * Applied per-ship — each ship enforces this cap independently.
  *
- * Baseline (no stat research): BASE_STAT_CAP (1)
- * Tech I → 3, Tech II → 6, Tech III → 10.
+ * Baseline (no stat research): BASE_STAT_CAP (2)
+ * Tech I → 4, Tech II → 7, Tech III → 10.
+ *
+ * Phase 29 rebase: caps +1 each tier (3/6/10 → 4/7/10) since ships start
+ * at level 1 — preserves the same upgrade headroom above the baseline.
  */
 export function maxStatLevel(
   stat: ShipStatKey,
@@ -132,8 +135,8 @@ export function maxStatLevel(
 ): number {
   const set = Array.isArray(unlockedIds) ? new Set(unlockedIds) : unlockedIds;
   if (set.has(`${stat}_cap_t3`)) return 10;
-  if (set.has(`${stat}_cap_t2`)) return 6;
-  if (set.has(`${stat}_cap_t1`)) return 3;
+  if (set.has(`${stat}_cap_t2`)) return 7;
+  if (set.has(`${stat}_cap_t1`)) return 4;
   return BASE_STAT_CAP;
 }
 
