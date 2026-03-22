@@ -39,7 +39,7 @@ import { isHarshPlanetType } from "@/lib/game/habitability";
 import { nextGrowthAt } from "@/lib/game/taxes";
 import { BALANCE } from "@/lib/config/balance";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
-import type { Colony, Ship, SystemDiscovery, Player } from "@/lib/types/game";
+import type { Colony, Ship, SystemDiscovery, Player, PlayerStation } from "@/lib/types/game";
 
 const FoundColonySchema = z.object({
   bodyId: z.string().min(1).max(128),
@@ -247,10 +247,82 @@ export async function POST(request: NextRequest) {
   const slotCheck = requireColonySlot(player, activeColonyCount);
   if (!slotCheck.ok) return toErrorResponse(slotCheck.error);
 
-  // ── Found the colony ──────────────────────────────────────────────────────
-  // Phase 5: No credit or resource cost.
-  // first_colony_placed flag is set on the player after the first insert.
+  // ── Founding iron cost (Phase 28: skip for first colony) ─────────────────
+  // First colony is free to ease new-player onboarding.
+  // Subsequent colonies cost iron based on planet type.
   const isFirstColony = !player.first_colony_placed;
+
+  let ironDeducted = 0;
+  let stationIdForRefund: string | null = null;
+
+  if (!isFirstColony) {
+    const foundingCost =
+      BALANCE.colony.foundingCostIronByType[generatedBody.type] ??
+      BALANCE.colony.foundingCostIronDefault;
+
+    if (foundingCost > 0) {
+      // Look up player station
+      const { data: station } = maybeSingleResult<Pick<PlayerStation, "id">>(
+        await admin
+          .from("player_stations")
+          .select("id")
+          .eq("owner_id", player.id)
+          .maybeSingle(),
+      );
+
+      if (!station) {
+        return toErrorResponse(
+          fail(
+            "not_found",
+            "Your station could not be found. Refresh the page — bootstrap will create it automatically.",
+          ).error,
+        );
+      }
+
+      stationIdForRefund = station.id;
+
+      const { data: ironRow } = maybeSingleResult<{ quantity: number }>(
+        await admin
+          .from("resource_inventory")
+          .select("quantity")
+          .eq("location_type", "station")
+          .eq("location_id", station.id)
+          .eq("resource_type", "iron")
+          .maybeSingle(),
+      );
+
+      const ironAvailable = ironRow?.quantity ?? 0;
+      if (ironAvailable < foundingCost) {
+        return toErrorResponse(
+          fail(
+            "insufficient_resources",
+            `Not enough iron to found a colony on this ${generatedBody.type} world. Need ${foundingCost}, have ${ironAvailable}.`,
+          ).error,
+        );
+      }
+
+      // Deduct iron upfront
+      const newIron = ironAvailable - foundingCost;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const adminAny = admin as any;
+      if (newIron <= 0) {
+        await adminAny
+          .from("resource_inventory")
+          .delete()
+          .eq("location_type", "station")
+          .eq("location_id", station.id)
+          .eq("resource_type", "iron");
+      } else {
+        await adminAny
+          .from("resource_inventory")
+          .update({ quantity: newIron })
+          .eq("location_type", "station")
+          .eq("location_id", station.id)
+          .eq("resource_type", "iron");
+      }
+      ironDeducted = foundingCost;
+    }
+  }
   const now = new Date();
   const growthAt = nextGrowthAt(1, now);
 
@@ -270,6 +342,18 @@ export async function POST(request: NextRequest) {
 
   let colony: Colony | null = null;
 
+  // Helper: refund deducted iron if colony DB operation fails
+  async function refundIron(): Promise<void> {
+    if (ironDeducted > 0 && stationIdForRefund) {
+      await (admin as any) // eslint-disable-line @typescript-eslint/no-explicit-any
+        .from("resource_inventory")
+        .upsert(
+          { location_type: "station", location_id: stationIdForRefund, resource_type: "iron", quantity: ironDeducted },
+          { onConflict: "location_type,location_id,resource_type" },
+        );
+    }
+  }
+
   if (existingColony?.status === "collapsed") {
     // Reuse the collapsed row — UPDATE avoids a UNIQUE constraint violation on body_id.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -280,6 +364,7 @@ export async function POST(request: NextRequest) {
       .select("*")
       .maybeSingle();
     if (updateRes.error) {
+      await refundIron();
       return toErrorResponse(
         fail(
           "internal_error",
@@ -296,6 +381,7 @@ export async function POST(request: NextRequest) {
       .select("*")
       .maybeSingle();
     if (insertRes.error) {
+      await refundIron();
       // Distinguish a genuine unique-conflict (concurrent claim) from other errors.
       const isConflict =
         insertRes.error.code === "23505" ||
@@ -316,6 +402,7 @@ export async function POST(request: NextRequest) {
   }
 
   if (!colony) {
+    await refundIron();
     return toErrorResponse(
       fail("internal_error", "Colony row was not returned after insert; please retry.").error,
     );

@@ -111,10 +111,11 @@ export function effectiveSpeed(engineLevel: number): number {
 
 /**
  * Iron cost to upgrade `stat` to `targetLevel` (= currentLevel + 1).
- * Cost = ironCostPerLevel[stat] × targetLevel.
+ * Phase 28: exponential formula — cost = ceil(base * 1.8^targetLevel).
  */
 export function upgradeIronCost(stat: ShipStatKey, targetLevel: number): number {
-  return (BALANCE.shipUpgrades.ironCostPerLevel[stat] ?? 0) * targetLevel;
+  const base = BALANCE.shipUpgrades.ironCostBase[stat] ?? 0;
+  return Math.ceil(base * Math.pow(1.8, targetLevel));
 }
 
 // ---------------------------------------------------------------------------

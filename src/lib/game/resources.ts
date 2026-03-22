@@ -35,33 +35,40 @@ import { randInt, weightedPick } from "./rng";
 
 type ResourceWeight = { value: ResourceType; weight: number };
 
+// Phase 28 (Resource Safety): All planet types include iron with at least
+// a small weight. This ensures every colony site produces some iron,
+// which is the primary construction resource for upgrades and founding.
 const COMMON_RESOURCES: Record<BodyType, ResourceWeight[]> = {
   // ── Phase 16 named planet types ──────────────────────────────────────────
   lush: [
     { value: "biomass", weight: 5 },
     { value: "water",   weight: 4 },
+    { value: "iron",    weight: 1 }, // trace iron deposits
   ],
   ocean: [
     { value: "water",   weight: 7 },
     { value: "biomass", weight: 3 },
+    { value: "iron",    weight: 1 }, // seafloor iron deposits
   ],
   desert: [
     { value: "silica",  weight: 7 },
-    { value: "iron",    weight: 2 },
+    { value: "iron",    weight: 3 }, // iron-rich desert regolith
     { value: "carbon",  weight: 1 },
   ],
   ice_planet: [
     { value: "water",   weight: 6 },
     { value: "sulfur",  weight: 3 },
+    { value: "iron",    weight: 1 }, // subsurface iron
   ],
   volcanic: [
     { value: "sulfur",       weight: 5 },
-    { value: "iron",         weight: 3 },
+    { value: "iron",         weight: 4 }, // volcanic iron-rich lava fields
     { value: "rare_crystal", weight: 2 },
   ],
   toxic: [
     { value: "sulfur",       weight: 5 },
     { value: "rare_crystal", weight: 3 },
+    { value: "iron",         weight: 2 }, // corroded iron formations
     { value: "carbon",       weight: 1 },
   ],
 
@@ -73,15 +80,18 @@ const COMMON_RESOURCES: Record<BodyType, ResourceWeight[]> = {
   habitable: [
     { value: "biomass", weight: 4 },
     { value: "water",   weight: 4 },
+    { value: "iron",    weight: 2 }, // iron-rich soil
     { value: "carbon",  weight: 1 },
   ],
   gas_giant: [
     { value: "carbon", weight: 5 },
     { value: "sulfur", weight: 2 },
+    { value: "iron",   weight: 1 }, // metallic core ejecta
   ],
   ice_giant: [
     { value: "water",  weight: 6 },
     { value: "carbon", weight: 2 },
+    { value: "iron",   weight: 1 }, // deep metallic deposits
   ],
   asteroid_belt: [
     { value: "iron",   weight: 7 },
@@ -93,6 +103,7 @@ const COMMON_RESOURCES: Record<BodyType, ResourceWeight[]> = {
   ],
   frozen: [
     { value: "water",  weight: 7 },
+    { value: "iron",   weight: 2 }, // iron-rich permafrost
     { value: "carbon", weight: 2 },
   ],
 };

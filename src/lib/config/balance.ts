@@ -13,8 +13,12 @@ export const BALANCE = {
   // Travel
   // -------------------------------------------------------------------------
   travel: {
-    /** Base ship speed in light-years per hour */
-    baseSpeedLyPerHr: 1.0,
+    /**
+     * Base ship speed in light-years per hour.
+     * Phase 28: increased for ~30 min travel at medium distances (~5 ly).
+     * A 5 ly journey at 10 ly/hr = 30 minutes.
+     */
+    baseSpeedLyPerHr: 10.0,
   },
 
   // -------------------------------------------------------------------------
@@ -27,6 +31,35 @@ export const BALANCE = {
      * GAME_RULES.md §7: "only source of Credits is colony taxes."
      */
     taxPerHourByTier: [0, 10, 25, 60, 150, 350, 800, 1800, 4000, 9000, 20000],
+
+    /**
+     * Iron cost to found a colony, by planet body type.
+     * First colony is always free (tutorial onboarding).
+     * Subsequent colonies cost iron based on planet habitability.
+     *
+     * Tiers:
+     *   Lush   (300): lush, habitable — richest biospheres, easiest to settle
+     *   Ocean  (400): ocean, rocky, desert — moderate conditions
+     *   Harsh  (600): volcanic, toxic — requires dome research (GAME_RULES.md §16)
+     *   Extreme (900): barren, frozen, ice_planet — barely habitable environments
+     *
+     * Any unlisted type falls back to foundingCostIronDefault.
+     */
+    foundingCostIronByType: {
+      lush:       300,
+      habitable:  300,
+      ocean:      400,
+      rocky:      400,
+      desert:     400,
+      volcanic:   600,
+      toxic:      600,
+      barren:     900,
+      frozen:     900,
+      ice_planet: 900,
+    } as Record<string, number>,
+
+    /** Fallback founding cost for any body type not in foundingCostIronByType. */
+    foundingCostIronDefault: 400,
 
     /**
      * Hours of tax yield that can accumulate before collection is capped.
@@ -265,10 +298,10 @@ export const BALANCE = {
     /**
      * Base resource units produced per hour per population tier,
      * per basic resource node revealed by survey.
-     * At tier 1: 5 u/hr per node → 60 units per 12h cap period.
-     * At tier 2: 10 u/hr per node → 120 units per cap period.
+     * Phase 28: 1 unit/5s = 720 u/hr base rate (at tier 1, per node).
+     * At tier 2: 1440 u/hr per node.
      */
-    baseUnitsPerHrPerTier: 5,
+    baseUnitsPerHrPerTier: 720,
 
     /**
      * Maximum hours of extraction yield that can accumulate before
@@ -381,10 +414,15 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   shipUpgrades: {
     /**
-     * Iron cost to upgrade a stat to level N = ironCostPerLevel[stat] * N.
-     * (Level 1 costs 1×, level 2 costs 2×, …)
+     * Base iron cost for ship stat upgrades.
+     * Phase 28: exponential formula — cost to reach level N = Math.ceil(base * 1.8^N).
+     * Computed in shipUpgrades.ts upgradeIronCost().
+     *
+     * Sample costs (hull base=8):
+     *   → level 2: ceil(8 × 1.8²) = 26    → level 5: ceil(8 × 1.8⁵) = 152
+     *   → level 3: ceil(8 × 1.8³) = 47    → level 8: ceil(8 × 1.8⁸) = 900
      */
-    ironCostPerLevel: {
+    ironCostBase: {
       hull:    8,
       shield:  8,
       cargo:   10,
@@ -404,12 +442,13 @@ export const BALANCE = {
 
     /**
      * Base ship speed at level 0 (ly/hr).
-     * Must match the ships table DEFAULT (00002_players_ships.sql).
+     * Phase 28: must match travel.baseSpeedLyPerHr.
+     * Ships default to engine_level=1, giving effectiveSpeed = 11.0 ly/hr.
      */
-    baseSpeedLyPerHr: 1.0,
+    baseSpeedLyPerHr: 10.0,
 
     /** Additional speed (ly/hr) per engine upgrade level. */
-    speedPerLevel: 0.2,
+    speedPerLevel: 1.0,
 
     /**
      * Ship tier thresholds — minimum total upgrades (inclusive) to reach each tier.

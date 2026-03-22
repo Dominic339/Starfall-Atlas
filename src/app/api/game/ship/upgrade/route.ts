@@ -12,7 +12,7 @@
  *   6. Not at per-ship total research cap
  *   7. Not at absolute DB max (10)
  *   8. Fetch station → station inventory
- *   9. Sufficient iron for cost (ironCostPerLevel[stat] × targetLevel)
+ *   9. Sufficient iron for cost (ceil(ironCostBase[stat] × 1.8^targetLevel))
  *  10. Deduct iron from station inventory
  *  11. Persist: increment stat_level, update derived stat column if applicable
  *

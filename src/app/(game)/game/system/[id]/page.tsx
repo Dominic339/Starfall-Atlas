@@ -740,8 +740,8 @@ export default async function SystemPage({
                           ) : (
                             <span className="text-zinc-400">{node.type}</span>
                           )}{" "}
-                          <span className="text-zinc-600">
-                            {node.quantity > 1 ? `×${node.quantity} yield` : "base yield"}
+                          <span className={resourceTierColor(node.quantity)}>
+                            {resourceTierLabel(node.quantity)}
                           </span>
                         </span>
                       ),
@@ -960,14 +960,38 @@ function spectralLabel(spectralClass: string): string {
 
 function bodyLabel(type: string): string {
   const labels: Record<string, string> = {
-    habitable: "Habitable World",
-    rocky: "Rocky Planet",
-    barren: "Barren World",
-    frozen: "Frozen World",
-    gas_giant: "Gas Giant",
-    ice_giant: "Ice Giant",
+    habitable:     "Habitable World",
+    lush:          "Lush World",
+    ocean:         "Ocean World",
+    desert:        "Desert World",
+    ice_planet:    "Ice Planet",
+    volcanic:      "Volcanic World",
+    toxic:         "Toxic World",
+    rocky:         "Rocky Planet",
+    barren:        "Barren World",
+    frozen:        "Frozen World",
+    gas_giant:     "Gas Giant",
+    ice_giant:     "Ice Giant",
     asteroid_belt: "Asteroid Belt",
   };
   return labels[type] ?? type;
+}
+
+/**
+ * Convert a raw survey resource quantity to a human-readable tier label.
+ * Labels represent the planet's reserve richness, not extraction rate.
+ */
+function resourceTierLabel(quantity: number): string {
+  if (quantity >= 6000) return "Abundant";
+  if (quantity >= 2000) return "High";
+  if (quantity >= 500)  return "Moderate";
+  return "Low";
+}
+
+function resourceTierColor(quantity: number): string {
+  if (quantity >= 6000) return "text-emerald-400";
+  if (quantity >= 2000) return "text-sky-400";
+  if (quantity >= 500)  return "text-zinc-400";
+  return "text-zinc-600";
 }
 

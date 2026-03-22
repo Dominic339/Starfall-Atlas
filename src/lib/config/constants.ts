@@ -46,13 +46,18 @@ export const WORLD_EVENTS_PAGE_SIZE = 50;
  * Starter ships — every new player begins with two ships at Sol.
  * Ships are the active transport and exploration layer of the economy.
  */
+/**
+ * Phase 28: ships start at engine_level=1.
+ * effectiveSpeed(1) = BALANCE.shipUpgrades.baseSpeedLyPerHr + 1 × speedPerLevel
+ *                   = 10.0 + 1 × 1.0 = 11.0 ly/hr.
+ */
 export const STARTER_SHIPS: ReadonlyArray<{
   name: string;
   speedLyPerHr: number;
   cargoCap: number;
 }> = [
-  { name: "Pioneer I",  speedLyPerHr: 1.0, cargoCap: 100 },
-  { name: "Pioneer II", speedLyPerHr: 1.0, cargoCap: 100 },
+  { name: "Pioneer I",  speedLyPerHr: 11.0, cargoCap: 100 },
+  { name: "Pioneer II", speedLyPerHr: 11.0, cargoCap: 100 },
 ] as const;
 
 /** @deprecated Use STARTER_SHIPS[0] for the first ship. Kept for backwards compatibility. */
