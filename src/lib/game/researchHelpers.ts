@@ -102,20 +102,20 @@ export function milestoneLabel(m: MilestoneRequirement): string {
  * Maximum total upgrade points allowed on a SINGLE ship (not a global pool).
  * Each ship is an independent asset and enforces this cap individually.
  *
- * Baseline (no hull research): BASE_TOTAL_SHIP_UPGRADES (10)
- * T2 → 15, T3 → 27, T4 → 63, T5 → 64.
+ * Baseline (no hull research): BASE_TOTAL_SHIP_UPGRADES (12)
+ * T2 → 17, T3 → 29, T4 → 65, T5 → 66.
  *
- * Phase 29 rebase: +4 to each tier to account for the level-1 baseline
- * (ships start with 4 total upgrade points across hull/engine/shield/utility).
+ * Phase 29 rebase: +4 to each tier (hull/engine/shield/utility at level 1 = total 4).
+ * Phase 30 rebase: +2 more to each tier (cargo/turret also normalized to level 1 = total 6).
  */
 export function maxTotalShipUpgrades(
   unlockedIds: ReadonlySet<string> | string[],
 ): number {
   const set = Array.isArray(unlockedIds) ? new Set(unlockedIds) : unlockedIds;
-  if (set.has("ship_hull_t5")) return 64;
-  if (set.has("ship_hull_t4")) return 63;
-  if (set.has("ship_hull_t3")) return 27;
-  if (set.has("ship_hull_t2")) return 15;
+  if (set.has("ship_hull_t5")) return 66;
+  if (set.has("ship_hull_t4")) return 65;
+  if (set.has("ship_hull_t3")) return 29;
+  if (set.has("ship_hull_t2")) return 17;
   return BASE_TOTAL_SHIP_UPGRADES;
 }
 

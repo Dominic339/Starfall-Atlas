@@ -684,9 +684,12 @@ export default async function GameDashboard() {
           { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
           { x: toEntry.x, y: toEntry.y, z: toEntry.z },
         );
+        // Same-system "travel" is not a real trip — guard prevents RangeError
+        // in travelDurationMs (which requires dist > 0) and avoids phantom jobs.
+        if (dist <= 0) return false;
         if (dist > BALANCE.lanes.baseRangeLy) return false;
 
-        const arriveAt = computeArrivalTime(requestTime, dist, ship.speed_ly_per_hr);
+        const arriveAt = computeArrivalTime(requestTime, dist, Number(ship.speed_ly_per_hr));
 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         await (admin as any)
@@ -740,7 +743,7 @@ export default async function GameDashboard() {
         const target = candidates[0];
 
         if (target.distanceLy === 0) {
-          // Colony in same system: load immediately, then depart to station.
+          // Colony in same system as ship: load immediately.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           await (admin as any)
             .from("ships")
@@ -754,9 +757,57 @@ export default async function GameDashboard() {
 
           // Immediately load (same system = no travel needed).
           const loaded = await doLoad(target.colonyId);
+          const hasCargo = (loaded > 0 || (cargoByShipId.get(ship.id) ?? []).length > 0);
 
-          if (loaded > 0 || (cargoByShipId.get(ship.id) ?? []).length > 0) {
-            const departed = await startTravel(st.current_system_id); // st is non-null (outer guard)
+          if (hasCargo) {
+            // If ship is already at the station (colony co-located with station),
+            // startTravel would produce dist=0 and fail. Unload inline instead.
+            if (ship.current_system_id === st.current_system_id) {
+              const cargo = cargoByShipId.get(ship.id) ?? [];
+              if (cargo.length > 0) {
+                const rtypes = cargo.map((r) => r.resource_type);
+                const { data: stRows } = await admin
+                  .from("resource_inventory")
+                  .select("resource_type, quantity")
+                  .eq("location_type", "station")
+                  .eq("location_id", st.id)
+                  .in("resource_type", rtypes);
+                const stMap = new Map(
+                  (stRows ?? []).map((r) => [
+                    (r as { resource_type: string }).resource_type,
+                    (r as { quantity: number }).quantity,
+                  ]),
+                );
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                await (admin as any)
+                  .from("resource_inventory")
+                  .upsert(
+                    cargo.map((item) => ({
+                      location_type: "station",
+                      location_id: st.id,
+                      resource_type: item.resource_type,
+                      quantity: (stMap.get(item.resource_type) ?? 0) + item.quantity,
+                    })),
+                    { onConflict: "location_type,location_id,resource_type" },
+                  );
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                await (admin as any)
+                  .from("resource_inventory")
+                  .delete()
+                  .eq("location_type", "ship")
+                  .eq("location_id", ship.id);
+                cargoByShipId.set(ship.id, []);
+              }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              await (admin as any)
+                .from("ships")
+                .update({ auto_state: "idle", auto_target_colony_id: null })
+                .eq("id", ship.id);
+              return { ...ship, auto_state: "idle", auto_target_colony_id: null };
+            }
+
+            // Colony in same system but station is elsewhere — travel to station.
+            const departed = await startTravel(st.current_system_id);
             const nextState = departed ? "traveling_to_station" : "idle";
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             await (admin as any)

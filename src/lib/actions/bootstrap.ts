@@ -167,6 +167,8 @@ async function reconcileStarterAssets(
         engine_level: 1,
         shield_level: 1,
         utility_level: 1,
+        cargo_level: 1,
+        turret_level: 1,
         current_system_id: SOL_SYSTEM_ID,
         current_body_id: null,
       })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
@@ -240,6 +242,8 @@ async function createStarterAssets(playerId: string): Promise<void> {
       engine_level: 1,
       shield_level: 1,
       utility_level: 1,
+      cargo_level: 1,
+      turret_level: 1,
       current_system_id: SOL_SYSTEM_ID,
       current_body_id: null,
     })),
