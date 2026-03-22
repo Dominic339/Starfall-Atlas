@@ -154,7 +154,7 @@ export function shipStatUpgradeStates(
   const result = {} as Record<ShipStatKey, StatUpgradeState>;
 
   for (const stat of SHIP_STAT_KEYS) {
-    const currentLevel = ship[`${stat}_level`] as number;
+    const currentLevel = (ship[`${stat}_level`] as number) ?? 0;
     const researchCap = maxStatLevel(stat, unlockedIds);
     const absoluteCap = 10;
     const effectiveCap = Math.min(researchCap, absoluteCap);
