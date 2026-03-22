@@ -84,11 +84,22 @@ export const RESEARCH_CATEGORY_META: Record<
 // Constants referenced by researchHelpers.ts
 // ---------------------------------------------------------------------------
 
-/** Max total ship upgrades (across all ships) when no hull research is unlocked. */
-export const BASE_TOTAL_SHIP_UPGRADES = 6;
+/**
+ * Max total upgrades on a SINGLE ship when no hull research is unlocked.
+ *
+ * Phase 29 rebase: ships now start at level 1 in hull/engine/shield/utility
+ * (total = 4). Set to 10 so 6 effective free upgrades remain above the
+ * baseline — matching the old "6 free upgrades from zero" intent.
+ */
+export const BASE_TOTAL_SHIP_UPGRADES = 10;
 
-/** Per-stat upgrade cap when no stat research is unlocked. */
-export const BASE_STAT_CAP = 1;
+/**
+ * Per-stat upgrade cap when no stat research is unlocked.
+ *
+ * Phase 29 rebase: ships start at level 1, so the base cap must be ≥ 2
+ * to allow the first meaningful upgrade (1→2) without any research.
+ */
+export const BASE_STAT_CAP = 2;
 
 // ---------------------------------------------------------------------------
 // Helpers for building repetitive definitions
@@ -107,11 +118,21 @@ const SHIP_STATS: ShipStatKey[] = [
   "hull", "shield", "cargo", "engine", "turret", "utility",
 ];
 
-/** Three-tier stat cap progression: [cap, iron cost] */
+/**
+ * Three-tier stat cap progression: [cap, iron cost].
+ *
+ * Phase 29 rebase: each cap value is +1 from Phase 28 to account for the
+ * level-1 baseline. Old caps (3/6/10) corresponded to 3/6/10 upgrades from
+ * zero. New caps (4/7/10) allow the same meaningful upgrade headroom above
+ * the new level-1 baseline. T3 stays at 10 (absolute max).
+ *
+ * Costs are substantially increased to match the higher early-game iron income
+ * from Phase 28 extraction rebalance (720 u/hr base).
+ */
 const STAT_TIERS: [number, number][] = [
-  [3,  10],   // Tech I
-  [6,  30],   // Tech II
-  [10, 80],   // Tech III
+  [4,  200],  // Tech I   — cap 2 → 4  (first real upgrade unlock)
+  [7,  600],  // Tech II  — cap 4 → 7  (mid-game)
+  [10, 2000], // Tech III — cap 7 → 10 (late-game, absolute max)
 ];
 
 function buildStatCapDefs(): ResearchDefinition[] {
@@ -167,9 +188,9 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 2 Hulls",
     description:
       "Advanced alloy frames allow ships to accept more installed modules. " +
-      "Raises the maximum total upgrade budget across all ships to 11.",
+      "Raises the per-ship upgrade budget to 15 (6 above the level-1 baseline).",
     category: "ship_hulls",
-    cost: [{ resource_type: "iron", quantity: 30 }],
+    cost: [{ resource_type: "iron", quantity: 300 }],
     requires: [],
   },
   {
@@ -177,9 +198,9 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 3 Hulls",
     description:
       "Reinforced composite hulls with integrated conduit routing. " +
-      "Raises the maximum total upgrade budget to 23.",
+      "Raises the per-ship upgrade budget to 27.",
     category: "ship_hulls",
-    cost: [{ resource_type: "iron", quantity: 80 }],
+    cost: [{ resource_type: "iron", quantity: 800 }],
     requires: ["ship_hull_t2"],
     milestones: [{ type: "min_active_colonies", count: 1 }],
   },
@@ -188,9 +209,9 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 4 Hulls",
     description:
       "High-density modular hull sections with redundant power feeds. " +
-      "Raises the maximum total upgrade budget to 59.",
+      "Raises the per-ship upgrade budget to 63.",
     category: "ship_hulls",
-    cost: [{ resource_type: "iron", quantity: 220 }],
+    cost: [{ resource_type: "iron", quantity: 2500 }],
     requires: ["ship_hull_t3"],
     milestones: [{ type: "min_active_colonies", count: 3 }],
   },
@@ -199,9 +220,9 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
     name: "Tier 5 Hulls",
     description:
       "Nano-lattice construction with exotic material bracing. " +
-      "Raises the maximum total upgrade budget to 60.",
+      "Raises the per-ship upgrade budget to 64.",
     category: "ship_hulls",
-    cost: [{ resource_type: "iron", quantity: 550 }],
+    cost: [{ resource_type: "iron", quantity: 8000 }],
     requires: ["ship_hull_t4"],
     milestones: [{ type: "min_active_colonies", count: 5 }],
   },
@@ -212,7 +233,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Hardened containment layers capable of withstanding wormhole transit " +
       "stresses. Required for future wormhole access. No active effect yet.",
     category: "ship_hulls",
-    cost: [{ resource_type: "iron", quantity: 1200 }],
+    cost: [{ resource_type: "iron", quantity: 15000 }],
     requires: ["ship_hull_t5"],
     milestones: [{ type: "min_active_colonies", count: 8 }],
     scaffoldOnly: true,
@@ -233,7 +254,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Advanced tactical overlay for large-scale operations. Unlocks 4 fleet slots (future).",
       "Full strategic command suite. Unlocks 5 fleet slots (future).",
     ],
-    [20, 55, 130, 300, 700],
+    [300, 800, 2000, 5000, 12000],
     [
       undefined,
       [{ type: "min_active_colonies", count: 1 }],
@@ -253,7 +274,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Staggered micro-jump coordination. Allows fleets of 12 ships (future).",
       "Synchronized formation-jump capability. Allows fleets of 20 ships (future).",
     ],
-    [20, 55, 130, 300, 700],
+    [300, 800, 2000, 5000, 12000],
     [
       undefined,
       [{ type: "min_active_colonies", count: 1 }],
@@ -275,7 +296,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Required before founding colonies on these planet types. " +
       "Harsh colonies consume additional iron each period for dome maintenance.",
     category: "colony_tech",
-    cost: [{ resource_type: "iron", quantity: 80 }],
+    cost: [{ resource_type: "iron", quantity: 500 }],
     requires: ["sustainability_1"],
     milestones: [{ type: "min_active_colonies", count: 1 }],
   },
@@ -291,7 +312,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Particle-sieve refinery improves ore grade before shipping (future).",
       "Quantum-stabilised extraction at near-theoretical efficiency limits (future).",
     ],
-    [15, 40, 100, 260, 650],
+    [200, 600, 1500, 4000, 10000],
   ),
   ...buildSequentialDefs(
     "colony_tech",
@@ -304,7 +325,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Distributed healthcare networks extend healthy lifespans (future).",
       "Post-scarcity welfare systems maximise population satisfaction (future).",
     ],
-    [15, 40, 100, 260, 650],
+    [200, 600, 1500, 4000, 10000],
   ),
   ...buildSequentialDefs(
     "colony_tech",
@@ -317,7 +338,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Fully self-sustaining colony cycles — minimal iron upkeep (future).",
       "Zero-net-import colony design. Upkeep requirements near zero (future).",
     ],
-    [15, 40, 100, 260, 650],
+    [200, 600, 1500, 4000, 10000],
   ),
   ...buildSequentialDefs(
     "colony_tech",
@@ -330,7 +351,7 @@ export const RESEARCH_DEFS: readonly ResearchDefinition[] = [
       "Distributed micro-warehouse grid across all colony bodies (future).",
       "Planetary-scale storage network — effectively unlimited (future).",
     ],
-    [15, 40, 100, 260, 650],
+    [200, 600, 1500, 4000, 10000],
   ),
 ] as const;
 

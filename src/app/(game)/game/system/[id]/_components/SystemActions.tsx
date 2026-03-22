@@ -27,6 +27,7 @@ interface TravelButtonProps {
   destinationName: string;
   distanceLy: number;
   travelHours: number;
+  shipName?: string;
 }
 
 export function TravelButton({
@@ -34,12 +35,19 @@ export function TravelButton({
   destinationName,
   distanceLy,
   travelHours,
+  shipName,
 }: TravelButtonProps) {
+  const [confirming, setConfirming] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
 
-  async function handleTravel() {
+  const eta =
+    travelHours < 1
+      ? `${Math.round(travelHours * 60)} min`
+      : `${travelHours.toFixed(1)} hr`;
+
+  async function handleConfirmedTravel() {
     setLoading(true);
     setError(null);
 
@@ -54,6 +62,7 @@ export function TravelButton({
 
       if (!json.ok) {
         setError(json.error?.message ?? "Travel failed.");
+        setConfirming(false);
         return;
       }
 
@@ -62,26 +71,50 @@ export function TravelButton({
       router.refresh();
     } catch {
       setError("Network error. Please try again.");
+      setConfirming(false);
     } finally {
       setLoading(false);
     }
   }
 
-  const eta =
-    travelHours < 1
-      ? `${Math.round(travelHours * 60)} min`
-      : `${travelHours.toFixed(1)} hr`;
+  if (confirming) {
+    return (
+      <div className="space-y-2 rounded-lg border border-indigo-800/60 bg-indigo-950/30 px-4 py-3">
+        <p className="text-sm font-medium text-zinc-200">Confirm departure</p>
+        <div className="text-xs text-zinc-400 space-y-0.5">
+          <p>Destination: <span className="text-zinc-200">{destinationName}</span></p>
+          <p>Distance: <span className="text-zinc-200">{distanceLy.toFixed(2)} ly</span></p>
+          <p>ETA: <span className="text-zinc-200">{eta}</span></p>
+          {shipName && <p>Ship: <span className="text-zinc-200">{shipName}</span></p>}
+        </div>
+        <div className="flex gap-2">
+          <button
+            onClick={handleConfirmedTravel}
+            disabled={loading}
+            className="flex-1 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {loading ? "Departing…" : "Confirm Departure"}
+          </button>
+          <button
+            onClick={() => { setConfirming(false); setError(null); }}
+            disabled={loading}
+            className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 transition-colors hover:bg-zinc-700 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+        </div>
+        {error && <p className="text-xs text-red-400">{error}</p>}
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-2">
       <button
-        onClick={handleTravel}
-        disabled={loading}
-        className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+        onClick={() => setConfirming(true)}
+        className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-indigo-500"
       >
-        {loading
-          ? "Departing…"
-          : `Travel to ${destinationName} · ${distanceLy.toFixed(2)} ly · ETA ${eta}`}
+        Travel to {destinationName} · {distanceLy.toFixed(2)} ly · ETA {eta}
       </button>
       {error && (
         <p className="text-xs text-red-400">{error}</p>
@@ -201,7 +234,7 @@ export function SurveyButton({ bodyId, bodyLabel }: SurveyButtonProps) {
         disabled={loading}
         className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
-        {loading ? "Surveying…" : `Survey ${bodyLabel}`}
+        {loading ? "Surveying…" : `Survey ${bodyLabel} with Ship`}
       </button>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>

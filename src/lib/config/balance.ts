@@ -418,17 +418,18 @@ export const BALANCE = {
      * Phase 28: exponential formula — cost to reach level N = Math.ceil(base * 1.8^N).
      * Computed in shipUpgrades.ts upgradeIronCost().
      *
-     * Sample costs (hull base=8):
-     *   → level 2: ceil(8 × 1.8²) = 26    → level 5: ceil(8 × 1.8⁵) = 152
-     *   → level 3: ceil(8 × 1.8³) = 47    → level 8: ceil(8 × 1.8⁸) = 900
+     * Sample costs (hull base=300):
+     *   → level 2: ceil(300 × 1.8²) = 972   → level 5: ceil(300 × 1.8⁵) = 5669
+     * Sample costs (engine base=500):
+     *   → level 2: ceil(500 × 1.8²) = 1620  → level 5: ceil(500 × 1.8⁵) = 9449
      */
     ironCostBase: {
-      hull:    8,
-      shield:  8,
-      cargo:   10,
-      engine:  15,
-      turret:  12,
-      utility: 8,
+      hull:    300,
+      shield:  300,
+      cargo:   200,
+      engine:  500,
+      turret:  350,
+      utility: 300,
     } as Record<string, number>,
 
     /**

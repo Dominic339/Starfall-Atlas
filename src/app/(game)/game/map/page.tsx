@@ -341,7 +341,7 @@ export default async function GalaxyMapPage() {
     id: s.id,
     name: s.name,
     systemId: s.current_system_id,
-    speedLyPerHr: s.speed_ly_per_hr,
+    speedLyPerHr: Number(s.speed_ly_per_hr),
   }));
 
   // ── Build fleet list for client (needed for dispatch UI) ─────────────────
