@@ -91,7 +91,7 @@ export async function POST(request: NextRequest) {
     .update({ status: "complete" })
     .eq("id", job.id);
 
-  // Move ship to destination.
+  // Move ship to destination and update Phase 32 state fields.
   const { data: ship } = singleResult<Ship>(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any)
@@ -99,6 +99,9 @@ export async function POST(request: NextRequest) {
       .update({
         current_system_id: job.to_system_id,
         current_body_id: null,
+        ship_state: "idle_at_station",
+        last_known_system_id: job.to_system_id,
+        destination_system_id: null,
       })
       .eq("id", job.ship_id)
       .select("*")
