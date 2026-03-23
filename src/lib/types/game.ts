@@ -19,6 +19,7 @@ import type {
   InventoryLocationType,
   StewardshipMethod,
   ShipDispatchMode,
+  ShipState,
   DisputeStatus,
 } from "./enums";
 
@@ -63,6 +64,12 @@ export interface Player {
   logo_id: string | null;
   /** Set when the player requests account deletion (soft delete). */
   deactivated_at: string | null;
+  /**
+   * Phase 32: Whether this account has dev-tool access.
+   * Gated by DB flag rather than NODE_ENV so it works in staging/preview.
+   * Added by migration 00035.
+   */
+  is_dev: boolean;
 }
 
 export interface Ship {
@@ -96,8 +103,72 @@ export interface Ship {
   engine_level: number;
   turret_level: number;
   utility_level: number;
+  /**
+   * Phase 32: Unified ship state — single authoritative field replacing
+   * the fragmented (dispatch_mode + auto_state + current_system_id=NULL) pattern.
+   * Added by migration 00033.
+   */
+  ship_state: ShipState;
+  /**
+   * Phase 32: Always populated, even while traveling (current_system_id goes
+   * NULL during travel, but last_known_system_id retains the last docked system).
+   * Added by migration 00033.
+   */
+  last_known_system_id: SystemId | null;
+  /**
+   * Phase 32: Set to the destination system while ship_state = 'traveling'.
+   * NULL when docked. Added by migration 00033.
+   */
+  destination_system_id: SystemId | null;
+  /**
+   * Phase 32: Active route assignment. NULL when ship has no route.
+   * Added by migration 00034 (FK → routes.id).
+   */
+  active_route_id: string | null;
+  /**
+   * Phase 32: Current leg index within active_route. 0-based.
+   * Added by migration 00034.
+   */
+  route_leg_index: number;
   created_at: string;
   updated_at: string;
+}
+
+// ---------------------------------------------------------------------------
+// Phase 32: Routes and route legs
+// ---------------------------------------------------------------------------
+
+/**
+ * A named logistics route — a reusable path from an origin to a destination.
+ * Ships are assigned to routes; travel is dispatched leg-by-leg from route_legs.
+ */
+export interface Route {
+  id: string;
+  player_id: PlayerId;
+  name: string;
+  route_type: "haul" | "survey" | "patrol" | "fleet_dispatch";
+  origin_type: "station" | "colony" | "system";
+  origin_id: string;
+  dest_type: "station" | "colony" | "system";
+  dest_id: string;
+  haul_mode: "manual" | "auto_nearest" | "auto_highest" | "round_trip";
+  status: "active" | "paused" | "completed" | "archived";
+  assigned_ship_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One hop within a Route — defines the from/to system pair and the lane used. */
+export interface RouteLeg {
+  id: string;
+  route_id: string;
+  leg_index: number;
+  from_system_id: SystemId;
+  to_system_id: SystemId;
+  lane_id: LaneId | null;
+  distance_ly: number | null;
+  estimated_duration_hr: number | null;
+  created_at: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -161,15 +161,39 @@ export type DisputeStatus = "open" | "resolved" | "expired";
  *
  * 'manual'                = player submits all travel and cargo actions explicitly.
  * 'auto_collect_nearest'  = ship automatically dispatches to collect from the
- *                           nearest colony that has accumulated resources (future).
+ *                           nearest colony that has accumulated resources.
  * 'auto_collect_highest'  = ship automatically dispatches to the colony with the
- *                           largest accumulated resource quantity (future).
+ *                           largest accumulated resource quantity.
  *
- * Auto modes are scaffolded in the schema and type system; full automation
- * behavior is a post-alpha feature and is not yet implemented server-side.
+ * Auto modes loop: find colony → travel → load → return → unload → repeat.
  * All ships default to 'manual'.
  */
 export type ShipDispatchMode =
   | "manual"
   | "auto_collect_nearest"
   | "auto_collect_highest";
+
+/**
+ * Unified ship state — single authoritative field replacing the fragmented
+ * (dispatch_mode + auto_state + current_system_id=NULL) pattern.
+ *
+ * 'idle_at_station'  = docked at player's home station, no assignment.
+ * 'idle_in_system'   = docked in a non-station system, no assignment.
+ * 'assigned'         = has an active route, waiting to execute next leg.
+ * 'traveling'        = active travel_job in progress.
+ * 'loading'          = actively transferring cargo from colony to ship.
+ * 'unloading'        = actively transferring cargo from ship to station.
+ * 'surveying'        = active survey_job in progress.
+ * 'harvesting'       = committed to an asteroid harvest.
+ * 'fleet_traveling'  = part of a fleet in synchronized transit.
+ */
+export type ShipState =
+  | "idle_at_station"
+  | "idle_in_system"
+  | "assigned"
+  | "traveling"
+  | "loading"
+  | "unloading"
+  | "surveying"
+  | "harvesting"
+  | "fleet_traveling";

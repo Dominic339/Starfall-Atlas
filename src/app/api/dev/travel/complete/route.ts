@@ -27,16 +27,19 @@ import { listResult } from "@/lib/supabase/utils";
 import type { TravelJob } from "@/lib/types/game";
 
 export async function POST() {
-  if (process.env.NODE_ENV === "production") {
-    return toErrorResponse(
-      fail("forbidden", "This endpoint is not available in production.").error,
-    );
-  }
-
   // ── Auth ────────────────────────────────────────────────────────────────
   const auth = await requireAuth();
   if (!auth.ok) return toErrorResponse(auth.error);
   const { player } = auth.data;
+
+  // Allow if dev account (DB flag) OR non-production environment.
+  const isDevAccount = player.is_dev === true;
+  const isDevEnv = process.env.NODE_ENV !== "production";
+  if (!isDevAccount && !isDevEnv) {
+    return toErrorResponse(
+      fail("forbidden", "This endpoint requires a dev account or non-production environment.").error,
+    );
+  }
 
   const admin = createAdminClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -104,7 +107,13 @@ export async function POST() {
 
     await adminAny
       .from("ships")
-      .update({ current_system_id: job.to_system_id, current_body_id: null })
+      .update({
+        current_system_id: job.to_system_id,
+        current_body_id: null,
+        ship_state: "idle_at_station",
+        last_known_system_id: job.to_system_id,
+        destination_system_id: null,
+      })
       .eq("id", job.ship_id);
 
     completed++;

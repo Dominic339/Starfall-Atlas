@@ -140,14 +140,19 @@ export async function POST(request: NextRequest) {
   const arriveAt = computeArrivalTime(now, distanceLy, ship.speed_ly_per_hr);
 
   // Step 1: Mark ship as in transit by clearing its location.
-  // This must happen before inserting the job so that concurrent requests see
-  // the ship as in transit and reject with job_in_progress.
+  // Also write Phase 32 unified state fields:
+  //   ship_state             → 'traveling'
+  //   last_known_system_id   → fromSystemId (stays populated while in transit)
+  //   destination_system_id  → destinationSystemId
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   await (admin as any)
     .from("ships")
     .update({
       current_system_id: null,
       current_body_id: null,
+      ship_state: "traveling",
+      last_known_system_id: fromSystemId,
+      destination_system_id: destinationSystemId,
     })
     .eq("id", ship.id);
 
@@ -198,7 +203,14 @@ export async function POST(request: NextRequest) {
     ok: true,
     data: {
       job,
-      ship: { ...ship, current_system_id: null, current_body_id: null },
+      ship: {
+        ...ship,
+        current_system_id: null,
+        current_body_id: null,
+        ship_state: "traveling",
+        last_known_system_id: fromSystemId,
+        destination_system_id: destinationSystemId,
+      },
     },
   });
 }
