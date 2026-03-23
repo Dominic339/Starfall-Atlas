@@ -1,32 +1,18 @@
 /**
- * Game dashboard — Command Centre.
+ * /game/command — Summary & Dev Tools (demoted from primary hub).
  *
- * Overview of the logistics loop:
- *   Station (hub) → Ships (haul) → Colonies (produce) → Ships (return) → Station
+ * The Galaxy Map (/game/map) is now the primary game surface.
+ * The Station page (/game/station) is the logistics hub.
+ * This page is a lightweight overview + developer tooling.
  *
- * The command centre is a unified summary view of all player assets and state.
- * For focused management, use the dedicated pages:
- *   /game/station  — station inventory and docked ships
- *   /game/colony/[id] — per-colony details and actions
- *   /game/fleet/[id]  — fleet composition and dispatch
- *   /game/map         — galaxy map with travel visualization
+ * Shows:
+ *   - Credits, iron, ship/colony counts at a glance
+ *   - Quick links to dedicated management pages
+ *   - Dev controls (complete travel, grant resources) for dev accounts
  *
- * Data flow (server-side, sequential per request):
- *   1. Player auth gate
- *   2. Engine tick (growth, upkeep) + travel resolution (arrivals, auto-ship)
- *   3. Parallel data fetch: ships, jobs, colonies, station, research, fleets, slots, routes
- *   4. Parallel fetch: surveys, inventories, structures, transports
- *   5. Display data computation and JSX render
- *
- * Key phases implemented:
- *   - Ship dispatch modes: manual / auto_collect_nearest / auto_collect_highest
- *   - Colony upkeep: iron (and food on harsh worlds) consumed per 24h period
- *   - Health status: well_supplied / struggling / neglected
- *   - Fleet model: staged groups of ships traveling together
- *   - Colony structures: warehouse / extractor / habitat_module
- *   - Colony supply routes and transports (inter-colony transfer)
- *   - Ship upgrades: 6 stat levels (hull/engine/shield/utility/cargo/turret)
- *   - Research tree gating upgrade caps
+ * Engine tick + travel resolution still runs here so that visiting
+ * this page also advances game state (idempotent — safe to run on
+ * multiple pages).
  */
 
 import { redirect } from "next/navigation";
@@ -34,73 +20,10 @@ import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { getCatalogEntry, systemDisplayName, getNearbySystems } from "@/lib/catalog";
-import { generateSystem } from "@/lib/game/generation";
-import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
-import { calculateAccumulatedTax } from "@/lib/game/taxes";
-import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
-import { rankColonyCandidates, autoStateLabel } from "@/lib/game/shipAutomation";
-import {
-  SHIP_STAT_KEYS,
-  SHIP_STAT_LABELS,
-  buildShipUpgradeSummary,
-  type ShipUpgradeSummary,
-} from "@/lib/game/shipUpgrades";
-import {
-  colonyHealthStatus,
-  extractionMultiplier,
-  taxMultiplier,
-  upkeepDescription,
-} from "@/lib/game/colonyUpkeep";
-import type { ColonyHealthStatus } from "@/lib/game/colonyUpkeep";
-import { isHarshPlanetType } from "@/lib/game/habitability";
-import { colonyTransportCapacity } from "@/lib/game/transportCapacity";
-import {
-  getStructureTier,
-  researchLevel,
-  extractionBonusMultiplier,
-  upkeepReductionFraction,
-  effectiveStorageCap,
-  structureBuildCost,
-} from "@/lib/game/colonyStructures";
-import { BALANCE } from "@/lib/config/balance";
-import type {
-  Player,
-  Ship,
-  TravelJob,
-  Colony,
-  Structure,
-  PlayerStation,
-  ResourceInventoryRow,
-  SurveyResult,
-  SystemId,
-  ColonyId,
-  Fleet,
-  FleetSlot,
-  PlayerResearch,
-  ColonyRoute,
-  ColonyTransport,
-} from "@/lib/types/game";
-import type { ExtractionAmount } from "@/lib/game/extraction";
-import { CollectButton, ExtractButton, UnloadButton } from "../_components/ColonyActions";
-import { ShipModeSelector } from "../_components/ShipModeSelector";
-import { UpgradeButton } from "../_components/UpgradeButton";
-import { CreateFleetForm, DispatchFleetForm, DisbandFleetButton } from "../_components/FleetActions";
-import { FleetSlotModeSelector } from "../_components/FleetSlotControls";
-import { BuildStructureButton } from "../_components/ColonyStructures";
-import { RefineForm } from "../_components/RefineControls";
-import { RESEARCH_DEFS } from "@/lib/config/research";
+import { systemDisplayName } from "@/lib/catalog";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
-import {
-  researchStatus,
-  arePrerequisitesMet,
-  areMilestonesMet,
-  milestoneLabel,
-  allStatCaps,
-  type MilestoneData,
-} from "@/lib/game/researchHelpers";
-import { PurchaseButton } from "../research/_components/PurchaseButton";
+import type { Player, Ship, Colony, PlayerStation, ResourceInventoryRow, TravelJob } from "@/lib/types/game";
 import { DevControls } from "./_components/DevControls";
 
 export const dynamic = "force-dynamic";
@@ -109,1999 +32,273 @@ export const metadata = {
   title: "Command — Starfall Atlas",
 };
 
-export default async function GameDashboard() {
+export default async function CommandPage() {
   const user = await getUser();
   if (!user) redirect("/login");
 
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
-  // ── Step 1: player ────────────────────────────────────────────────────────
   const { data: player } = maybeSingleResult<Player>(
-    await admin
-      .from("players")
-      .select("*")
-      .eq("auth_id", user.id)
-      .maybeSingle(),
+    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
   );
-
   if (!player) redirect("/login");
 
-  // ── Phase 32: Run engine tick and travel resolution before fetching display ─
-  // These functions update the DB (growth, upkeep, auto-ship state machine,
-  // fleet arrivals) so that Steps 2–3 fetch already-resolved state.
-  // Replaces the former Steps 4, 4.5, 5, and 5.5 that ran inline after fetching.
+  // Engine tick + travel resolution (idempotent — also runs on /game/map)
   const requestTime = new Date();
   await runEngineTick(admin, player.id, requestTime);
   await runTravelResolution(admin, player.id, requestTime);
 
-  // ── Step 2: parallel fetches that only need player.id ─────────────────────
-  const [shipsRes, jobsRes, coloniesRes, stationRes, researchRes, fleetsRes, slotsRes, routesRes, discoveryCountRes] = await Promise.all([
-    admin.from("ships").select("*").eq("owner_id", player.id).order("created_at", { ascending: true }),
-    // Fetch ALL pending jobs — Phase 8 ships can each have their own job.
-    admin
-      .from("travel_jobs")
-      .select("*")
-      .eq("player_id", player.id)
-      .eq("status", "pending")
-      .order("created_at", { ascending: false }),
-    admin
-      .from("colonies")
-      .select("*")
-      .eq("owner_id", player.id)
-      .order("created_at", { ascending: true }),
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (admin as any)
-      .from("player_stations")
-      .select("*")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-    // Phase 11: player research for upgrade cap computation
-    admin
-      .from("player_research")
-      .select("research_id")
-      .eq("player_id", player.id),
-    // Phase 12: active and traveling fleets with their member ship IDs
-    admin
-      .from("fleets")
-      .select("*, fleet_ships(ship_id)")
-      .eq("player_id", player.id)
-      .neq("status", "disbanded")
-      .order("created_at", { ascending: true }),
-    // Phase 13: fleet slots (lazy-bootstrapped below if absent)
-    admin
-      .from("player_fleet_slots")
-      .select("*")
-      .eq("player_id", player.id)
-      .order("slot_number", { ascending: true }),
-    // Phase 15: colony supply routes
-    admin
-      .from("colony_routes")
-      .select("*")
-      .eq("player_id", player.id)
-      .order("created_at", { ascending: true }),
-    // Phase 27: discovery count for research milestone checks
-    admin
-      .from("system_discoveries")
-      .select("id", { count: "exact", head: true })
-      .eq("player_id", player.id),
+  // Parallel fetches for summary data
+  const [shipsRes, coloniesRes, stationRes, pendingJobsRes] = await Promise.all([
+    admin.from("ships").select("id, name, current_system_id, ship_state").eq("owner_id", player.id),
+    admin.from("colonies").select("id, system_id, body_id, status, population_tier, upkeep_missed_periods").eq("owner_id", player.id),
+    admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
+    admin.from("travel_jobs").select("id").eq("player_id", player.id).eq("status", "pending"),
   ]);
 
-  const shipList = listResult<Ship>(shipsRes).data ?? [];
-  const allTravelJobs = listResult<TravelJob>(jobsRes).data ?? [];
-  const discoveryCount = discoveryCountRes.count ?? 0;
-  // Research unlock set — used for per-ship upgrade cap computation (Phase 11).
-  const unlockedResearchIds = new Set(
-    (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
-      (r) => r.research_id,
-    ),
-  );
-  // Per-ship travel job index (used by automation resolver and ShipRow).
-  const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
-
-  // Phase 12: fleet data structures.
-  // fleetList is mutable — Step 5.5 updates status/current_system_id in place.
-  type FleetWithShips = Fleet & { fleet_ships: { ship_id: string }[] };
-  const rawFleets = (listResult<FleetWithShips>(fleetsRes).data ?? []);
-  const fleetList: FleetWithShips[] = rawFleets.map((f) => ({ ...f }));
-  // Ships that belong to any non-disbanded fleet (active or traveling).
-  const shipIdsInFleet = new Set(
-    fleetList.flatMap((f) => f.fleet_ships.map((fs) => fs.ship_id)),
-  );
-  // Map fleet ID → member ship IDs for quick lookups.
-  const shipIdsByFleetId = new Map(
-    fleetList.map((f) => [f.id, f.fleet_ships.map((fs) => fs.ship_id)]),
-  );
-
-  // Phase 13: fleet slots — mutable so auto loop can update state in-memory.
-  let slotList = listResult<FleetSlot>(slotsRes).data ?? [];
-  // Phase 15: colony supply routes (mutable: last_run_at updated during Step 6).
-  const colonyRouteList: ColonyRoute[] = (listResult<ColonyRoute>(routesRes).data ?? []).map((r) => ({ ...r }));
-
-  // Lazy bootstrap: create 2 default manual slots on first-ever dashboard load.
-  if (slotList.length === 0) {
-    const { data: newSlots } = await (admin as any)
-      .from("player_fleet_slots")
-      .insert([
-        { player_id: player.id, slot_number: 1, name: "Fleet 1", mode: "manual" },
-        { player_id: player.id, slot_number: 2, name: "Fleet 2", mode: "manual" },
-      ])
-      .select("*");
-    slotList = (newSlots ?? []) as FleetSlot[];
-  }
-  // Keep a single "active" job for the in-transit banner (first pending job).
-  const activeTravelJob = allTravelJobs[0] ?? null;
-
-  const rawColonies = listResult<Colony>(coloniesRes).data ?? [];
+  const ships = listResult<Pick<Ship, "id" | "name" | "current_system_id" | "ship_state">>(shipsRes).data ?? [];
+  const colonies = listResult<Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier" | "upkeep_missed_periods">>(coloniesRes).data ?? [];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
+  const pendingTravelCount = (listResult<Pick<TravelJob, "id">>(pendingJobsRes).data ?? []).length;
 
-  // ── Step 3: parallel fetches that need colony bodies / station.id ──────────
-  const colonyBodyIds = rawColonies.map((c) => c.body_id);
-  const shipIds = shipList.map((s) => s.id);
-  const activeColonyIds = rawColonies
-    .filter((c) => c.status === "active")
-    .map((c) => c.id);
-
-  const [surveyRes, invRes, cargoRes, colonyInvRes, structuresRes, transportsRes] = await Promise.all([
-    colonyBodyIds.length > 0
-      ? admin
-          .from("survey_results")
-          .select("body_id, resource_nodes")
-          .in("body_id", colonyBodyIds)
-      : Promise.resolve({ data: [] }),
-    station
-      ? admin
-          .from("resource_inventory")
-          .select("resource_type, quantity")
-          .eq("location_type", "station")
-          .eq("location_id", station.id)
-          .order("resource_type", { ascending: true })
-      : Promise.resolve({ data: [] }),
-    shipIds.length > 0
-      ? admin
-          .from("resource_inventory")
-          .select("location_id, resource_type, quantity")
-          .eq("location_type", "ship")
-          .in("location_id", shipIds)
-      : Promise.resolve({ data: [] }),
-    // Colony inventory: needed for auto-ship target selection and loading.
-    activeColonyIds.length > 0
-      ? admin
-          .from("resource_inventory")
-          .select("location_id, resource_type, quantity")
-          .eq("location_type", "colony")
-          .in("location_id", activeColonyIds)
-      : Promise.resolve({ data: [] }),
-    // Phase 14: colony structures for all player colonies.
-    rawColonies.length > 0
-      ? admin
-          .from("structures")
-          .select("id, colony_id, type, tier, is_active")
-          .in("colony_id", rawColonies.map((c) => c.id))
-          .eq("is_active", true)
-      : Promise.resolve({ data: [] }),
-    // Phase 15: colony transports — needed to gate route resolution.
-    rawColonies.length > 0
-      ? admin
-          .from("colony_transports")
-          .select("colony_id, tier")
-          .in("colony_id", rawColonies.map((c) => c.id))
-      : Promise.resolve({ data: [] }),
-  ]);
-
-  const surveyByBodyId = new Map(
-    ((surveyRes.data ?? []) as Pick<SurveyResult, "body_id" | "resource_nodes">[]).map(
-      (s) => [s.body_id, s],
-    ),
-  );
-
-  const stationInventory = (invRes.data ?? []) as Pick<
-    ResourceInventoryRow,
-    "resource_type" | "quantity"
-  >[];
-
-  // Per-ship cargo map (mutable — updated by auto-resolution in Step 5).
-  type CargoRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
-    location_id: string;
-  };
-  const cargoByShipId = new Map<string, { resource_type: string; quantity: number }[]>();
-  for (const row of (cargoRes.data ?? []) as CargoRow[]) {
-    const list = cargoByShipId.get(row.location_id) ?? [];
-    list.push({ resource_type: row.resource_type, quantity: row.quantity });
-    cargoByShipId.set(row.location_id, list);
-  }
-
-  // Colony inventory maps (mutable — updated by auto-loading in Step 5).
-  type ColonyInvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
-    location_id: string;
-  };
-  const colonyInvByColonyId = new Map<
-    string,
-    { resource_type: string; quantity: number }[]
-  >();
-  const colonyInvTotals = new Map<string, number>();
-  for (const row of (colonyInvRes.data ?? []) as ColonyInvRow[]) {
-    const list = colonyInvByColonyId.get(row.location_id) ?? [];
-    list.push({ resource_type: row.resource_type, quantity: row.quantity });
-    colonyInvByColonyId.set(row.location_id, list);
-    colonyInvTotals.set(
-      row.location_id,
-      (colonyInvTotals.get(row.location_id) ?? 0) + row.quantity,
-    );
-  }
-
-  // Phase 14: structures per colony.
-  type StructureRow = Pick<Structure, "id" | "colony_id" | "type" | "tier" | "is_active">;
-  const structuresByColonyId = new Map<string, StructureRow[]>();
-  for (const row of ((structuresRes.data ?? []) as StructureRow[])) {
-    const list = structuresByColonyId.get(row.colony_id) ?? [];
-    list.push(row);
-    structuresByColonyId.set(row.colony_id, list);
-  }
-
-  // Phase 15/18: transport rows per colony — used for gate check and throughput cap.
-  const transportRowsByColonyId = new Map<string, Pick<ColonyTransport, "colony_id" | "tier">[]>();
-  for (const row of ((transportsRes.data ?? []) as Pick<ColonyTransport, "colony_id" | "tier">[])) {
-    const list = transportRowsByColonyId.get(row.colony_id) ?? [];
-    list.push(row);
-    transportRowsByColonyId.set(row.colony_id, list);
-  }
-  // Convenience: count-only map (kept for backward compat with any remaining uses).
-  const transportsByColonyId = new Map<string, number>(
-    [...transportRowsByColonyId.entries()].map(([id, rows]) => [id, rows.length]),
-  );
-
-  // Phase 14: wired research levels (extraction, sustainability, storage).
-  const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
-  const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
-  const storageResearchLvl = researchLevel(unlockedResearchIds, "storage");
-
-  // ── Steps 4, 4.5, 5, 5.5 moved to lib functions ─────────────────────────
-  // runEngineTick()       → colony growth + upkeep (called above, before Step 2)
-  // runTravelResolution() → auto-ship state machine + fleet arrivals (called above)
-  //
-  // rawColonies and shipList are fetched in Steps 2–3 AFTER those functions ran,
-  // so they already reflect the post-resolution state from the DB.
-  const colonyList: Colony[] = rawColonies;
-  const resolvedShipList: Ship[] = [...shipList];
-
-    // ── Fleet automation helpers (Step 5.6) ──────────────────────────────────
-  //
-  // These closures capture mutable state (resolvedShipList, fleetList, etc.)
-  // and perform server-authoritative DB writes + in-memory sync.
-
-  /** Dispatch a staged fleet to a destination system. Returns true on success. */
-  async function dispatchFleetToSystem(
-    fleet: Fleet,
-    memberShips: Ship[],
-    destSystemId: string,
-  ): Promise<boolean> {
-    const fromSystemId = fleet.current_system_id;
-    if (!fromSystemId || fromSystemId === destSystemId) return false;
-
-    const fromEntry = getCatalogEntry(fromSystemId);
-    const toEntry = getCatalogEntry(destSystemId);
-    if (!fromEntry || !toEntry) return false;
-
-    const dist = distanceBetween(
-      { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
-      { x: toEntry.x, y: toEntry.y, z: toEntry.z },
-    );
-    if (dist > BALANCE.lanes.baseRangeLy) return false;
-
-    const speed = memberShips.length > 0
-      ? Math.min(...memberShips.map((s) => s.speed_ly_per_hr))
-      : 1.0;
-    const arriveAt = computeArrivalTime(requestTime, dist, speed);
-    const memberIds = memberShips.map((s) => s.id as string);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("fleets")
-      .update({ status: "traveling", current_system_id: null, updated_at: requestTime.toISOString() })
-      .eq("id", fleet.id);
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("ships")
-      .update({ current_system_id: null, current_body_id: null })
-      .in("id", memberIds);
-
-    const jobRows = memberShips.map((s) => ({
-      ship_id: s.id,
-      player_id: player!.id,
-      from_system_id: fromSystemId,
-      to_system_id: destSystemId,
-      lane_id: null,
-      fleet_id: fleet.id,
-      depart_at: requestTime.toISOString(),
-      arrive_at: arriveAt.toISOString(),
-      transit_tax_paid: 0,
-      status: "pending",
-    }));
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: insertedJobs } = await (admin as any)
-      .from("travel_jobs")
-      .insert(jobRows)
-      .select("*");
-
-    // Sync in-memory
-    for (let si = 0; si < resolvedShipList.length; si++) {
-      if (memberIds.includes(resolvedShipList[si].id as string)) {
-        resolvedShipList[si] = {
-          ...resolvedShipList[si],
-          current_system_id: null,
-          current_body_id: null,
-        };
-      }
-    }
-    if (insertedJobs) {
-      for (const job of insertedJobs as TravelJob[]) {
-        travelJobByShipId.set(job.ship_id, job);
-      }
-    }
-    const fIdx = fleetList.findIndex((f) => f.id === fleet.id);
-    if (fIdx >= 0) {
-      fleetList[fIdx] = { ...fleetList[fIdx], status: "traveling", current_system_id: null };
-    }
-    return true;
-  }
-
-  /** Load cargo from a colony into fleet member ships (respects cargo caps). */
-  async function loadFleetFromColony(colonyId: string, memberShips: Ship[]): Promise<number> {
-    const colonyInv = (colonyInvByColonyId.get(colonyId) ?? []).map((r) => ({ ...r }));
-    if (colonyInv.length === 0) return 0;
-
-    let totalLoaded = 0;
-    const dbUpdates: Promise<unknown>[] = [];
-
-    for (const ship of memberShips) {
-      const shipId = ship.id as string;
-      const currentCargo = cargoByShipId.get(shipId) ?? [];
-      const cargoUsed = currentCargo.reduce((s, r) => s + r.quantity, 0);
-      let remaining = ship.cargo_cap - cargoUsed;
-      if (remaining <= 0) continue;
-
-      const toLoad: { resource_type: string; quantity: number }[] = [];
-
-      for (const item of colonyInv) {
-        if (remaining <= 0) break;
-        const load = Math.min(item.quantity, remaining);
-        if (load > 0) {
-          toLoad.push({ resource_type: item.resource_type, quantity: load });
-          item.quantity -= load;
-          remaining -= load;
-          totalLoaded += load;
-        }
-      }
-
-      if (toLoad.length === 0) continue;
-
-      const existingMap = new Map(currentCargo.map((r) => [r.resource_type, r.quantity]));
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      dbUpdates.push((admin as any).from("resource_inventory").upsert(
-        toLoad.map((item) => ({
-          location_type: "ship",
-          location_id: shipId,
-          resource_type: item.resource_type,
-          quantity: (existingMap.get(item.resource_type) ?? 0) + item.quantity,
-        })),
-        { onConflict: "location_type,location_id,resource_type" },
-      ));
-
-      // Update in-memory cargo
-      const newCargo = [...currentCargo];
-      for (const loaded of toLoad) {
-        const ex = newCargo.find((r) => r.resource_type === loaded.resource_type);
-        if (ex) ex.quantity += loaded.quantity;
-        else newCargo.push({ ...loaded });
-      }
-      cargoByShipId.set(shipId, newCargo);
-    }
-
-    // Persist colony inventory changes
-    const remainingInv = colonyInv.filter((r) => r.quantity > 0);
-    const depleted = colonyInv.filter((r) => r.quantity === 0);
-    for (const item of depleted) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      dbUpdates.push((admin as any).from("resource_inventory").delete()
-        .eq("location_type", "colony")
-        .eq("location_id", colonyId)
-        .eq("resource_type", item.resource_type));
-    }
-    for (const item of remainingInv) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      dbUpdates.push((admin as any).from("resource_inventory").update({ quantity: item.quantity })
-        .eq("location_type", "colony")
-        .eq("location_id", colonyId)
-        .eq("resource_type", item.resource_type));
-    }
-    await Promise.all(dbUpdates);
-
-    colonyInvByColonyId.set(colonyId, remainingInv);
-    colonyInvTotals.set(colonyId, remainingInv.reduce((s, r) => s + r.quantity, 0));
-    return totalLoaded;
-  }
-
-  /** Unload all fleet member ship cargo to the station. */
-  async function unloadFleetToStation(memberShips: Ship[]): Promise<void> {
-    if (!station) return;
-    const aggregated = new Map<string, number>();
-    const memberIds = memberShips.map((s) => s.id as string);
-
-    for (const ship of memberShips) {
-      for (const item of (cargoByShipId.get(ship.id as string) ?? [])) {
-        aggregated.set(item.resource_type, (aggregated.get(item.resource_type) ?? 0) + item.quantity);
-      }
-    }
-    if (aggregated.size === 0) return;
-
-    const rtypes = [...aggregated.keys()];
-    const { data: stRows } = await admin
+  // Station iron
+  let stationIron = 0;
+  if (station) {
+    const { data: ironRow } = await admin
       .from("resource_inventory")
-      .select("resource_type, quantity")
+      .select("quantity")
       .eq("location_type", "station")
       .eq("location_id", station.id)
-      .in("resource_type", rtypes);
-
-    const stMap = new Map(
-      ((stRows ?? []) as { resource_type: string; quantity: number }[])
-        .map((r) => [r.resource_type, r.quantity]),
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("resource_inventory").upsert(
-      [...aggregated.entries()].map(([rt, qty]) => ({
-        location_type: "station",
-        location_id: station!.id,
-        resource_type: rt,
-        quantity: (stMap.get(rt) ?? 0) + qty,
-      })),
-      { onConflict: "location_type,location_id,resource_type" },
-    );
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any).from("resource_inventory").delete()
-      .eq("location_type", "ship")
-      .in("location_id", memberIds);
-
-    for (const shipId of memberIds) cargoByShipId.set(shipId, []);
-
-    // Update in-memory station inventory
-    for (const [rt, qty] of aggregated) {
-      const inv = stationInventory.find((r) => r.resource_type === rt);
-      if (inv) inv.quantity += qty;
-      else stationInventory.push({ resource_type: rt, quantity: qty });
-    }
+      .eq("resource_type", "iron")
+      .maybeSingle();
+    stationIron = (ironRow as { quantity: number } | null)?.quantity ?? 0;
   }
 
-  // ── Step 5.6: slot-based auto fleet loop ─────────────────────────────────
-  //
-  // For each auto slot, advance the state machine by one step:
-  //   no fleet    → form fleet from eligible ships → dispatch to colony
-  //   at colony   → load cargo → dispatch to station
-  //   at station  → unload cargo → find next target → dispatch to colony
-  //   traveling   → wait (arrival already resolved by Step 5.5)
-
-  for (let sli = 0; sli < slotList.length; sli++) {
-    const slot = slotList[sli];
-    if (slot.mode === "manual") continue;
-
-    const autoMode = slot.mode as "auto_collect_nearest" | "auto_collect_highest";
-
-    // Resolve current fleet from updated fleetList (Step 5.5 may have mutated it)
-    const fIdx = slot.current_fleet_id
-      ? fleetList.findIndex((f) => f.id === slot.current_fleet_id)
-      : -1;
-    let currentFleet: (typeof fleetList)[number] | null = fIdx >= 0 ? fleetList[fIdx] : null;
-
-    // If fleet was disbanded externally, clear the reference
-    if (currentFleet && currentFleet.status === "disbanded") currentFleet = null;
-
-    // Still traveling this cycle — arrival handled by Step 5.5; wait.
-    if (currentFleet && currentFleet.status === "traveling") continue;
-
-    const memberIds = currentFleet ? (shipIdsByFleetId.get(currentFleet.id) ?? []) : [];
-    const memberShips = resolvedShipList.filter((s) => (memberIds as string[]).includes(s.id as string));
-
-    if (currentFleet && currentFleet.status === "active") {
-      const fleetSystemId = currentFleet.current_system_id;
-
-      if (fleetSystemId === station?.current_system_id) {
-        // ── At station: unload then dispatch to next colony ───────────────────
-        await unloadFleetToStation(memberShips);
-
-        const candidates = rankColonyCandidates(
-          { current_system_id: fleetSystemId as SystemId, cargo_cap: 0 },
-          colonyList.filter((c) => c.status === "active"),
-          colonyInvTotals,
-          autoMode,
-        );
-
-        if (candidates.length === 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (admin as any).from("player_fleet_slots")
-            .update({ auto_state: "idle", auto_target_colony_id: null, updated_at: requestTime.toISOString() })
-            .eq("id", slot.id);
-          slotList[sli] = { ...slot, auto_state: "idle", auto_target_colony_id: null };
-          continue;
-        }
-
-        const targetColony = colonyList.find((c) => c.id === candidates[0].colonyId)!;
-        const dispatched = await dispatchFleetToSystem(currentFleet, memberShips, targetColony.system_id as string);
-        if (dispatched) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (admin as any).from("player_fleet_slots")
-            .update({ auto_state: "going_to_colony", auto_target_colony_id: targetColony.id, updated_at: requestTime.toISOString() })
-            .eq("id", slot.id);
-          slotList[sli] = { ...slot, auto_state: "going_to_colony", auto_target_colony_id: targetColony.id as ColonyId };
-        }
-
-      } else if (fleetSystemId) {
-        // ── At a non-station system ───────────────────────────────────────────
-        // If this matches our target colony, load. Otherwise head to station.
-        const targetColony = colonyList.find(
-          (c) => c.id === slot.auto_target_colony_id && c.system_id === fleetSystemId,
-        );
-
-        if (targetColony) {
-          await loadFleetFromColony(targetColony.id as string, memberShips);
-        }
-
-        // Always head back to station after visiting a non-station system
-        if (station) {
-          const dispatched = await dispatchFleetToSystem(
-            currentFleet,
-            memberShips,
-            station.current_system_id as string,
-          );
-          if (dispatched) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            await (admin as any).from("player_fleet_slots")
-              .update({ auto_state: "going_to_station", updated_at: requestTime.toISOString() })
-              .eq("id", slot.id);
-            slotList[sli] = { ...slot, auto_state: "going_to_station" };
-          }
-        }
-      }
-
-    } else {
-      // ── No fleet (or disbanded): form one from eligible ships ─────────────
-      if (!station) continue;
-
-      // Eligible: at station, not in any fleet, any dispatch_mode
-      const eligibleShips = resolvedShipList
-        .filter((s) =>
-          s.current_system_id === station!.current_system_id &&
-          !(shipIdsInFleet as Set<string>).has(s.id as string),
-        )
-        .sort((a, b) => b.cargo_cap - a.cargo_cap); // highest cargo first
-
-      if (eligibleShips.length === 0) continue;
-
-      // Find target colony from station
-      const candidates = rankColonyCandidates(
-        { current_system_id: station.current_system_id as SystemId, cargo_cap: 0 },
-        colonyList.filter((c) => c.status === "active"),
-        colonyInvTotals,
-        autoMode,
-      );
-      if (candidates.length === 0) continue;
-
-      const targetColony = colonyList.find((c) => c.id === candidates[0].colonyId)!;
-      const totalAvailable = colonyInvTotals.get(targetColony.id as string) ?? 0;
-
-      // Select enough ships to cover available inventory
-      const selectedShips: Ship[] = [];
-      let cargoCapacity = 0;
-      for (const s of eligibleShips) {
-        selectedShips.push(s);
-        cargoCapacity += s.cargo_cap;
-        if (cargoCapacity >= totalAvailable) break;
-      }
-      if (selectedShips.length === 0) continue;
-
-      // Form fleet
-      const { data: newFleet } = maybeSingleResult<Fleet>(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (admin as any)
-          .from("fleets")
-          .insert({
-            player_id: player.id,
-            name: slot.name,
-            status: "active",
-            current_system_id: station.current_system_id,
-          })
-          .select("*")
-          .maybeSingle(),
-      );
-      if (!newFleet) continue;
-
-      const selectedIds = selectedShips.map((s) => s.id as string);
-
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any).from("fleet_ships").insert(
-        selectedIds.map((sid) => ({ fleet_id: newFleet.id, ship_id: sid })),
-      );
-
-      // Update slot
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any).from("player_fleet_slots").update({
-        current_fleet_id: newFleet.id,
-        auto_state: "going_to_colony",
-        auto_target_colony_id: targetColony.id,
-        updated_at: requestTime.toISOString(),
-      }).eq("id", slot.id);
-
-      // Sync in-memory fleet structures
-      for (const sid of selectedIds) (shipIdsInFleet as Set<string>).add(sid);
-      shipIdsByFleetId.set(newFleet.id, selectedIds);
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      fleetList.push({ ...newFleet, fleet_ships: selectedIds.map((sid) => ({ ship_id: sid })) } as any);
-      slotList[sli] = {
-        ...slot,
-        current_fleet_id: newFleet.id,
-        auto_state: "going_to_colony",
-        auto_target_colony_id: targetColony.id as ColonyId,
-      };
-
-      // Dispatch to colony
-      await dispatchFleetToSystem(newFleet, selectedShips, targetColony.system_id as string);
-    }
-  }
-
-  // ── Step 6: lazy colony route resolution ──────────────────────────────────
-  // For each route, compute how many periods have elapsed since last_run_at,
-  // cap at maxCatchupPeriods, and transfer resources from source colony
-  // inventory to destination colony inventory.
-  // Gate: source colony must have ≥1 transport and sufficient inventory.
-
-  for (const route of colonyRouteList) {
-    const fromColony = colonyList.find((c) => c.id === route.from_colony_id && c.status === "active");
-    const toColony   = colonyList.find((c) => c.id === route.to_colony_id   && c.status === "active");
-    if (!fromColony || !toColony) continue;
-
-    // Transport gate: source colony must have at least one transport.
-    const sourceTransports = transportRowsByColonyId.get(fromColony.id) ?? [];
-    if (sourceTransports.length === 0) continue;
-
-    const lastRun = new Date(route.last_run_at);
-    const elapsedMs = requestTime.getTime() - lastRun.getTime();
-    const elapsedMinutes = elapsedMs / 60_000;
-    const rawPeriods = Math.floor(elapsedMinutes / route.interval_minutes);
-    if (rawPeriods <= 0) continue;
-    const periods = Math.min(rawPeriods, BALANCE.colonyTransport.maxCatchupPeriods);
-
-    // Phase 18: throughput cap — total capacity of all transports at source,
-    // multiplied by number of periods being resolved.
-    const capacityPerPeriod = colonyTransportCapacity(sourceTransports);
-    const transferCap = capacityPerPeriod * periods;
-
-    // Determine how much to transfer per period.
-    const sourceInv = colonyInvByColonyId.get(fromColony.id) ?? [];
-    const sourceRow = sourceInv.find((r) => r.resource_type === route.resource_type);
-    const available = sourceRow?.quantity ?? 0;
-    if (available <= 0) {
-      // Nothing to send — still advance last_run_at so we don't re-check stale data.
-    } else {
-      let transferTotal = 0;
-      if (route.mode === "all") {
-        transferTotal = Math.min(available, transferCap);
-      } else if (route.mode === "excess") {
-        transferTotal = Math.max(0, available - BALANCE.colonyTransport.excessThreshold) * periods;
-        transferTotal = Math.min(transferTotal, available, transferCap);
-      } else if (route.mode === "fixed") {
-        transferTotal = Math.min((route.fixed_amount ?? 0) * periods, available, transferCap);
-      }
-
-      if (transferTotal > 0) {
-        const newSourceQty = available - transferTotal;
-
-        // Update source colony inventory in DB.
-        if (newSourceQty <= 0) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (admin as any)
-            .from("resource_inventory")
-            .delete()
-            .eq("location_type", "colony")
-            .eq("location_id", fromColony.id)
-            .eq("resource_type", route.resource_type);
-        } else {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          await (admin as any)
-            .from("resource_inventory")
-            .update({ quantity: newSourceQty })
-            .eq("location_type", "colony")
-            .eq("location_id", fromColony.id)
-            .eq("resource_type", route.resource_type);
-        }
-
-        // Upsert destination colony inventory in DB.
-        const destInv = colonyInvByColonyId.get(toColony.id) ?? [];
-        const destRow = destInv.find((r) => r.resource_type === route.resource_type);
-        const destCurrent = destRow?.quantity ?? 0;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        await (admin as any)
-          .from("resource_inventory")
-          .upsert(
-            [{ location_type: "colony", location_id: toColony.id, resource_type: route.resource_type, quantity: destCurrent + transferTotal }],
-            { onConflict: "location_type,location_id,resource_type" },
-          );
-
-        // Update in-memory source inventory.
-        const newSourceInv = sourceInv
-          .map((r) => r.resource_type === route.resource_type ? { ...r, quantity: newSourceQty } : r)
-          .filter((r) => r.quantity > 0);
-        colonyInvByColonyId.set(fromColony.id, newSourceInv);
-        colonyInvTotals.set(fromColony.id, newSourceInv.reduce((s, r) => s + r.quantity, 0));
-
-        // Update in-memory dest inventory.
-        const newDestInv = [...destInv];
-        const destIdx = newDestInv.findIndex((r) => r.resource_type === route.resource_type);
-        if (destIdx >= 0) newDestInv[destIdx] = { ...newDestInv[destIdx], quantity: destCurrent + transferTotal };
-        else newDestInv.push({ resource_type: route.resource_type, quantity: destCurrent + transferTotal });
-        colonyInvByColonyId.set(toColony.id, newDestInv);
-        colonyInvTotals.set(toColony.id, newDestInv.reduce((s, r) => s + r.quantity, 0));
-      }
-    }
-
-    // Advance last_run_at by consumed periods.
-    const newLastRunAt = new Date(lastRun.getTime() + periods * route.interval_minutes * 60_000).toISOString();
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("colony_routes")
-      .update({ last_run_at: newLastRunAt })
-      .eq("id", route.id);
-    route.last_run_at = newLastRunAt;
-  }
-
-  // ── Phase 11: per-ship upgrade summaries ──────────────────────────────────
-  // Computed after auto-resolution so resolvedShipList reflects current state.
-  // Station iron needed for affordability checks.
-  const stationIronForUpgrades =
-    stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
-
-  const upgradeByShipId = new Map<string, ShipUpgradeSummary>();
-  for (const ship of resolvedShipList) {
-    upgradeByShipId.set(ship.id, buildShipUpgradeSummary(ship, unlockedResearchIds));
-  }
-
-  // ── Derived state ─────────────────────────────────────────────────────────
-  const activeColonyCount = colonyList.filter((c) => c.status === "active").length;
-
-  // Phase 27: milestone data and station inventory map for embedded research.
-  const maxColonyTier = colonyList
-    .filter((c) => c.status === "active")
-    .reduce((max, c) => Math.max(max, c.population_tier), 0);
-  const milestoneData: MilestoneData = {
-    activeColonyCount,
-    systemsDiscovered: discoveryCount,
-    maxColonyTier,
-  };
-  const stationInvMap = new Map(stationInventory.map((r) => [r.resource_type, r.quantity]));
-
-  const currentSystemId =
-    resolvedShipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
-
-  const isAnyInTransit = resolvedShipList.some(
-    (s) => !s.current_system_id && travelJobByShipId.has(s.id),
-  );
-
-  // ETA for the dashboard banner (show for the first in-transit ship's job).
-  const bannerJob =
-    allTravelJobs.find((j) =>
-      resolvedShipList.some((s) => !s.current_system_id && s.id === j.ship_id),
-    ) ?? null;
-  let etaDisplay: string | null = null;
-  if (bannerJob) {
-    const arriveAt = new Date(bannerJob.arrive_at);
-    const remainingMs = Math.max(0, arriveAt.getTime() - requestTime.getTime());
-    const remainingMin = Math.ceil(remainingMs / 60_000);
-    etaDisplay =
-      remainingMin <= 0
-        ? "Arrived — resolve travel"
-        : remainingMin < 60
-          ? `~${remainingMin} min remaining`
-          : `~${(remainingMin / 60).toFixed(1)} hr remaining`;
-  }
-
-  const dockedSystemId =
-    resolvedShipList.find((s) => s.current_system_id != null)?.current_system_id ?? null;
-  const nearbySystems = dockedSystemId
-    ? getNearbySystems(dockedSystemId, BALANCE.lanes.baseRangeLy).slice(0, 4)
-    : [];
-
-  // Pre-compute auto-ship target system names for ShipRow display.
-  const autoTargetNameByShipId = new Map<string, string>();
-  for (const ship of resolvedShipList) {
-    if (ship.dispatch_mode !== "manual" && ship.auto_target_colony_id) {
-      const colony = colonyList.find((c) => c.id === ship.auto_target_colony_id);
-      if (colony) {
-        autoTargetNameByShipId.set(ship.id, systemDisplayName(colony.system_id));
-      }
-    }
-  }
-
-  // ── Fleet display data ────────────────────────────────────────────────────
-  // Ship name lookup for fleet member display.
-  const shipNameById = new Map(resolvedShipList.map((s) => [s.id, s.name]));
-
-  // Per-fleet ETA display (when traveling).
-  const fleetEtaDisplay = new Map<string, string>();
-  for (const fleet of fleetList) {
-    if (fleet.status !== "traveling") continue;
-    const fleetJobs = allTravelJobs.filter((j) => j.fleet_id === fleet.id);
-    if (fleetJobs.length === 0) continue;
-    const latestArriveAt = fleetJobs.reduce(
-      (latest, j) =>
-        new Date(j.arrive_at) > new Date(latest) ? j.arrive_at : latest,
-      fleetJobs[0].arrive_at,
-    );
-    const remainingMs = Math.max(0, new Date(latestArriveAt).getTime() - requestTime.getTime());
-    const remainingMin = Math.ceil(remainingMs / 60_000);
-    const eta =
-      remainingMin <= 0
-        ? "Arrived — refreshing…"
-        : remainingMin < 60
-          ? `~${remainingMin} min remaining`
-          : `~${(remainingMin / 60).toFixed(1)} hr remaining`;
-    fleetEtaDisplay.set(fleet.id, eta);
-  }
-
-  // Per-fleet nearby systems for dispatch form.
-  const fleetNearbySystems = new Map<string, { id: string; name: string }[]>();
-  for (const fleet of fleetList) {
-    if (fleet.status !== "active" || !fleet.current_system_id) continue;
-    const nearby = getNearbySystems(fleet.current_system_id, BALANCE.lanes.baseRangeLy)
-      .slice(0, 6)
-      .map((n) => ({ id: n.id, name: n.name }));
-    fleetNearbySystems.set(fleet.id, nearby);
-  }
-
-  // ── Slot-aware fleet data ─────────────────────────────────────────────────
-  // Fleet IDs that belong to a slot (shown in slot card, not in free-fleet list)
-  const slotFleetIds = new Set(slotList.map((s) => s.current_fleet_id).filter(Boolean) as string[]);
-
-  // Free fleets: manually created and not attached to any slot
-  const freeFleets = fleetList.filter((f) => !slotFleetIds.has(f.id));
-
-  // Docked ships not in any fleet, for manual slot "Form Fleet" and free fleet creation
-  const dockedShipsForFleet = resolvedShipList
-    .filter((s) => s.current_system_id !== null && !(shipIdsInFleet as Set<string>).has(s.id as string))
-    .map((s) => ({ id: s.id as string, name: s.name }));
-
-  // Per-slot auto state label
-  function slotAutoStateLabel(slot: FleetSlot, fleet: typeof fleetList[number] | null): string {
-    if (slot.mode === "manual") return "";
-    if (!fleet) return "Idle — no eligible ships or colonies";
-    if (fleet.status === "traveling") {
-      const jobs = allTravelJobs.filter((j) => j.fleet_id === fleet.id);
-      const dest = jobs[0] ? systemDisplayName(jobs[0].to_system_id) : "unknown";
-      const eta = fleetEtaDisplay.get(fleet.id) ?? "";
-      const direction = slot.auto_state === "going_to_station" ? "→ Station" : `→ ${dest}`;
-      return `${direction}${eta ? ` · ${eta}` : ""}`;
-    }
-    if (fleet.status === "active") {
-      const sysName = fleet.current_system_id ? systemDisplayName(fleet.current_system_id) : "unknown";
-      if (fleet.current_system_id === station?.current_system_id) return `Staged at station (${sysName})`;
-      const colonyName = slot.auto_target_colony_id
-        ? colonyList.find((c) => c.id === slot.auto_target_colony_id)?.system_id
-          ? systemDisplayName(colonyList.find((c) => c.id === slot.auto_target_colony_id)!.system_id)
-          : "colony"
-        : "colony";
-      return `Loading at ${colonyName}`;
-    }
-    return "Idle";
-  }
-
-  // Phase 14: station carbon for build cost affordability checks.
-  const stationCarbon = stationInventory.find((r) => r.resource_type === "carbon")?.quantity ?? 0;
-
-  // Helper: derive planet type from a body_id (deterministic, no DB).
-  // Used in per-colony display data below (upkeep description, harsh badge).
-  function colonyPlanetType(bodyId: string): import("@/lib/types/enums").BodyType | null {
-    const lastColon = bodyId.lastIndexOf(":");
-    if (lastColon === -1) return null;
-    const sysId = bodyId.slice(0, lastColon);
-    const bIdx = parseInt(bodyId.slice(lastColon + 1), 10);
-    if (isNaN(bIdx)) return null;
-    const catEntry = getCatalogEntry(sysId);
-    const sys = generateSystem(sysId, catEntry ?? undefined);
-    return sys.bodies[bIdx]?.type ?? null;
-  }
-
-  // ── Per-colony display data ───────────────────────────────────────────────
-  const colonyDisplayData = colonyList.map((colony) => {
-    const health = colonyHealthStatus(colony.upkeep_missed_periods);
-
-    const rawAccrued =
-      colony.status === "active"
-        ? calculateAccumulatedTax(
-            colony.last_tax_collected_at,
-            colony.population_tier,
-            requestTime,
-          )
-        : 0;
-    // Apply health tax multiplier for display (matches what collect will give).
-    const accrued = Math.floor(rawAccrued * taxMultiplier(colony.upkeep_missed_periods));
-
-    // Phase 14: per-colony structure tiers and bonuses.
-    const colonyStructures = (structuresByColonyId.get(colony.id) ?? []) as Structure[];
-    const extractorTier = getStructureTier(colonyStructures, "extractor");
-    const warehouseTier = getStructureTier(colonyStructures, "warehouse");
-    const habitatTier = getStructureTier(colonyStructures, "habitat_module");
-    const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
-    const storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
-    const upkeepRedFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
-
-    const survey = surveyByBodyId.get(colony.body_id) ?? null;
-    const rawExtraction: ExtractionAmount[] =
-      survey && colony.last_extract_at && colony.status === "active"
-        ? calculateAccumulatedExtraction(
-            survey.resource_nodes,
-            colony.population_tier,
-            colony.last_extract_at,
-            requestTime,
-            extBonusMult,
-          )
-        : [];
-    // Apply health extraction multiplier for display (matches what extract will give).
-    const extMult = extractionMultiplier(colony.upkeep_missed_periods);
-    const accruedExtraction: ExtractionAmount[] = rawExtraction
-      .map((item) => ({ ...item, quantity: Math.floor(item.quantity * extMult) }))
-      .filter((item) => item.quantity > 0);
-
-    // Build options: one entry per buildable type showing current tier and next cost.
-    const BUILDABLE = ["warehouse", "extractor", "habitat_module"] as const;
-    const buildOptions = BUILDABLE.map((type) => {
-      const currentTier = getStructureTier(colonyStructures, type);
-      const targetTier = currentTier + 1;
-      const atMax = targetTier > BALANCE.structures.maxTier;
-      const cost = atMax ? null : structureBuildCost(targetTier);
-      const canAfford = cost !== null &&
-        (stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0) >= cost.iron &&
-        stationCarbon >= cost.carbon;
-      return { type, currentTier, targetTier, cost, canAfford, atMax };
-    });
-
-    // Phase 16: planet type for display and upkeep description.
-    const planetType = colonyPlanetType(colony.body_id);
-    const isHarsh = planetType !== null && isHarshPlanetType(planetType);
-    const upkeepDesc = upkeepDescription(colony.population_tier, isHarsh, upkeepRedFrac);
-
-    return {
-      colony,
-      accrued,
-      accruedExtraction,
-      health,
-      colonyStructures,
-      extractorTier,
-      warehouseTier,
-      habitatTier,
-      storageCap,
-      upkeepRedFrac,
-      buildOptions,
-      planetType,
-      isHarsh,
-      upkeepDesc,
-    };
-  });
-
-  const totalAccrued = colonyDisplayData.reduce((s, d) => s + d.accrued, 0);
+  const dockedShips = ships.filter((s) => s.current_system_id !== null);
+  const inTransitShips = ships.filter((s) => s.current_system_id === null);
+  const activeColonies = colonies.filter((c) => c.status === "active");
+  const neglectedColonies = activeColonies.filter((c) => c.upkeep_missed_periods >= 3);
+  const showDev = player.is_dev || process.env.NODE_ENV !== "production";
 
   return (
-    <div className="space-y-6">
-      {/* Page header */}
+    <div className="mx-auto max-w-5xl p-6 space-y-8">
+      {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">Command Centre</h1>
-          <p className="mt-1 text-sm text-zinc-500">
-            {player.handle}
+          <h1 className="text-xl font-semibold text-zinc-100">Command</h1>
+          <p className="mt-0.5 text-sm text-zinc-600">
+            Overview — use the{" "}
+            <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+              map
+            </Link>{" "}
+            and{" "}
+            <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+              station
+            </Link>{" "}
+            for gameplay
           </p>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Link
-            href="/game/map"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            Galaxy Map →
-          </Link>
-          <Link
-            href="/game/station"
-            className="rounded-lg border border-amber-900/60 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-amber-500 hover:bg-zinc-800/60 hover:text-amber-300 transition-colors"
-          >
-            Station →
-          </Link>
-          <Link
-            href="/game/routes"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            Routes →
-          </Link>
-          <Link
-            href="/game/alliance"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            Alliance →
-          </Link>
         </div>
       </div>
 
-      {/* ── Dev controls (dev account or non-production environment) ───── */}
-      {(player.is_dev || process.env.NODE_ENV !== "production") && (
-        <DevControls
-          pendingTravelCount={allTravelJobs.length}
-          stationId={station?.id ?? null}
-          isDev={player.is_dev === true}
-        />
+      {/* Dev controls — shown first so dev users see them immediately */}
+      {showDev && (
+        <section>
+          <DevControls
+            pendingTravelCount={pendingTravelCount}
+            stationId={station?.id ?? null}
+            isDev={player.is_dev}
+          />
+        </section>
       )}
 
-      {/* ── 2-column landscape grid ─────────────────────────────────────── */}
-      <div className="grid gap-6 lg:grid-cols-2">
-        {/* ── LEFT column: Station · Fleet Slots · Ships ────────────────── */}
-        <div className="space-y-6">
+      {/* Asset summary */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+          Summary
+        </h2>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
+              {player.credits.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Station Iron</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
+              {stationIron.toLocaleString()}
+            </p>
+          </div>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Ships</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
+              {dockedShips.length} docked
+              {inTransitShips.length > 0 && (
+                <span className="ml-1 text-sm text-indigo-400">
+                  +{inTransitShips.length} transit
+                </span>
+              )}
+            </p>
+          </div>
+          <div className={`rounded-lg border px-4 py-3 text-center ${
+            neglectedColonies.length > 0
+              ? "border-red-900 bg-red-950/20"
+              : "border-zinc-800 bg-zinc-900"
+          }`}>
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Colonies</p>
+            <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
+              {activeColonies.length} active
+              {neglectedColonies.length > 0 && (
+                <span className="ml-1 text-sm text-red-400">
+                  {neglectedColonies.length} neglected
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+      </section>
 
-      {/* ── Station (primary section) ────────────────────────────────────── */}
+      {/* Station location */}
       {station && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Station
           </h2>
-          <div className="rounded-lg border border-amber-900/50 bg-zinc-900 px-4 py-3">
-            {/* Station header */}
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-base font-semibold text-zinc-100">
-                  {station.name}
-                </p>
-                <p className="text-xs text-zinc-500">
-                  <Link
-                    href={`/game/system/${encodeURIComponent(station.current_system_id)}`}
-                    className="text-amber-500 hover:text-amber-400 transition-colors"
-                  >
-                    {systemDisplayName(station.current_system_id)}
-                  </Link>
-                  {" · "}
-                  <span className="text-zinc-600">stationary hub</span>
-                </p>
-              </div>
-              <div className="flex shrink-0 flex-col items-end gap-1">
-                <span className="rounded-full bg-amber-900/40 px-2 py-0.5 text-xs text-amber-400">
-                  Hub
-                </span>
-                <span className="text-xs text-zinc-600">
-                  {activeColonyCount}/{player.colony_slots} colon{activeColonyCount !== 1 ? "ies" : "y"}
-                </span>
-              </div>
-            </div>
-
-            {/* Credits + accrued */}
-            <div className="mt-3 border-t border-zinc-800 pt-3 flex items-center justify-between gap-4">
-              <div>
-                <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
-                <p className="mt-0.5 font-mono text-xl font-semibold text-amber-300">
-                  {player.credits.toLocaleString()}
-                </p>
-              </div>
-              {totalAccrued > 0 && (
-                <p className="text-xs text-zinc-500">
-                  +{totalAccrued} ¢ pending — collect from colonies
-                </p>
-              )}
-            </div>
-
-            {/* Station inventory */}
-            <div className="mt-3 border-t border-zinc-800 pt-3">
-              <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Inventory
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 flex items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-zinc-200">{station.name}</p>
+              <p className="text-xs text-zinc-600">
+                {systemDisplayName(station.current_system_id)}
               </p>
-              {stationInventory.length > 0 ? (
-                <div className="flex flex-wrap gap-x-4 gap-y-1">
-                  {stationInventory.map((row) => (
-                    <span key={row.resource_type} className="text-xs text-zinc-400">
-                      {row.resource_type}{" "}
-                      <span className="font-mono text-zinc-200">
-                        ×{row.quantity.toLocaleString()}
-                      </span>
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-xs text-zinc-700">
-                  Empty — dispatch ships to colonies and haul resources back here.
-                </p>
-              )}
             </div>
-
-            {/* Refining */}
-            <div className="mt-3 border-t border-zinc-800 pt-3">
-              <p className="mb-2 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                Refine
-              </p>
-              <RefineForm />
-            </div>
+            <Link
+              href="/game/station"
+              className="rounded border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 transition-colors"
+            >
+              Manage Station →
+            </Link>
           </div>
         </section>
       )}
 
-      {/* In-transit banner (manual ships only; auto ships show state in ShipRow) */}
-      {isAnyInTransit && bannerJob && activeTravelJob?.ship_id &&
-        resolvedShipList.find((s) => s.id === activeTravelJob.ship_id)?.dispatch_mode === "manual" && (
-        <div className="rounded-lg border border-indigo-900/60 bg-zinc-900/70 px-4 py-3 flex items-center justify-between gap-4">
-          <div>
-            <p className="text-sm text-zinc-300">
-              <span className="text-zinc-500">Ship in transit →</span>{" "}
-              <Link
-                href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
-                className="text-indigo-400 hover:text-indigo-300 font-medium"
-              >
-                {systemDisplayName(bannerJob.to_system_id)}
-              </Link>
-            </p>
-            {etaDisplay && (
-              <p className="text-xs text-zinc-500 mt-0.5">{etaDisplay}</p>
-            )}
-          </div>
-          <Link
-            href={`/game/system/${encodeURIComponent(bannerJob.to_system_id)}`}
-            className="shrink-0 rounded-lg bg-indigo-800 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-700 transition-colors"
-          >
-            View system →
-          </Link>
-        </div>
-      )}
-
-      {/* Fleet Slots */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-          Fleet Slots
-        </h2>
-        <div className="space-y-3">
-          {slotList.map((slot) => {
-            const fleet = slot.current_fleet_id
-              ? fleetList.find((f) => f.id === slot.current_fleet_id) ?? null
-              : null;
-            const memberShipIds = fleet ? (shipIdsByFleetId.get(fleet.id) ?? []) : [];
-            const nearby = fleet ? (fleetNearbySystems.get(fleet.id) ?? []) : [];
-            const destJob = fleet ? allTravelJobs.find((j) => j.fleet_id === fleet.id) : null;
-            const isAuto = slot.mode !== "manual";
-            const stateLabel = slotAutoStateLabel(slot, fleet);
-
-            return (
-              <div
-                key={slot.id}
-                className={`rounded-lg border bg-zinc-900 px-4 py-3 ${
-                  fleet?.status === "traveling"
-                    ? "border-indigo-800"
-                    : "border-zinc-700"
-                }`}
-              >
-                {/* Slot header */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-zinc-200">{slot.name}</p>
-                    {isAuto && (
-                      <p className="mt-0.5 text-xs text-indigo-400">
-                        {stateLabel || "Idle"}
-                      </p>
-                    )}
-                    {!isAuto && fleet && (
-                      <p className="mt-0.5 text-xs text-zinc-500">
-                        {fleet.status === "traveling" && destJob
-                          ? `→ ${systemDisplayName(destJob.to_system_id)}`
-                          : fleet.current_system_id
-                            ? systemDisplayName(fleet.current_system_id)
-                            : "In transit"}
-                        {fleetEtaDisplay.get(fleet.id) && (
-                          <span className="ml-2 text-zinc-600">
-                            {fleetEtaDisplay.get(fleet.id)}
-                          </span>
-                        )}
-                        {" "}
-                        <Link
-                          href={`/game/fleet/${fleet.id}`}
-                          className="text-indigo-500 hover:text-indigo-300 transition-colors"
-                        >
-                          →
-                        </Link>
-                      </p>
-                    )}
-                    {!isAuto && !fleet && (
-                      <p className="mt-0.5 text-xs text-zinc-600">No fleet assigned</p>
-                    )}
-                    {memberShipIds.length > 0 && (
-                      <p className="mt-0.5 text-xs text-zinc-600">
-                        {memberShipIds.length} ship{memberShipIds.length !== 1 ? "s" : ""}:{" "}
-                        {memberShipIds
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          .map((id) => shipNameById.get(id as any) ?? (id as string).slice(0, 8))
-                          .join(", ")}
-                      </p>
-                    )}
-                  </div>
-                  <div className="shrink-0 flex flex-col items-end gap-1.5">
-                    <FleetSlotModeSelector slotId={slot.id} currentMode={slot.mode} />
-                    {/* Disband for manual staged fleets */}
-                    {!isAuto && fleet?.status === "active" && (
-                      <DisbandFleetButton fleetId={fleet.id} />
-                    )}
-                  </div>
-                </div>
-
-                {/* Manual slot: dispatch form for staged fleet */}
-                {!isAuto && fleet?.status === "active" && nearby.length > 0 && (
-                  <div className="mt-3 border-t border-zinc-800 pt-3">
-                    <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                      Dispatch Fleet
-                    </p>
-                    <DispatchFleetForm fleetId={fleet.id} nearbySystems={nearby} />
-                  </div>
-                )}
-
-                {/* Manual slot: form fleet if no current fleet and eligible ships exist */}
-                {!isAuto && !fleet && dockedShipsForFleet.length >= 2 && (
-                  <div className="mt-3 border-t border-zinc-800 pt-3">
-                    <CreateFleetForm dockedShips={dockedShipsForFleet} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Free fleets: manually created, not attached to a slot */}
-          {freeFleets.map((fleet) => {
-            const memberShipIds = shipIdsByFleetId.get(fleet.id) ?? [];
-            const nearby = fleetNearbySystems.get(fleet.id) ?? [];
-            const destJob = allTravelJobs.find((j) => j.fleet_id === fleet.id);
-            return (
-              <div
-                key={fleet.id}
-                className={`rounded-lg border bg-zinc-900 px-4 py-3 ${
-                  fleet.status === "traveling" ? "border-indigo-800" : "border-zinc-700"
-                }`}
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="flex items-center gap-2">
-                      <p className="text-sm font-medium text-zinc-200">{fleet.name}</p>
-                      <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-500">
-                        Manual
-                      </span>
-                    </div>
-                    <p className="mt-0.5 text-xs text-zinc-500">
-                      {fleet.status === "traveling" && destJob
-                        ? `→ ${systemDisplayName(destJob.to_system_id)}`
-                        : fleet.current_system_id
-                          ? systemDisplayName(fleet.current_system_id)
-                          : "In transit"}
-                      {fleetEtaDisplay.get(fleet.id) && (
-                        <span className="ml-2 text-zinc-600">{fleetEtaDisplay.get(fleet.id)}</span>
-                      )}
-                    </p>
-                    {memberShipIds.length > 0 && (
-                      <p className="mt-0.5 text-xs text-zinc-600">
-                        {memberShipIds.length} ship{memberShipIds.length !== 1 ? "s" : ""}:{" "}
-                        {memberShipIds
-                          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                          .map((id) => shipNameById.get(id as any) ?? (id as string).slice(0, 8))
-                          .join(", ")}
-                      </p>
-                    )}
-                  </div>
-                  {fleet.status === "active" && (
-                    <DisbandFleetButton fleetId={fleet.id} />
-                  )}
-                </div>
-                {fleet.status === "active" && nearby.length > 0 && (
-                  <div className="mt-3 border-t border-zinc-800 pt-3">
-                    <p className="mb-1.5 text-xs font-medium text-zinc-500 uppercase tracking-wider">
-                      Dispatch
-                    </p>
-                    <DispatchFleetForm fleetId={fleet.id} nearbySystems={nearby} />
-                  </div>
-                )}
-              </div>
-            );
-          })}
-
-          {/* Create free fleet from docked ships not in any fleet */}
-          {dockedShipsForFleet.length >= 2 && freeFleets.length === 0 && slotList.every((s) => s.current_fleet_id) && (
-            <div className="rounded-lg border border-dashed border-zinc-700 bg-zinc-900/50 px-4 py-3">
-              <CreateFleetForm dockedShips={dockedShipsForFleet} />
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Ships — secondary to station/fleet context */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-          Ships
-        </h2>
-        {resolvedShipList.length === 0 ? (
-          <EmptyState message="No ships found. Try refreshing or signing out and back in." />
-        ) : (
+      {/* Ships overview */}
+      {ships.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Ships
+          </h2>
           <div className="space-y-2">
-            {resolvedShipList.map((ship) => (
-              <ShipRow
+            {ships.map((ship) => (
+              <div
                 key={ship.id}
-                ship={ship}
-                job={travelJobByShipId.get(ship.id) ?? null}
-                cargo={cargoByShipId.get(ship.id) ?? []}
-                stationSystemId={station?.current_system_id ?? null}
-                autoTargetSystemName={autoTargetNameByShipId.get(ship.id) ?? null}
-                upgradeSummary={upgradeByShipId.get(ship.id) ?? null}
-                stationIron={stationIronForUpgrades}
-              />
+                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+              >
+                <div>
+                  <p className="text-sm text-zinc-300">{ship.name}</p>
+                  <p className="text-xs text-zinc-600">
+                    {ship.current_system_id
+                      ? systemDisplayName(ship.current_system_id)
+                      : "In transit…"}
+                  </p>
+                </div>
+                <span className={`text-xs ${
+                  ship.current_system_id ? "text-emerald-500" : "text-indigo-400"
+                }`}>
+                  {ship.current_system_id ? "Docked" : "Traveling"}
+                </span>
+              </div>
             ))}
           </div>
-        )}
-      </section>
+          <p className="mt-2 text-xs text-zinc-700">
+            Dispatch ships from the{" "}
+            <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+              map
+            </Link>{" "}
+            or{" "}
+            <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+              station
+            </Link>.
+          </p>
+        </section>
+      )}
 
-        </div>{/* end left column */}
-
-        {/* ── RIGHT column: Colonies · Research ─────────────────────────── */}
-        <div className="space-y-6">
-
-      {/* Colonies */}
-      {colonyList.length > 0 && (
+      {/* Colonies overview */}
+      {colonies.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Colonies
           </h2>
           <div className="space-y-2">
-            {colonyDisplayData.map(({ colony, accrued, accruedExtraction, health, extractorTier, warehouseTier, habitatTier, storageCap, upkeepRedFrac, buildOptions, planetType, isHarsh, upkeepDesc }) => (
-              <ColonyRow
-                key={colony.id}
-                colony={colony}
-                accrued={accrued}
-                accruedExtraction={accruedExtraction}
-                health={health}
-                extractorTier={extractorTier}
-                warehouseTier={warehouseTier}
-                habitatTier={habitatTier}
-                storageCap={storageCap}
-                upkeepRedFrac={upkeepRedFrac}
-                buildOptions={buildOptions}
-                planetType={planetType}
-                isHarsh={isHarsh}
-                upkeepDesc={upkeepDesc}
-              />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── Research (compact) ─────────────────────────────────────────────── */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Research
-          </h2>
-          <span className="text-xs text-zinc-600">
-            Budget: <span className="font-mono text-zinc-400">{allStatCaps(unlockedResearchIds).cargo}</span> cargo cap ·{" "}
-            Iron: <span className="font-mono text-zinc-400">{(stationInvMap.get("iron") ?? 0).toLocaleString()}</span>
-          </span>
-        </div>
-        <div className="space-y-1.5">
-          {RESEARCH_DEFS.filter((def) => {
-            const s = researchStatus(def, unlockedResearchIds, milestoneData);
-            return s !== "unlocked";
-          }).slice(0, 8).map((def) => {
-            const status = researchStatus(def, unlockedResearchIds, milestoneData);
-            const prereqsMet = arePrerequisitesMet(def, unlockedResearchIds);
-            const milestonesMet = areMilestonesMet(def.milestones ?? [], milestoneData);
-            const canAfford = def.cost.every(
-              (c) => (stationInvMap.get(c.resource_type) ?? 0) >= c.quantity,
-            );
-            const isPurchasable = status === "purchasable" && canAfford;
-            const costLabel = def.cost.map((c) => `${c.quantity} ${c.resource_type}`).join(", ");
-            const borderClass =
-              status === "purchasable" && canAfford
-                ? "border-indigo-800"
-                : "border-zinc-800";
-
-            return (
-              <div
-                key={def.id}
-                className={`rounded border bg-zinc-900/70 px-3 py-2 ${borderClass}`}
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className={`text-xs font-medium ${
-                      status === "purchasable" && canAfford ? "text-zinc-100" : "text-zinc-500"
-                    }`}>
-                      {def.name}
-                      {def.scaffoldOnly && (
-                        <span className="ml-1.5 text-zinc-700">(Future)</span>
-                      )}
+            {colonies.map((colony) => {
+              const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
+              const isNeglected = colony.upkeep_missed_periods >= 3;
+              const isStruggling = !isNeglected && colony.upkeep_missed_periods >= 1;
+              return (
+                <div
+                  key={colony.id}
+                  className={`flex items-center justify-between rounded-lg border px-4 py-2.5 ${
+                    isNeglected
+                      ? "border-red-900 bg-red-950/20"
+                      : isStruggling
+                        ? "border-amber-900 bg-amber-950/10"
+                        : "border-zinc-800 bg-zinc-900/70"
+                  }`}
+                >
+                  <div>
+                    <p className="text-sm text-zinc-300">
+                      {systemDisplayName(colony.system_id)}
+                      <span className="ml-1.5 text-xs text-zinc-600">
+                        · Body {bodyIdx} · T{colony.population_tier}
+                      </span>
                     </p>
-                    {status === "locked" && (
-                      <p className="text-xs text-zinc-700 mt-0.5">
-                        {!prereqsMet
-                          ? `Req: ${def.requires
-                              .filter((id) => !unlockedResearchIds.has(id))
-                              .map((id) => RESEARCH_DEFS.find((r) => r.id === id)?.name ?? id)
-                              .join(", ")}`
-                          : !milestonesMet
-                            ? (def.milestones ?? [])
-                                .filter((m) => {
-                                  switch (m.type) {
-                                    case "min_active_colonies": return milestoneData.activeColonyCount < m.count;
-                                    case "min_systems_discovered": return milestoneData.systemsDiscovered < m.count;
-                                    case "min_colony_tier": return milestoneData.maxColonyTier < m.tier;
-                                  }
-                                })
-                                .map(milestoneLabel)
-                                .join(", ")
-                            : ""}
+                    {isNeglected && (
+                      <p className="text-xs text-red-400">
+                        Neglected ({colony.upkeep_missed_periods} missed periods)
                       </p>
                     )}
-                    {status === "purchasable" && !canAfford && (
-                      <p className="text-xs text-zinc-700 mt-0.5">Need {costLabel}</p>
+                    {isStruggling && (
+                      <p className="text-xs text-amber-400">Low supplies</p>
+                    )}
+                    {colony.status !== "active" && (
+                      <p className="text-xs text-zinc-600 capitalize">{colony.status}</p>
                     )}
                   </div>
-                  <div className="shrink-0 text-right">
-                    <p className="text-xs text-zinc-600">{costLabel}</p>
-                    {isPurchasable && (
-                      <PurchaseButton researchId={def.id} costLabel={costLabel} />
-                    )}
-                  </div>
+                  <Link
+                    href={`/game/colony/${colony.id}`}
+                    className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
+                  >
+                    Details →
+                  </Link>
                 </div>
-              </div>
-            );
-          })}
-          {RESEARCH_DEFS.every((def) => researchStatus(def, unlockedResearchIds, milestoneData) === "unlocked") && (
-            <p className="text-xs text-emerald-600 py-2">All research unlocked.</p>
-          )}
-          {RESEARCH_DEFS.filter((def) => researchStatus(def, unlockedResearchIds, milestoneData) !== "unlocked").length > 8 && (
-            <p className="text-xs text-zinc-700 py-1">
-              +{RESEARCH_DEFS.filter((def) => researchStatus(def, unlockedResearchIds, milestoneData) !== "unlocked").length - 8} more —{" "}
-              <Link href="/game/research" className="text-indigo-600 hover:text-indigo-400">view all</Link>
-            </p>
-          )}
-        </div>
-      </section>
-
-        </div>{/* end right column */}
-      </div>{/* end 2-column grid */}
-
-      {/* Nearby systems */}
-      {nearbySystems.length > 0 && dockedSystemId && (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Nearby systems
-          </h2>
-          <div className="space-y-2">
-            {nearbySystems.map((nearby) => (
-              <Link
-                key={nearby.id}
-                href={`/game/system/${encodeURIComponent(nearby.id)}`}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 transition-colors hover:border-zinc-700"
-              >
-                <p className="text-sm font-medium text-zinc-200">{nearby.name}</p>
-                <span className="font-mono text-xs text-zinc-500">
-                  {nearby.distanceFromSource.toFixed(2)} ly
-                </span>
-              </Link>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
 
-      {/* Getting started */}
-      <section className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
-        <h2 className="mb-2 text-sm font-semibold text-zinc-400">
-          Getting started
+      {/* Quick nav */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+          Navigate
         </h2>
-        <ol className="space-y-1 text-sm text-zinc-500">
-          <li>
-            <span className="text-zinc-400">1.</span> Travel to a nearby system
-            within {BALANCE.lanes.baseRangeLy} ly and discover it.
-          </li>
-          <li>
-            <span className="text-zinc-400">2.</span> Survey a body to reveal
-            its resources and colony suitability.
-          </li>
-          <li>
-            <span className="text-zinc-400">3.</span> Found a colony on a
-            habitable world — your first colony is free.
-          </li>
-          <li>
-            <span className="text-zinc-400">4.</span> Extract resources from
-            colonies into colony inventory.
-          </li>
-          <li>
-            <span className="text-zinc-400">5.</span> Load ship cargo and return
-            to Sol to unload into your station — or set a ship to auto mode.
-          </li>
-        </ol>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {[
+            { href: "/game/map", label: "Galaxy Map", color: "text-indigo-400 border-indigo-800/40" },
+            { href: "/game/station", label: "Station", color: "text-amber-400 border-amber-800/40" },
+            { href: "/game/research", label: "Research", color: "text-teal-400 border-teal-800/40" },
+            { href: "/game/alliance", label: "Alliance", color: "text-violet-400 border-violet-800/40" },
+          ].map(({ href, label, color }) => (
+            <Link
+              key={href}
+              href={href}
+              className={`rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-center text-xs font-medium transition-colors hover:bg-zinc-800/60 ${color}`}
+            >
+              {label}
+            </Link>
+          ))}
+        </div>
       </section>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Sub-components
-// ---------------------------------------------------------------------------
-
-function ShipRow({
-  ship,
-  job,
-  cargo,
-  stationSystemId,
-  autoTargetSystemName,
-  upgradeSummary,
-  stationIron,
-}: {
-  ship: Ship;
-  job: TravelJob | null;
-  cargo: { resource_type: string; quantity: number }[];
-  stationSystemId: string | null;
-  autoTargetSystemName: string | null;
-  upgradeSummary: ShipUpgradeSummary | null;
-  stationIron: number;
-}) {
-  const isThisShipInTransit = !ship.current_system_id && job !== null;
-  const isAuto = ship.dispatch_mode !== "manual";
-
-  let locationDisplay: string;
-  if (isThisShipInTransit && job) {
-    locationDisplay = `En route → ${systemDisplayName(job.to_system_id)}`;
-  } else if (ship.current_system_id) {
-    locationDisplay = systemDisplayName(ship.current_system_id);
-  } else {
-    locationDisplay = "In transit";
-  }
-
-  const systemHref =
-    isThisShipInTransit && job
-      ? `/game/system/${encodeURIComponent(job.to_system_id)}`
-      : ship.current_system_id
-        ? `/game/system/${encodeURIComponent(ship.current_system_id)}`
-        : null;
-
-  const cargoUsed = cargo.reduce((s, r) => s + r.quantity, 0);
-  const cargoSummary = cargo.map((r) => `${r.quantity} ${r.resource_type}`).join(", ");
-
-  const canUnload =
-    ship.dispatch_mode === "manual" &&
-    !!ship.current_system_id &&
-    stationSystemId !== null &&
-    ship.current_system_id === stationSystemId &&
-    cargo.length > 0;
-
-  // ETA from job
-  let etaText: string | null = null;
-  if (isThisShipInTransit && job) {
-    const remainingMs = Math.max(0, new Date(job.arrive_at).getTime() - Date.now());
-    const remainingMin = Math.ceil(remainingMs / 60_000);
-    etaText =
-      remainingMin <= 0
-        ? "Arriving…"
-        : remainingMin < 60
-          ? `~${remainingMin} min`
-          : `~${(remainingMin / 60).toFixed(1)} hr`;
-  }
-
-  const tier = upgradeSummary?.tier ?? 1;
-  const totalUpgrades = upgradeSummary?.totalUpgrades ?? 0;
-  const maxTotal = upgradeSummary?.maxTotalUpgrades ?? 6;
-
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-      {/* ── Header row ────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
-            {/* Ship tier badge */}
-            <span className="rounded-full bg-zinc-800 px-1.5 py-0.5 text-xs text-zinc-400">
-              T{tier}
-            </span>
-          </div>
-          <p className="text-xs text-zinc-500">
-            {systemHref ? (
-              <Link href={systemHref} className="hover:text-zinc-300 transition-colors">
-                {locationDisplay}
-              </Link>
-            ) : (
-              locationDisplay
-            )}
-            {etaText && (
-              <span className="ml-2 text-zinc-600">{etaText}</span>
-            )}
-          </p>
-          {/* Auto-ship task label */}
-          {isAuto && (
-            <p className="mt-0.5 text-xs text-indigo-400">
-              {autoStateLabel(ship.auto_state, autoTargetSystemName ?? undefined)}
-            </p>
-          )}
-        </div>
-        <div className="text-right shrink-0 space-y-1">
-          <p className="text-xs text-zinc-500">
-            {Number(ship.speed_ly_per_hr).toFixed(2)} ly/hr · {cargoUsed}/{ship.cargo_cap} cargo
-          </p>
-          {/* Mode selector */}
-          <ShipModeSelector shipId={ship.id} currentMode={ship.dispatch_mode} />
-        </div>
-      </div>
-
-      {/* Cargo contents */}
-      {cargo.length > 0 && (
-        <div className="mt-2 border-t border-zinc-800 pt-2">
-          <p className="text-xs text-zinc-500 mb-1">
-            Cargo: <span className="text-zinc-400">{cargoSummary}</span>
-          </p>
-          {canUnload && (
-            <UnloadButton shipId={ship.id} summary={cargoSummary} />
-          )}
-        </div>
-      )}
-
-      {/* ── Upgrade panel ─────────────────────────────────────────────────── */}
-      {upgradeSummary && (
-        <div className="mt-2 border-t border-zinc-800 pt-2">
-          <div className="flex items-center justify-between mb-1.5">
-            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              Ship Upgrades
-            </p>
-            <p className="text-xs text-zinc-600">
-              {totalUpgrades}/{maxTotal} used · T{tier}
-            </p>
-          </div>
-          {/* Active stats (cargo + engine) */}
-          <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-            {(["cargo", "engine"] as const).map((stat) => {
-              const s = upgradeSummary.stats[stat];
-              const canAfford = stationIron >= s.ironCost;
-              const showButton = s.canUpgrade;
-              const buttonAffordable = showButton && canAfford;
-
-              const valueLabel =
-                stat === "cargo"
-                  ? ` · cap ${upgradeSummary.effectiveCargoCap}`
-                  : ` · ${upgradeSummary.effectiveSpeed} ly/hr`;
-
-              let lockedReason = "";
-              if (s.isAtStatCap && s.researchCap < 10) {
-                lockedReason = `Research cap (${s.researchCap})`;
-              } else if (s.isAtStatCap) {
-                lockedReason = "Max";
-              } else if (s.isAtTotalCap) {
-                lockedReason = "Ship at limit";
-              }
-
-              return (
-                <div key={stat} className="flex items-center justify-between gap-1 min-w-0">
-                  <span className="text-xs text-zinc-500 shrink-0">
-                    {SHIP_STAT_LABELS[stat]}{" "}
-                    <span className="font-mono text-zinc-300">Lv {s.currentLevel ?? 0}</span>
-                    <span className="text-zinc-600">{valueLabel}</span>
-                  </span>
-                  <span className="shrink-0">
-                    {showButton ? (
-                      buttonAffordable ? (
-                        <UpgradeButton shipId={ship.id} stat={stat} ironCost={s.ironCost} />
-                      ) : (
-                        <span className="text-xs text-zinc-700" title={`Need ${s.ironCost} iron`}>
-                          ↑ {s.ironCost}⛏
-                        </span>
-                      )
-                    ) : lockedReason ? (
-                      <span className="text-xs text-zinc-700">{lockedReason}</span>
-                    ) : null}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Combat / utility stats — upgradeable but not yet active in gameplay */}
-          <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1">
-            {(["hull", "shield", "turret", "utility"] as const).map((stat) => {
-              const s = upgradeSummary.stats[stat];
-              const canAfford = stationIron >= s.ironCost;
-              const showButton = s.canUpgrade;
-              const buttonAffordable = showButton && canAfford;
-
-              let lockedReason = "";
-              if (s.isAtStatCap && s.researchCap < 10) {
-                lockedReason = `Research cap (${s.researchCap})`;
-              } else if (s.isAtStatCap) {
-                lockedReason = "Max";
-              } else if (s.isAtTotalCap) {
-                lockedReason = "Ship at limit";
-              }
-
-              return (
-                <div key={stat} className="flex items-center justify-between gap-1 min-w-0">
-                  <span className="text-xs text-zinc-600 shrink-0">
-                    {SHIP_STAT_LABELS[stat]}{" "}
-                    <span className="font-mono text-zinc-500">Lv {s.currentLevel ?? 0}</span>
-                  </span>
-                  <span className="shrink-0">
-                    {showButton ? (
-                      buttonAffordable ? (
-                        <UpgradeButton shipId={ship.id} stat={stat} ironCost={s.ironCost} />
-                      ) : (
-                        <span className="text-xs text-zinc-700" title={`Need ${s.ironCost} iron`}>
-                          ↑ {s.ironCost}⛏
-                        </span>
-                      )
-                    ) : lockedReason ? (
-                      <span className="text-xs text-zinc-700">{lockedReason}</span>
-                    ) : null}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          <p className="mt-1 text-xs text-zinc-800">
-            Hull · Shield · Turret · Utility — combat stats, not active yet
-          </p>
-          {stationIron > 0 && (
-            <p className="mt-1.5 text-xs text-zinc-700">
-              Station iron: <span className="font-mono text-zinc-500">{stationIron.toLocaleString()}</span>
-            </p>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ColonyRow({
-  colony,
-  accrued,
-  accruedExtraction,
-  health,
-  extractorTier,
-  warehouseTier,
-  habitatTier,
-  storageCap,
-  upkeepRedFrac,
-  buildOptions,
-  planetType,
-  isHarsh,
-  upkeepDesc,
-}: {
-  colony: Colony;
-  accrued: number;
-  accruedExtraction: ExtractionAmount[];
-  health: ColonyHealthStatus;
-  extractorTier: number;
-  warehouseTier: number;
-  habitatTier: number;
-  storageCap: number;
-  upkeepRedFrac: number;
-  buildOptions: {
-    type: "warehouse" | "extractor" | "habitat_module";
-    currentTier: number;
-    targetTier: number;
-    cost: { iron: number; carbon: number } | null;
-    canAfford: boolean;
-    atMax: boolean;
-  }[];
-  planetType: import("@/lib/types/enums").BodyType | null;
-  isHarsh: boolean;
-  upkeepDesc: string;
-}) {
-  const systemName = systemDisplayName(colony.system_id);
-  const bodyIndex = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
-
-  const statusColor: Record<Colony["status"], string> = {
-    active: "text-emerald-400",
-    abandoned: "text-amber-400",
-    collapsed: "text-zinc-600",
-  };
-
-  let growthLabel: string | null = null;
-  if (colony.status === "active") {
-    if (!colony.next_growth_at) {
-      growthLabel = "Max tier";
-    } else if (colony.upkeep_missed_periods >= 1) {
-      growthLabel = "growth paused";
-    } else {
-      const growthDate = new Date(colony.next_growth_at);
-      growthLabel = `grows ${growthDate > new Date() ? growthDate.toLocaleDateString() : "soon"}`;
-    }
-  }
-
-  const extractSummary = formatExtractionSummary(accruedExtraction);
-
-  const healthBadge: Record<ColonyHealthStatus, { label: string; classes: string }> = {
-    well_supplied: { label: "Supplied", classes: "bg-emerald-900/50 text-emerald-400" },
-    struggling: { label: "Struggling", classes: "bg-amber-900/50 text-amber-400" },
-    neglected: { label: "Neglected", classes: "bg-red-900/50 text-red-400" },
-  };
-  const badge = healthBadge[health];
-
-  return (
-    <div className={`rounded-lg border bg-zinc-900 px-4 py-3 ${
-      health === "neglected"
-        ? "border-red-900"
-        : health === "struggling"
-          ? "border-amber-900"
-          : "border-zinc-800"
-    }`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 flex-wrap">
-            <p className="text-sm font-medium text-zinc-200 truncate">
-              <Link
-                href={`/game/system/${encodeURIComponent(colony.system_id)}`}
-                className="hover:text-zinc-100 transition-colors"
-              >
-                {systemName}
-              </Link>
-              <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
-              {" "}
-              <Link
-                href={`/game/colony/${colony.id}`}
-                className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-              >
-                details →
-              </Link>
-            </p>
-            {/* Planet type badge */}
-            {planetType && (
-              <span className={`rounded-full px-1.5 py-0.5 text-xs ${
-                isHarsh
-                  ? "bg-red-950/60 text-red-400"
-                  : planetType === "lush" || planetType === "ocean" || planetType === "habitable"
-                    ? "bg-emerald-950/60 text-emerald-500"
-                    : "bg-zinc-800 text-zinc-400"
-              }`}>
-                {bodyTypeLabel(planetType)}
-              </span>
-            )}
-            {isHarsh && (
-              <span className="rounded-full bg-amber-950/60 px-1.5 py-0.5 text-xs text-amber-500">
-                Harsh
-              </span>
-            )}
-            {colony.status === "active" && health !== "well_supplied" && (
-              <span className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${badge.classes}`}>
-                {badge.label}
-              </span>
-            )}
-          </div>
-          <p className="mt-0.5 text-xs text-zinc-500">
-            Tier {colony.population_tier}{" "}
-            <span className={`font-medium ${statusColor[colony.status]}`}>
-              {colony.status}
-            </span>
-            {growthLabel && (
-              <span className={`ml-2 ${colony.upkeep_missed_periods >= 1 ? "text-amber-600" : "text-zinc-600"}`}>
-                · {growthLabel}
-              </span>
-            )}
-          </p>
-          {/* Upkeep description — always show for active colonies */}
-          {colony.status === "active" && (
-            <p className="mt-0.5 text-xs text-zinc-600">
-              Upkeep: {upkeepDesc}
-            </p>
-          )}
-          {colony.status === "active" && health !== "well_supplied" && (
-            <p className="mt-0.5 text-xs text-red-500">
-              {health === "neglected"
-                ? `Neglected ${colony.upkeep_missed_periods} periods — ${isHarsh ? "send food + iron" : "send food"} to station!`
-                : `Low ${isHarsh ? "food/iron" : "food"} supply — yields reduced`}
-            </p>
-          )}
-        </div>
-
-        <div className="shrink-0 text-right space-y-1.5">
-          {/* Tax */}
-          {colony.status === "active" && (
-            <div>
-              <p className="text-xs text-zinc-500">
-                {accrued > 0 ? (
-                  <span className="text-amber-300 font-medium">{accrued} ¢ accrued</span>
-                ) : (
-                  <span className="text-zinc-600">
-                    {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
-                  </span>
-                )}
-              </p>
-              {accrued > 0 && (
-                <CollectButton colonyId={colony.id} accrued={accrued} />
-              )}
-            </div>
-          )}
-
-          {/* Extraction */}
-          {colony.status === "active" && extractSummary && (
-            <div>
-              <p className="text-xs text-teal-300 font-medium">{extractSummary} ready</p>
-              <ExtractButton colonyId={colony.id} summary={extractSummary} />
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Structures panel */}
-      {colony.status === "active" && (
-        <div className="mt-3 border-t border-zinc-800 pt-3">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-xs font-medium text-zinc-500 uppercase tracking-wider">
-              Structures
-            </p>
-            <div className="flex items-center gap-3 text-xs text-zinc-600">
-              {warehouseTier > 0 && (
-                <span>Storage {storageCap.toLocaleString()} (+{storageCap - colony.storage_cap})</span>
-              )}
-              {extractorTier > 0 && (
-                <span>Extractor T{extractorTier}</span>
-              )}
-              {habitatTier > 0 && upkeepRedFrac > 0 && (
-                <span>Upkeep −{Math.round(upkeepRedFrac * 100)}%</span>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {buildOptions.map(({ type, currentTier, targetTier, cost, canAfford, atMax }) => {
-              const label =
-                type === "warehouse" ? "Warehouse" :
-                type === "extractor" ? "Extractor" :
-                "Habitat Mod.";
-              if (atMax) {
-                return (
-                  <span key={type} className="text-xs text-zinc-700">
-                    {label} T{currentTier} (max)
-                  </span>
-                );
-              }
-              const buttonLabel =
-                currentTier === 0
-                  ? `Build ${label} T1`
-                  : `Upgrade ${label} T${targetTier}`;
-              return cost ? (
-                <BuildStructureButton
-                  key={type}
-                  colonyId={colony.id}
-                  structureType={type}
-                  targetTier={targetTier}
-                  ironCost={cost.iron}
-                  carbonCost={cost.carbon}
-                  canAfford={canAfford}
-                  label={buttonLabel}
-                />
-              ) : null;
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-function bodyTypeLabel(type: string): string {
-  const labels: Record<string, string> = {
-    lush:          "Lush",
-    ocean:         "Ocean",
-    desert:        "Desert",
-    ice_planet:    "Ice",
-    volcanic:      "Volcanic",
-    toxic:         "Toxic",
-    rocky:         "Rocky",
-    habitable:     "Habitable",
-    barren:        "Barren",
-    frozen:        "Frozen",
-    gas_giant:     "Gas Giant",
-    ice_giant:     "Ice Giant",
-    asteroid_belt: "Asteroid Belt",
-  };
-  return labels[type] ?? type;
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-6 text-center">
-      <p className="text-sm text-zinc-600">{message}</p>
     </div>
   );
 }

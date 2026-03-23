@@ -43,9 +43,9 @@ export default async function GameLayout({
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100">
+    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
       {/* Navigation bar */}
-      <header className="border-b border-zinc-800 bg-zinc-950 px-6 py-3">
+      <header className="shrink-0 border-b border-zinc-800 bg-zinc-950 px-6 py-3">
         <div className="flex items-center justify-between">
           <span className="font-mono text-sm font-medium text-zinc-300">
             Starfall Atlas
@@ -53,21 +53,27 @@ export default async function GameLayout({
           <div className="flex items-center gap-5">
             <Link
               href="/game/map"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+              className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
             >
               Map
-            </Link>
-            <Link
-              href="/game/command"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Command
             </Link>
             <Link
               href="/game/station"
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
               Station
+            </Link>
+            <Link
+              href="/game/research"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Research
+            </Link>
+            <Link
+              href="/game/command"
+              className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+            >
+              Overview
             </Link>
             <Link
               href="/game/profile"
@@ -88,7 +94,7 @@ export default async function GameLayout({
       </header>
 
       {/* Page content */}
-      <main className="mx-auto max-w-5xl p-6">{children}</main>
+      <main className="flex flex-1 flex-col overflow-y-auto">{children}</main>
     </div>
   );
 }

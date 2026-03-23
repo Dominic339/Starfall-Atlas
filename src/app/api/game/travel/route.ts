@@ -34,6 +34,8 @@ import type { Ship, TravelJob } from "@/lib/types/game";
 
 const CreateTravelSchema = z.object({
   destinationSystemId: z.string().min(1).max(64),
+  /** Optional: explicitly select which ship to dispatch. */
+  shipId: z.string().uuid().optional(),
 });
 
 export async function POST(request: NextRequest) {
@@ -46,7 +48,7 @@ export async function POST(request: NextRequest) {
   const body = await request.json().catch(() => ({}));
   const input = parseInput(CreateTravelSchema, body);
   if (!input.ok) return toErrorResponse(input.error);
-  const { destinationSystemId } = input.data;
+  const { destinationSystemId, shipId: requestedShipId } = input.data;
 
   // ── Catalog validation ───────────────────────────────────────────────────
   const destEntry = getCatalogEntry(destinationSystemId);
@@ -74,15 +76,35 @@ export async function POST(request: NextRequest) {
       .order("created_at", { ascending: true }),
   );
 
-  const ship =
-    (allShips ?? []).find(
-      (s) =>
-        s.current_system_id != null &&
-        s.current_system_id !== destinationSystemId,
-    ) ?? null;
+  // If caller specified a shipId, use that ship explicitly; otherwise auto-pick
+  // the first available docked ship (legacy behaviour).
+  let ship: Ship | null = null;
+  if (requestedShipId) {
+    const found = (allShips ?? []).find((s) => s.id === requestedShipId);
+    if (!found) {
+      return toErrorResponse(fail("not_found", "Ship not found.").error);
+    }
+    if (found.current_system_id === null) {
+      return toErrorResponse(
+        fail("job_in_progress", "That ship is already in transit.").error,
+      );
+    }
+    if (found.current_system_id === destinationSystemId) {
+      return toErrorResponse(
+        fail("invalid_target", "That ship is already at the destination.").error,
+      );
+    }
+    ship = found;
+  } else {
+    ship =
+      (allShips ?? []).find(
+        (s) =>
+          s.current_system_id != null &&
+          s.current_system_id !== destinationSystemId,
+      ) ?? null;
+  }
 
   if (!ship) {
-    // Either no ships exist, all are in transit, or all are already at dest.
     const anyShip = (allShips ?? []).length > 0;
     if (!anyShip) {
       return toErrorResponse(

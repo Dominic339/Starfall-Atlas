@@ -27,6 +27,8 @@ import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
 import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
+import { runEngineTick } from "@/lib/game/engineTick";
+import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
 
@@ -89,6 +91,13 @@ export default async function GalaxyMapPage() {
   );
   if (!player) redirect("/login");
 
+  // ── Engine tick + travel resolution ──────────────────────────────────────
+  // Run before data fetches so the UI always reflects resolved arrivals and
+  // updated upkeep/growth state without requiring a Command Centre visit.
+  const requestTime = new Date();
+  await runEngineTick(admin, player.id, requestTime);
+  await runTravelResolution(admin, player.id, requestTime);
+
   // ── Parallel data fetches ─────────────────────────────────────────────────
   const [
     shipsRes,
@@ -104,10 +113,10 @@ export default async function GalaxyMapPage() {
     beaconsRes,
     disputesRes,
   ] = await Promise.all([
-    // Ships — need id, current_system_id, name, speed
+    // Ships — need id, current_system_id, name, speed, cargo_cap for dispatch UI
     admin
       .from("ships")
-      .select("id, name, current_system_id, speed_ly_per_hr")
+      .select("id, name, current_system_id, speed_ly_per_hr, cargo_cap")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
 
@@ -186,7 +195,7 @@ export default async function GalaxyMapPage() {
   await resolveOverdueDisputes(admin);
 
   // ── Parse results ─────────────────────────────────────────────────────────
-  type ShipRow = { id: string; name: string; current_system_id: string | null; speed_ly_per_hr: number };
+  type ShipRow = { id: string; name: string; current_system_id: string | null; speed_ly_per_hr: number; cargo_cap: number };
   type ColonyRow = { system_id: string };
   type DiscoveryRow = { system_id: string };
   type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
@@ -342,6 +351,7 @@ export default async function GalaxyMapPage() {
     name: s.name,
     systemId: s.current_system_id,
     speedLyPerHr: Number(s.speed_ly_per_hr),
+    cargoCap: s.cargo_cap,
   }));
 
   // ── Build fleet list for client (needed for dispatch UI) ─────────────────
@@ -503,37 +513,35 @@ export default async function GalaxyMapPage() {
     }),
   }));
 
+  // Discovery stats for map sub-bar
+  const discoveredCount = systems.filter((s) => s.isDiscovered).length;
+
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
-      {/* Header */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2">
-        <Link
-          href="/game/command"
-          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-        >
-          ← Command
-        </Link>
-        <h1 className="text-sm font-semibold text-zinc-200">Galaxy Map</h1>
-        <span className="text-xs text-zinc-600">
-          {systems.filter((s) => s.isDiscovered).length}/{systems.length} systems discovered
+    // Full-height flex column — fills the layout's main flex container.
+    // The sub-bar is a thin info strip; GalaxyMapClient fills the rest.
+    <div className="flex flex-1 flex-col overflow-hidden">
+      {/* Thin map info bar */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800/60 bg-zinc-950 px-4 py-1.5 text-xs text-zinc-600">
+        <span>
+          {discoveredCount}/{systems.length} systems discovered
           {colonies.length > 0 && (
             <> · {colonies.length} {colonies.length === 1 ? "colony" : "colonies"}</>
           )}
           {galaxyAsteroids.length > 0 && (
             <> · {galaxyAsteroids.length} {galaxyAsteroids.length === 1 ? "asteroid" : "asteroids"}</>
           )}
-          {galaxyBeacons.length > 0 && (
-            <> · {galaxyBeacons.length} {galaxyBeacons.length === 1 ? "beacon" : "beacons"}</>
-          )}
         </span>
-        <div className="ml-auto flex items-center gap-3 text-xs text-zinc-600">
+        <div className="ml-auto flex items-center gap-3">
+          <Link href="/game/station" className="hover:text-zinc-400 transition-colors">
+            Station →
+          </Link>
           <Link href="/game/routes" className="hover:text-zinc-400 transition-colors">
-            Route Map
+            Routes →
           </Link>
         </div>
-      </header>
+      </div>
 
-      {/* Map */}
+      {/* Map — fills remaining space */}
       <GalaxyMapClient
         systems={systems}
         ships={galaxyShips}

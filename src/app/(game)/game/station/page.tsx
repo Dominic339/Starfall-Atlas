@@ -1,13 +1,16 @@
 /**
- * /game/station — Dedicated Station page.
+ * /game/station — Logistics Hub.
  *
- * Shows the player's core station: inventory, docked ships, credits,
- * and quick links to dispatch / upgrade / refine.
+ * The station is the player's central logistics hub:
+ *   - Station inventory: all resources held here
+ *   - Credits balance
+ *   - Docked ships: unload cargo or dispatch to a target system
+ *   - Ships away: ships at colonies or in transit
+ *   - Refine: process raw resources
+ *   - Colonies list with stockpile totals and quick links
  *
- * The station is the central logistics hub:
- *   - Ships haul resources here from colonies
- *   - Resources are refined or stored here
- *   - Ships are upgraded using iron from station inventory
+ * From here the player can dispatch any docked ship to any system within
+ * travel range without visiting the galaxy map.
  */
 
 import { redirect } from "next/navigation";
@@ -15,10 +18,12 @@ import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { systemDisplayName } from "@/lib/catalog";
-import type { Player, Ship, PlayerStation, ResourceInventoryRow } from "@/lib/types/game";
+import { getNearbySystems, systemDisplayName } from "@/lib/catalog";
+import { BALANCE } from "@/lib/config/balance";
+import type { Player, Ship, PlayerStation, ResourceInventoryRow, Colony } from "@/lib/types/game";
 import { UnloadButton } from "../_components/ColonyActions";
 import { RefineForm } from "../_components/RefineControls";
+import { ShipDispatchForm } from "../_components/ShipDispatchForm";
 
 export const dynamic = "force-dynamic";
 
@@ -39,26 +44,35 @@ export default async function StationPage() {
   if (!player) redirect("/login");
 
   // Parallel fetches
-  const [stationRes, shipsRes] = await Promise.all([
+  const [stationRes, shipsRes, coloniesRes] = await Promise.all([
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin
       .from("ships")
       .select("*")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
+    admin
+      .from("colonies")
+      .select("id, system_id, body_id, status, population_tier")
+      .eq("owner_id", player.id)
+      .eq("status", "active")
+      .order("created_at", { ascending: true }),
   ]);
 
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
   const ships = listResult<Ship>(shipsRes).data ?? [];
 
+  type ColonyRow = Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">;
+  const colonies = (listResult<ColonyRow>(coloniesRes).data ?? []);
+
   if (!station) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-5xl p-6 space-y-6">
         <h1 className="text-xl font-semibold text-zinc-100">Station</h1>
         <p className="text-sm text-zinc-500">
-          No station found. Return to{" "}
-          <Link href="/game/command" className="text-indigo-400 hover:text-indigo-300">
-            Command Centre
+          No station found. Visit the{" "}
+          <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300">
+            Galaxy Map
           </Link>{" "}
           to trigger bootstrap.
         </p>
@@ -66,12 +80,18 @@ export default async function StationPage() {
     );
   }
 
-  // Fetch station inventory and cargo for ships docked at station system
-  const dockedShipIds = ships
-    .filter((s) => s.current_system_id === station.current_system_id)
-    .map((s) => s.id);
+  // Fetch station inventory, ship cargo, and colony stockpile totals
+  const dockedShips = ships.filter((s) => s.current_system_id === station.current_system_id);
+  const travelingShips = ships.filter((s) => s.current_system_id === null);
+  const awayShips = ships.filter(
+    (s) =>
+      s.current_system_id !== null &&
+      s.current_system_id !== station.current_system_id,
+  );
+  const dockedShipIds = dockedShips.map((s) => s.id);
+  const activeColonyIds = colonies.map((c) => c.id);
 
-  const [invRes, cargoRes] = await Promise.all([
+  const [invRes, cargoRes, colonyInvRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -84,6 +104,13 @@ export default async function StationPage() {
           .select("location_id, resource_type, quantity")
           .eq("location_type", "ship")
           .in("location_id", dockedShipIds)
+      : Promise.resolve({ data: [] }),
+    activeColonyIds.length > 0
+      ? admin
+          .from("resource_inventory")
+          .select("location_id, quantity")
+          .eq("location_type", "colony")
+          .in("location_id", activeColonyIds)
       : Promise.resolve({ data: [] }),
   ]);
 
@@ -102,21 +129,25 @@ export default async function StationPage() {
     cargoByShipId.set(row.location_id, list);
   }
 
+  type ColonyInvRow = { location_id: string; quantity: number };
+  const colonyStockpileTotals = new Map<string, number>();
+  for (const row of (colonyInvRes.data ?? []) as ColonyInvRow[]) {
+    colonyStockpileTotals.set(
+      row.location_id,
+      (colonyStockpileTotals.get(row.location_id) ?? 0) + row.quantity,
+    );
+  }
+
   const totalIron =
     stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
 
-  const dockedShips = ships.filter(
-    (s) => s.current_system_id === station.current_system_id,
-  );
-  const travelingShips = ships.filter((s) => s.current_system_id === null);
-  const awayShips = ships.filter(
-    (s) =>
-      s.current_system_id !== null &&
-      s.current_system_id !== station.current_system_id,
+  // Systems within travel range of the station (for dispatch controls)
+  const nearbySystems = getNearbySystems(station.current_system_id, BALANCE.lanes.baseRangeLy).map(
+    (s) => ({ id: s.id, name: s.name }),
   );
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl p-6 space-y-8">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
@@ -132,43 +163,33 @@ export default async function StationPage() {
             <span className="text-zinc-600">logistics hub</span>
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/game/map"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            Galaxy Map →
-          </Link>
-          <Link
-            href="/game/command"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            ← Command
-          </Link>
+        <Link
+          href="/game/map"
+          className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
+        >
+          Galaxy Map →
+        </Link>
+      </div>
+
+      {/* Credits + Iron summary */}
+      <div className="rounded-lg border border-amber-900/50 bg-zinc-900 px-4 py-3">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
+            <p className="mt-0.5 font-mono text-2xl font-semibold text-amber-300">
+              {player.credits.toLocaleString()}
+            </p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Iron</p>
+            <p className="mt-0.5 font-mono text-lg font-medium text-zinc-200">
+              {totalIron.toLocaleString()}
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* Credits */}
-      <section>
-        <div className="rounded-lg border border-amber-900/50 bg-zinc-900 px-4 py-3">
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
-              <p className="mt-0.5 font-mono text-2xl font-semibold text-amber-300">
-                {player.credits.toLocaleString()}
-              </p>
-            </div>
-            <div className="text-right">
-              <p className="text-xs text-zinc-600 uppercase tracking-wider">Iron</p>
-              <p className="mt-0.5 font-mono text-lg font-medium text-zinc-200">
-                {totalIron.toLocaleString()}
-              </p>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Inventory */}
+      {/* Station inventory */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Inventory
@@ -191,23 +212,13 @@ export default async function StationPage() {
         ) : (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-6 text-center">
             <p className="text-sm text-zinc-600">
-              Inventory is empty — dispatch ships to haul resources from colonies.
+              Inventory empty — dispatch ships to haul resources from colonies.
             </p>
           </div>
         )}
       </section>
 
-      {/* Refining */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-          Refine
-        </h2>
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-          <RefineForm />
-        </div>
-      </section>
-
-      {/* Docked ships */}
+      {/* Docked ships — with dispatch and unload */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Docked Ships ({dockedShips.length})
@@ -221,6 +232,10 @@ export default async function StationPage() {
                 (r) => `${r.quantity} ${r.resource_type.replace(/_/g, " ")}`,
               );
               const cargoSummary = cargoParts.join(", ") || "empty";
+              // Dispatch targets: nearby systems excluding the ship's current location
+              const dispatchTargets = nearbySystems.filter(
+                (s) => s.id !== ship.current_system_id,
+              );
               return (
                 <div
                   key={ship.id}
@@ -239,6 +254,8 @@ export default async function StationPage() {
                       Docked
                     </span>
                   </div>
+
+                  {/* Unload cargo */}
                   {cargo.length > 0 && (
                     <div className="mt-2 border-t border-zinc-800 pt-2">
                       <p className="text-xs text-zinc-500 mb-1">
@@ -247,16 +264,67 @@ export default async function StationPage() {
                       <UnloadButton shipId={ship.id} summary={cargoSummary} />
                     </div>
                   )}
+
+                  {/* Dispatch to a system */}
+                  <div className="mt-2 border-t border-zinc-800 pt-2">
+                    <p className="text-xs text-zinc-600 mb-1">Dispatch to system:</p>
+                    <ShipDispatchForm
+                      shipId={ship.id}
+                      targetSystems={dispatchTargets}
+                    />
+                  </div>
                 </div>
               );
             })}
           </div>
         ) : (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
-            <p className="text-sm text-zinc-600">No ships docked.</p>
+            <p className="text-sm text-zinc-600">No ships docked at station.</p>
           </div>
         )}
       </section>
+
+      {/* Colonies — stockpile overview */}
+      {colonies.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Colonies ({colonies.length})
+          </h2>
+          <div className="space-y-2">
+            {colonies.map((colony) => {
+              const stockpile = colonyStockpileTotals.get(colony.id) ?? 0;
+              const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
+              return (
+                <div
+                  key={colony.id}
+                  className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                >
+                  <div>
+                    <p className="text-sm text-zinc-300">
+                      {systemDisplayName(colony.system_id)}
+                      <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIdx}</span>
+                      <span className="ml-1.5 text-xs text-zinc-600">T{colony.population_tier}</span>
+                    </p>
+                    {stockpile > 0 ? (
+                      <p className="text-xs text-teal-400">
+                        {stockpile} units ready to haul
+                      </p>
+                    ) : (
+                      <p className="text-xs text-zinc-700">Stockpile empty</p>
+                    )}
+                  </div>
+                  <Link
+                    href={`/game/colony/${colony.id}`}
+                    className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
+                  >
+                    Details →
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Ships away */}
       {(awayShips.length > 0 || travelingShips.length > 0) && (
@@ -268,7 +336,7 @@ export default async function StationPage() {
             {[...awayShips, ...travelingShips].map((ship) => (
               <div
                 key={ship.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5 flex items-center justify-between"
+                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
               >
                 <div>
                   <p className="text-sm text-zinc-300">{ship.name}</p>
@@ -283,7 +351,7 @@ export default async function StationPage() {
                     href={`/game/system/${encodeURIComponent(ship.current_system_id)}`}
                     className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
                   >
-                    View →
+                    System →
                   </Link>
                 )}
               </div>
@@ -291,6 +359,16 @@ export default async function StationPage() {
           </div>
         </section>
       )}
+
+      {/* Refining */}
+      <section>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+          Refine
+        </h2>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <RefineForm />
+        </div>
+      </section>
     </div>
   );
 }

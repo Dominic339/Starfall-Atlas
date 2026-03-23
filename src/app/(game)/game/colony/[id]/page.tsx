@@ -17,13 +17,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { systemDisplayName, getCatalogEntry } from "@/lib/catalog";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
-import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
 import { colonyHealthStatus, upkeepDescription } from "@/lib/game/colonyUpkeep";
 import { isHarshPlanetType } from "@/lib/game/habitability";
 import {
   getStructureTier,
   researchLevel,
-  extractionBonusMultiplier,
   upkeepReductionFraction,
   effectiveStorageCap,
   structureBuildCost,
@@ -35,11 +33,9 @@ import type {
   Structure,
   PlayerStation,
   ResourceInventoryRow,
-  ResourceNodeRecord,
-  SurveyResult,
   PlayerResearch,
 } from "@/lib/types/game";
-import { CollectButton, ExtractButton } from "../../_components/ColonyActions";
+import { CollectButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import type { BodyType } from "@/lib/types/enums";
 
@@ -78,12 +74,7 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   if (!colony) notFound();
 
   // Parallel data fetches
-  const [surveyRes, invRes, structuresRes, stationRes, researchRes] = await Promise.all([
-    admin
-      .from("survey_results")
-      .select("body_id, resource_nodes")
-      .eq("body_id", colony.body_id)
-      .maybeSingle(),
+  const [invRes, structuresRes, stationRes, researchRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -99,7 +90,6 @@ export default async function ColonyPage({ params }: { params: { id: string } })
     admin.from("player_research").select("research_id").eq("player_id", player.id),
   ]);
 
-  const survey = maybeSingleResult<Pick<SurveyResult, "body_id" | "resource_nodes">>(surveyRes).data;
   const colonyInventory = (invRes.data ?? []) as Pick<ResourceInventoryRow, "resource_type" | "quantity">[];
   const structures = (structuresRes.data ?? []) as Structure[];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
@@ -126,26 +116,14 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   const now = new Date();
   const accrued = calculateAccumulatedTax(colony.last_tax_collected_at, colony.population_tier, now);
 
-  // Compute extraction
-  const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
+  // Structure tiers
   const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
   const storageResearchLvl = researchLevel(unlockedResearchIds, "storage");
-  const extractorTier = getStructureTier(structures, "extractor");
   const warehouseTier = getStructureTier(structures, "warehouse");
   const habitatTier = getStructureTier(structures, "habitat_module");
-  const bonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
   const upkeepRedFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
-  const resourceNodes = (survey?.resource_nodes ?? []) as ResourceNodeRecord[];
-  const accruedExtraction = calculateAccumulatedExtraction(
-    resourceNodes,
-    colony.population_tier,
-    colony.last_extract_at ?? colony.created_at,
-    now,
-    bonusMult,
-  );
-  const extractSummary = formatExtractionSummary(accruedExtraction);
 
   // Planet type (needed for isHarsh)
   const catalogEntry = getCatalogEntry(colony.system_id);
@@ -279,43 +257,28 @@ export default async function ColonyPage({ params }: { params: { id: string } })
         </div>
       )}
 
-      {/* Tax + Extraction actions */}
+      {/* Tax yield */}
       {colony.status === "active" && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Yield
           </h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-              <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
-              {accrued > 0 ? (
-                <>
-                  <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
-                    {accrued} ¢
-                  </p>
-                  <div className="mt-2">
-                    <CollectButton colonyId={colony.id} accrued={accrued} />
-                  </div>
-                </>
-              ) : (
-                <p className="mt-1 text-sm text-zinc-500">
-                  {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+            <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
+            {accrued > 0 ? (
+              <>
+                <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
+                  {accrued} ¢
                 </p>
-              )}
-            </div>
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-              <p className="text-xs text-zinc-600 uppercase tracking-wider">Extraction</p>
-              {extractSummary ? (
-                <>
-                  <p className="mt-1 text-sm font-medium text-teal-300">{extractSummary} ready</p>
-                  <div className="mt-2">
-                    <ExtractButton colonyId={colony.id} summary={extractSummary} />
-                  </div>
-                </>
-              ) : (
-                <p className="mt-1 text-sm text-zinc-500">Accruing…</p>
-              )}
-            </div>
+                <div className="mt-2">
+                  <CollectButton colonyId={colony.id} accrued={accrued} />
+                </div>
+              </>
+            ) : (
+              <p className="mt-1 text-sm text-zinc-500">
+                {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
+              </p>
+            )}
           </div>
         </section>
       )}
@@ -339,13 +302,23 @@ export default async function ColonyPage({ params }: { params: { id: string } })
                 </div>
               ))}
             </div>
-            <p className="mt-2 text-xs text-zinc-600">
-              Dispatch a ship here to haul this cargo back to your station.
+            <p className="mt-3 text-xs text-zinc-600 border-t border-zinc-800 pt-2">
+              Dispatch a ship to this system from the{" "}
+              <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                map
+              </Link>{" "}
+              or your{" "}
+              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                station
+              </Link>{" "}
+              to haul this cargo.
             </p>
           </div>
         ) : (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
-            <p className="text-sm text-zinc-600">Colony inventory is empty.</p>
+            <p className="text-sm text-zinc-600">
+              Colony inventory is empty — resources accumulate between ship hauls.
+            </p>
           </div>
         )}
       </section>
