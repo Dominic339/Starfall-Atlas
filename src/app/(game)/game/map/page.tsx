@@ -25,7 +25,7 @@ import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 
 export const dynamic = "force-dynamic";
@@ -131,10 +131,10 @@ export default async function GalaxyMapPage() {
       .eq("player_id", player.id)
       .neq("status", "disbanded"),
 
-    // Active travel jobs (in-transit target)
+    // Active travel jobs (in-transit: need from+to for travel lines)
     admin
       .from("travel_jobs")
-      .select("ship_id, to_system_id")
+      .select("id, ship_id, fleet_id, from_system_id, to_system_id")
       .eq("player_id", player.id)
       .eq("status", "pending"),
 
@@ -190,7 +190,7 @@ export default async function GalaxyMapPage() {
   type ColonyRow = { system_id: string };
   type DiscoveryRow = { system_id: string };
   type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
-  type TravelRow = { ship_id: string; to_system_id: string };
+  type TravelRow = { id: string; ship_id: string; fleet_id: string | null; from_system_id: string; to_system_id: string };
   type StewardRow = { system_id: string; steward_id: string };
   type AsteroidRow = {
     id: string; system_id: string;
@@ -352,6 +352,40 @@ export default async function GalaxyMapPage() {
     isHarvesting: harvestingFleetIds.has(f.id),
   }));
 
+  // ── Build travel lines for client ────────────────────────────────────────
+  // Deduplicate by fleet_id so fleet members don't produce N identical lines.
+  const seenFleetIds = new Set<string>();
+  const galaxyTravelLines: GalaxyTravelLine[] = [];
+  for (const tj of travelJobs) {
+    const fromPos = systemSvgMap.get(tj.from_system_id);
+    const toPos   = systemSvgMap.get(tj.to_system_id);
+    if (!fromPos || !toPos) continue;
+
+    if (tj.fleet_id) {
+      // Fleet job: one line per fleet (skip duplicates from member ships)
+      if (seenFleetIds.has(tj.fleet_id)) continue;
+      seenFleetIds.add(tj.fleet_id);
+      const fleet = fleets.find((f) => f.id === tj.fleet_id);
+      galaxyTravelLines.push({
+        key: `fleet-${tj.fleet_id}`,
+        x1: fromPos.svgX, y1: fromPos.svgY,
+        x2: toPos.svgX,   y2: toPos.svgY,
+        label: fleet?.name ?? "Fleet",
+        isFleet: true,
+      });
+    } else {
+      // Ship job: one line per ship
+      const ship = ships.find((s) => s.id === tj.ship_id);
+      galaxyTravelLines.push({
+        key: `ship-${tj.id}`,
+        x1: fromPos.svgX, y1: fromPos.svgY,
+        x2: toPos.svgX,   y2: toPos.svgY,
+        label: ship?.name ?? "Ship",
+        isFleet: false,
+      });
+    }
+  }
+
   // ── Build asteroid list for client ────────────────────────────────────────
   const galaxyAsteroids: GalaxyAsteroid[] = asteroidRows
     .filter((a) => {
@@ -508,6 +542,7 @@ export default async function GalaxyMapPage() {
         beacons={galaxyBeacons}
         territories={galaxyTerritories}
         disputes={galaxyDisputes}
+        travelLines={galaxyTravelLines}
         pixelsPerLy={pixelsPerLy}
         baseRangeLy={BALANCE.lanes.baseRangeLy}
         viewboxW={VIEWBOX_W}

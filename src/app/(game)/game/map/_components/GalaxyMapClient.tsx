@@ -123,6 +123,25 @@ export interface GalaxyTerritory {
   links: { x1: number; y1: number; x2: number; y2: number }[];
 }
 
+/**
+ * A ship or fleet travel line: from one system to another.
+ * SVG coordinates are computed server-side.
+ */
+export interface GalaxyTravelLine {
+  /** Unique key for React */
+  key: string;
+  /** SVG position of the origin system */
+  x1: number;
+  y1: number;
+  /** SVG position of the destination system */
+  x2: number;
+  y2: number;
+  /** Short label shown near midpoint (e.g. ship name) */
+  label: string;
+  /** True = fleet travel (slightly different styling) */
+  isFleet: boolean;
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
@@ -131,6 +150,8 @@ interface GalaxyMapClientProps {
   beacons: GalaxyBeacon[];
   territories: GalaxyTerritory[];
   disputes: GalaxyDispute[];
+  /** Active travel lines (ship/fleet in-transit paths). */
+  travelLines: GalaxyTravelLine[];
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -243,6 +264,7 @@ export function GalaxyMapClient({
   beacons,
   territories,
   disputes,
+  travelLines,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -662,24 +684,47 @@ export function GalaxyMapClient({
               />
             )}
 
-            {/* ── In-transit path line ─────────────────────────────────────── */}
-            {currentSystem &&
-              systems
-                .filter((s) => s.isInTransitTarget)
-                .map((target) => (
+            {/* ── Travel lines (ship/fleet in-transit paths) ──────────────── */}
+            {travelLines.map((tl) => {
+              const midX = (tl.x1 + tl.x2) / 2;
+              const midY = (tl.y1 + tl.y2) / 2;
+              return (
+                <g key={tl.key} pointerEvents="none">
+                  {/* Animated dashed travel line */}
                   <line
-                    key={`transit-${target.id}`}
-                    x1={currentSystem.svgX}
-                    y1={currentSystem.svgY}
-                    x2={target.svgX}
-                    y2={target.svgY}
-                    stroke="#6366f1"
+                    x1={tl.x1}
+                    y1={tl.y1}
+                    x2={tl.x2}
+                    y2={tl.y2}
+                    stroke={tl.isFleet ? "#a78bfa" : "#6366f1"}
                     strokeWidth={1.5 / scale}
                     strokeDasharray={`${8 / scale} ${4 / scale}`}
-                    opacity={0.6}
-                    pointerEvents="none"
+                    opacity={0.65}
                   />
-                ))}
+                  {/* Arrowhead at destination */}
+                  <circle
+                    cx={tl.x2}
+                    cy={tl.y2}
+                    r={3 / scale}
+                    fill={tl.isFleet ? "#a78bfa" : "#6366f1"}
+                    opacity={0.8}
+                  />
+                  {/* Ship name label at midpoint (visible when zoomed in) */}
+                  {scale >= 1.5 && (
+                    <text
+                      x={midX}
+                      y={midY - 5 / scale}
+                      fill={tl.isFleet ? "#c4b5fd" : "#a5b4fc"}
+                      fontSize={9 / scale}
+                      textAnchor="middle"
+                      opacity={0.8}
+                    >
+                      {tl.label}
+                    </text>
+                  )}
+                </g>
+              );
+            })}
 
             {/* ── System stars ──────────────────────────────────────────────── */}
             {systems.map((sys) => {

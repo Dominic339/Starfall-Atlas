@@ -2,7 +2,7 @@
  * Player bootstrap — idempotent first-login initialization.
  *
  * Called from the game layout on every authenticated page load.
- * On first call it creates the player row and starter ship.
+ * On first call it creates the player row, starter ships, and station.
  * On all subsequent calls it returns the existing player instantly.
  *
  * Race-safety: the DB UNIQUE constraint on players(auth_id) ensures
@@ -16,6 +16,11 @@
  * Phase 28: reconcileStarterAssets now also detects and cleans up
  * duplicate ships created by the Phase 26 bootstrap bug. Any ships
  * beyond STARTER_SHIPS.length (oldest kept) are deleted.
+ *
+ * Phase 33: createStarterAssets now handles ship insert errors explicitly
+ * and no longer specifies stat-level columns (relies on DB defaults so it
+ * is forward-compatible with DBs that may be missing earlier migrations).
+ * Migration 00038 ensures stat-level columns exist with DEFAULT 1.
  */
 
 import type { User } from "@supabase/supabase-js";
@@ -157,24 +162,24 @@ async function reconcileStarterAssets(
     console.error(`[bootstrap] ships query failed for player ${playerId}:`, shipsError);
   } else if (!existingShips || existingShips.length === 0) {
     // No ships at all — create canonical starter ships.
+    // NOTE: stat-level columns (hull_level, engine_level, etc.) are intentionally
+    // omitted here. We rely on DB column defaults (set to 1 by migration 00038).
+    // This makes the insert resilient to DBs that have not yet run migration 00021.
     const { error: insertErr } = await admin.from("ships").insert(
       STARTER_SHIPS.map((ship) => ({
         owner_id: playerId,
         name: ship.name,
         speed_ly_per_hr: ship.speedLyPerHr,
         cargo_cap: ship.cargoCap,
-        hull_level: 1,
-        engine_level: 1,
-        shield_level: 1,
-        utility_level: 1,
-        cargo_level: 1,
-        turret_level: 1,
         current_system_id: SOL_SYSTEM_ID,
         current_body_id: null,
       })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
     if (insertErr) {
-      console.error(`[bootstrap] ship insert failed for player ${playerId}:`, insertErr);
+      console.error(
+        `[bootstrap] ship insert failed for player ${playerId}:`,
+        JSON.stringify(insertErr),
+      );
     }
   } else if (existingShips.length > STARTER_SHIPS.length) {
     // More ships than the canonical count — Phase 26 bootstrap bug produced duplicates.
@@ -231,26 +236,34 @@ async function createStarterAssets(playerId: string): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // Create 2 starter ships at Sol (Phase 28: start at level 1 on key stats)
-  await admin.from("ships").insert(
+  // Create 2 starter ships at Sol.
+  // NOTE: stat-level columns (hull_level, engine_level, etc.) are intentionally
+  // omitted — we rely on DB column defaults (set to 1 by migration 00038).
+  // This makes the insert resilient to DBs missing migration 00021.
+  const { error: shipErr } = await admin.from("ships").insert(
     STARTER_SHIPS.map((ship) => ({
       owner_id: playerId,
       name: ship.name,
       speed_ly_per_hr: ship.speedLyPerHr,
       cargo_cap: ship.cargoCap,
-      hull_level: 1,
-      engine_level: 1,
-      shield_level: 1,
-      utility_level: 1,
-      cargo_level: 1,
-      turret_level: 1,
       current_system_id: SOL_SYSTEM_ID,
       current_body_id: null,
     })),
   );
 
+  if (shipErr) {
+    // Log the full error so operators can diagnose DB schema issues.
+    console.error(
+      `[bootstrap] createStarterAssets: ship insert failed for player ${playerId}:`,
+      JSON.stringify(shipErr),
+    );
+    // Continue — the station should still be created so the player is not
+    // completely locked out. reconcileStarterAssets will retry ships on the
+    // next page load once the schema issue is resolved.
+  }
+
   // Create core station at Sol and retrieve its ID
-  const { data: station } = await admin
+  const { data: station, error: stationErr } = await admin
     .from("player_stations")
     .insert({
       owner_id: playerId,
@@ -260,9 +273,19 @@ async function createStarterAssets(playerId: string): Promise<void> {
     .select("id")
     .single();
 
-  // Phase 28: grant 900 starting iron in station inventory
+  if (stationErr) {
+    const isRace = stationErr.code === "23505";
+    if (!isRace) {
+      console.error(
+        `[bootstrap] createStarterAssets: station insert failed for player ${playerId}:`,
+        stationErr,
+      );
+    }
+  }
+
+  // Grant 900 starting iron in station inventory
   if (station?.id) {
-    await admin.from("resource_inventory").upsert(
+    const { error: invErr } = await admin.from("resource_inventory").upsert(
       {
         location_type: "station",
         location_id: station.id,
@@ -271,6 +294,12 @@ async function createStarterAssets(playerId: string): Promise<void> {
       },
       { onConflict: "location_type,location_id,resource_type" },
     );
+    if (invErr) {
+      console.error(
+        `[bootstrap] createStarterAssets: station inventory upsert failed for player ${playerId}:`,
+        JSON.stringify(invErr),
+      );
+    }
   }
 }
 
