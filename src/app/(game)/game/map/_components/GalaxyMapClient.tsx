@@ -61,6 +61,7 @@ export interface GalaxyShip {
   name: string;
   systemId: string | null;
   speedLyPerHr: number;
+  cargoCap: number;
 }
 
 export interface GalaxyFleet {
@@ -293,6 +294,10 @@ export function GalaxyMapClient({
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [recallLoading, setRecallLoading] = useState(false);
 
+  // ── Per-ship dispatch state ────────────────────────────────────────────────
+  const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
+  const [shipDispatchError, setShipDispatchError] = useState<string | null>(null);
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
@@ -463,6 +468,7 @@ export function GalaxyMapClient({
     setSelectedAsteroidId(null);
     setTravelError(null);
     setDispatchError(null);
+    setShipDispatchError(null);
   }
 
   function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
@@ -478,6 +484,7 @@ export function GalaxyMapClient({
     setSelectedAsteroidId(null);
     setTravelError(null);
     setDispatchError(null);
+    setShipDispatchError(null);
   }
 
   // ── Travel action ─────────────────────────────────────────────────────────
@@ -550,6 +557,33 @@ export function GalaxyMapClient({
       setDispatchError("Network error.");
     } finally {
       setRecallLoading(false);
+    }
+  }
+
+  // ── Per-ship dispatch ─────────────────────────────────────────────────────
+  async function handleDispatchShip(shipId: string) {
+    if (!selectedSystem) return;
+    setShipDispatchLoading(shipId);
+    setShipDispatchError(null);
+    try {
+      const res = await fetch("/api/game/travel", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          destinationSystemId: selectedSystem.id,
+          shipId,
+        }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setShipDispatchError(json.error?.message ?? "Dispatch failed.");
+      }
+    } catch {
+      setShipDispatchError("Network error.");
+    } finally {
+      setShipDispatchLoading(null);
     }
   }
 
@@ -1458,6 +1492,86 @@ export function GalaxyMapClient({
                       ))}
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* ── Per-ship dispatch ─────────────────────────────────────── */}
+              {ships.length > 0 && (
+                <div className="py-2">
+                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                    Ships
+                  </p>
+                  {shipDispatchError && (
+                    <p className="mb-1 text-xs text-red-400">{shipDispatchError}</p>
+                  )}
+                  <div className="space-y-1.5">
+                    {ships.map((ship) => {
+                      const isHere = ship.systemId === selectedSystem.id;
+                      const isInTransit = ship.systemId === null;
+                      const shipCurrentSystem =
+                        !isHere && !isInTransit
+                          ? (systems.find((s) => s.id === ship.systemId) ?? null)
+                          : null;
+                      const distLy = shipCurrentSystem
+                        ? dist3D(shipCurrentSystem, selectedSystem)
+                        : null;
+                      const inRange = distLy !== null && distLy <= baseRangeLy + 0.01;
+                      const etaHr =
+                        inRange && distLy !== null
+                          ? distLy / ship.speedLyPerHr
+                          : null;
+                      return (
+                        <div
+                          key={ship.id}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-xs text-zinc-300">
+                              {ship.name}
+                            </p>
+                            {!isHere && !isInTransit && distLy !== null && (
+                              <p className="text-xs text-zinc-700">
+                                {formatDist(distLy)}
+                                {etaHr !== null
+                                  ? ` · ${formatEta(etaHr)}`
+                                  : ""}
+                              </p>
+                            )}
+                          </div>
+                          <div className="shrink-0">
+                            {isHere ? (
+                              <span className="text-xs text-emerald-500">
+                                Docked
+                              </span>
+                            ) : isInTransit ? (
+                              <span className="text-xs text-zinc-600">
+                                In transit
+                              </span>
+                            ) : (
+                              <button
+                                onClick={() => handleDispatchShip(ship.id)}
+                                disabled={
+                                  !inRange ||
+                                  shipDispatchLoading === ship.id
+                                }
+                                className={`rounded border px-2 py-0.5 text-xs transition-colors ${
+                                  inRange
+                                    ? "border-indigo-700 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50"
+                                    : "cursor-not-allowed border-zinc-800 text-zinc-700"
+                                }`}
+                              >
+                                {shipDispatchLoading === ship.id
+                                  ? "…"
+                                  : inRange
+                                    ? "Dispatch"
+                                    : "Out of range"}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </div>
