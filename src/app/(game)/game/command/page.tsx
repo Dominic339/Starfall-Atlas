@@ -1,60 +1,32 @@
 /**
  * Game dashboard — Command Centre.
  *
- * Phase 6 additions:
- *   - Core station summary (name, location, resource inventory)
- *   - Both starter ships displayed (Phase 5.5 introduced 2 ships)
- *   - Colony growth auto-resolved lazily on page load
- *   - Resource extraction accrual shown per colony with ExtractButton
+ * Overview of the logistics loop:
+ *   Station (hub) → Ships (haul) → Colonies (produce) → Ships (return) → Station
  *
- * Phase 7 additions:
- *   - Extraction writes to colony inventory (not station directly)
- *   - Ship cargo displayed with unload action when at station
+ * The command centre is a unified summary view of all player assets and state.
+ * For focused management, use the dedicated pages:
+ *   /game/station  — station inventory and docked ships
+ *   /game/colony/[id] — per-colony details and actions
+ *   /game/fleet/[id]  — fleet composition and dispatch
+ *   /game/map         — galaxy map with travel visualization
  *
- * Phase 8 additions:
+ * Data flow (server-side, sequential per request):
+ *   1. Player auth gate
+ *   2. Engine tick (growth, upkeep) + travel resolution (arrivals, auto-ship)
+ *   3. Parallel data fetch: ships, jobs, colonies, station, research, fleets, slots, routes
+ *   4. Parallel fetch: surveys, inventories, structures, transports
+ *   5. Display data computation and JSX render
+ *
+ * Key phases implemented:
  *   - Ship dispatch modes: manual / auto_collect_nearest / auto_collect_highest
- *   - Lazy automation loop resolved on every dashboard load:
- *       auto-resolve travel → load colony → travel to station → unload → repeat
- *   - ShipModeSelector dropdown per ship
- *   - Colony inventory fetched to support auto target-selection
- *
- * Phase 9 additions:
- *   - Colony upkeep: iron consumed from station inventory each 24h period
- *   - Health status (well_supplied / struggling / neglected) shown per colony
- *   - Growth blocked when struggling or neglected
- *   - Extraction and tax multipliers applied at collection time
- *   - Tier loss after 5 consecutive missed periods
- *
- * Phase 12 additions:
- *   - Fleet model: fleets table + fleet_ships join + fleet_id on travel_jobs
- *   - Manual fleet creation from co-located docked ships
- *   - Manual fleet dispatch (all member ships travel together at slowest speed)
- *   - Lazy fleet travel resolution in Step 5.5 (ships arrive together)
- *   - Ships in active fleets are skipped by auto-resolution (Step 5)
- *   - Manual fleet disband only
- *
- * Phase 14 additions:
- *   - Colony structures: warehouse / extractor / habitat_module (tiers 1–3)
- *   - Colony research wired: extraction, sustainability, storage
- *   - Structures fetched in Step 3; effects applied to extraction/upkeep/storage
- *   - BuildStructureButton per colony in ColonyRow
- *
- * Phase 15 additions:
- *   - Colony supply routes and transports
- *   - Routes fetched in Step 2; transports fetched in Step 3
- *   - Step 6: lazy route resolution (inter-colony resource transfer)
- *   - Refine form added to station section
- *
- * Fetch order:
- *   1. player (auth gate)
- *   2. ships, travel jobs, colonies, station, research, fleets, slots, routes (parallel)
- *   3. surveys, station inv, ship cargo, colony inv totals, structures, transports (parallel)
- *   4. lazy growth resolution
- *   4.5. lazy upkeep resolution
- *   5. lazy auto-ship resolution
- *   5.5. lazy fleet travel resolution
- *   5.6. slot auto fleet loop
- *   6. lazy colony route resolution
+ *   - Colony upkeep: iron (and food on harsh worlds) consumed per 24h period
+ *   - Health status: well_supplied / struggling / neglected
+ *   - Fleet model: staged groups of ships traveling together
+ *   - Colony structures: warehouse / extractor / habitat_module
+ *   - Colony supply routes and transports (inter-colony transfer)
+ *   - Ship upgrades: 6 stat levels (hull/engine/shield/utility/cargo/turret)
+ *   - Research tree gating upgrade caps
  */
 
 import { redirect } from "next/navigation";
@@ -1127,7 +1099,7 @@ export default async function GameDashboard() {
             {player.handle}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
           <Link
             href="/game/map"
             className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
@@ -1135,10 +1107,16 @@ export default async function GameDashboard() {
             Galaxy Map →
           </Link>
           <Link
+            href="/game/station"
+            className="rounded-lg border border-amber-900/60 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-amber-500 hover:bg-zinc-800/60 hover:text-amber-300 transition-colors"
+          >
+            Station →
+          </Link>
+          <Link
             href="/game/routes"
             className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
           >
-            Route Map →
+            Routes →
           </Link>
           <Link
             href="/game/alliance"
@@ -1230,7 +1208,7 @@ export default async function GameDashboard() {
                 </div>
               ) : (
                 <p className="text-xs text-zinc-700">
-                  Empty — extract resources from colonies and haul them here.
+                  Empty — dispatch ships to colonies and haul resources back here.
                 </p>
               )}
             </div>
@@ -1319,6 +1297,13 @@ export default async function GameDashboard() {
                             {fleetEtaDisplay.get(fleet.id)}
                           </span>
                         )}
+                        {" "}
+                        <Link
+                          href={`/game/fleet/${fleet.id}`}
+                          className="text-indigo-500 hover:text-indigo-300 transition-colors"
+                        >
+                          →
+                        </Link>
                       </p>
                     )}
                     {!isAuto && !fleet && (
@@ -1952,6 +1937,13 @@ function ColonyRow({
                 {systemName}
               </Link>
               <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIndex}</span>
+              {" "}
+              <Link
+                href={`/game/colony/${colony.id}`}
+                className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+              >
+                details →
+              </Link>
             </p>
             {/* Planet type badge */}
             {planetType && (

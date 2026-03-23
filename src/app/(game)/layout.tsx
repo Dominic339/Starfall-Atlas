@@ -52,6 +52,24 @@ export default async function GameLayout({
           </span>
           <div className="flex items-center gap-5">
             <Link
+              href="/game/map"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Map
+            </Link>
+            <Link
+              href="/game/command"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Command
+            </Link>
+            <Link
+              href="/game/station"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Station
+            </Link>
+            <Link
               href="/game/profile"
               className="font-mono text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
             >
