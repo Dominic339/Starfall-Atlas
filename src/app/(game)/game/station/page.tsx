@@ -26,6 +26,7 @@ import { RefineForm } from "../_components/RefineControls";
 import { ShipDispatchForm } from "../_components/ShipDispatchForm";
 import { ShipModeButton } from "../_components/ShipModeButton";
 import { autoStateLabel, dispatchModeLabel } from "@/lib/game/shipAutomation";
+import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,11 @@ export default async function StationPage() {
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
   );
   if (!player) redirect("/login");
+
+  // Advance auto-ship state machines so ships that arrived since the last
+  // map/command visit are properly landed and ready to act.
+  const requestTime = new Date();
+  await runTravelResolution(admin, player.id, requestTime);
 
   // Parallel fetches
   const [stationRes, shipsRes, coloniesRes] = await Promise.all([
@@ -66,6 +72,11 @@ export default async function StationPage() {
 
   type ColonyRow = Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">;
   const colonies = (listResult<ColonyRow>(coloniesRes).data ?? []);
+
+  // Used to resolve auto_target_colony_id → system display name for away ships
+  const colonySystemNameById = new Map(
+    colonies.map((c) => [c.id, systemDisplayName(c.system_id)]),
+  );
 
   if (!station) {
     return (
@@ -280,6 +291,7 @@ export default async function StationPage() {
                     {mode !== "manual" && (
                       <p className="mt-1 text-xs text-zinc-700">
                         Auto ships collect colony stockpiles and return to station automatically.
+                        {" "}If the ship stays docked, use <strong className="text-zinc-600">Extract</strong> on a colony to populate its stockpile.
                       </p>
                     )}
                   </div>
@@ -358,6 +370,10 @@ export default async function StationPage() {
               const mode = (ship.dispatch_mode ?? "manual") as "manual" | "auto_collect_nearest" | "auto_collect_highest";
               const autoState = ship.auto_state as string | null;
               const isAuto = mode !== "manual";
+              const targetSystemName = ship.auto_target_colony_id
+                ? colonySystemNameById.get(ship.auto_target_colony_id)
+                : undefined;
+              const isIdleAuto = isAuto && (autoState === "idle" || autoState === null);
               return (
                 <div
                   key={ship.id}
@@ -372,10 +388,15 @@ export default async function StationPage() {
                           : "In transit…"}
                         {isAuto && (
                           <span className="ml-2 text-teal-500">
-                            · {autoStateLabel(autoState as Parameters<typeof autoStateLabel>[0])}
+                            · {autoStateLabel(autoState as Parameters<typeof autoStateLabel>[0], targetSystemName)}
                           </span>
                         )}
                       </p>
+                      {isIdleAuto && (
+                        <p className="mt-0.5 text-xs text-amber-600">
+                          Waiting for colony stockpile — use Extract on a colony first.
+                        </p>
+                      )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {isAuto && (

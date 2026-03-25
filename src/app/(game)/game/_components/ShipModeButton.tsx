@@ -42,11 +42,17 @@ export function ShipModeButton({ shipId, currentMode }: ShipModeButtonProps) {
         body: JSON.stringify({ shipId, mode }),
       });
       const json = await res.json();
-      if (json.ok) {
-        router.refresh();
-      } else {
+      if (!json.ok) {
         setError(json.error?.message ?? "Failed to set mode.");
+        return;
       }
+      // When activating an auto mode, immediately advance the state machine so
+      // the ship dispatches to a colony on this page refresh rather than sitting
+      // idle until the player visits the map.
+      if (mode !== "manual") {
+        await fetch("/api/engine/resolve-travel", { method: "POST" }).catch(() => null);
+      }
+      router.refresh();
     } catch {
       setError("Network error.");
     } finally {
