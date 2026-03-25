@@ -60,6 +60,10 @@ export interface GalaxyShip {
   id: string;
   name: string;
   systemId: string | null;
+  /** Populated when ship is currently in transit (current_system_id = null). */
+  destinationSystemId: string | null;
+  /** ISO timestamp of expected arrival; null when not in transit. */
+  arriveAt: string | null;
   speedLyPerHr: number;
   cargoCap: number;
 }
@@ -141,6 +145,8 @@ export interface GalaxyTravelLine {
   label: string;
   /** True = fleet travel (slightly different styling) */
   isFleet: boolean;
+  /** ISO timestamp of expected arrival for ETA display. */
+  arriveAt: string | null;
 }
 
 interface GalaxyMapClientProps {
@@ -743,7 +749,7 @@ export function GalaxyMapClient({
                     fill={tl.isFleet ? "#a78bfa" : "#6366f1"}
                     opacity={0.8}
                   />
-                  {/* Ship name label at midpoint (visible when zoomed in) */}
+                  {/* Ship name + ETA label at midpoint (visible when zoomed in) */}
                   {scale >= 1.5 && (
                     <text
                       x={midX}
@@ -754,6 +760,10 @@ export function GalaxyMapClient({
                       opacity={0.8}
                     >
                       {tl.label}
+                      {tl.arriveAt ? (() => {
+                        const msLeft = new Date(tl.arriveAt).getTime() - Date.now();
+                        return msLeft > 0 ? ` · ${formatEta(Math.max(0, msLeft / 3600000))}` : " · arriving";
+                      })() : ""}
                     </text>
                   )}
                 </g>
@@ -1538,15 +1548,30 @@ export function GalaxyMapClient({
                               </p>
                             )}
                           </div>
-                          <div className="shrink-0">
+                          <div className="shrink-0 text-right">
                             {isHere ? (
                               <span className="text-xs text-emerald-500">
                                 Docked
                               </span>
                             ) : isInTransit ? (
-                              <span className="text-xs text-zinc-600">
-                                In transit
-                              </span>
+                              <div>
+                                {ship.destinationSystemId && (
+                                  <p className="text-xs text-indigo-400">
+                                    → {systemMap.get(ship.destinationSystemId)?.name ?? ship.destinationSystemId}
+                                  </p>
+                                )}
+                                {ship.arriveAt && (() => {
+                                  const msLeft = new Date(ship.arriveAt).getTime() - Date.now();
+                                  return (
+                                    <p className="text-xs text-zinc-600">
+                                      {msLeft > 0 ? `ETA ${formatEta(Math.max(0, msLeft / 3600000))}` : "Arriving"}
+                                    </p>
+                                  );
+                                })()}
+                                {!ship.destinationSystemId && !ship.arriveAt && (
+                                  <span className="text-xs text-zinc-600">In transit</span>
+                                )}
+                              </div>
                             ) : (
                               <button
                                 onClick={() => handleDispatchShip(ship.id)}

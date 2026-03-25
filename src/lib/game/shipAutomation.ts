@@ -115,6 +115,21 @@ export function autoStateLabel(
   }
 }
 
+/**
+ * Formats a millisecond duration as a human-readable ETA string.
+ * Used by server-rendered pages to show time remaining for ships in transit.
+ *
+ * Examples: "< 1 min", "34 min", "2h 15m", "7h"
+ */
+export function formatEtaMs(remainingMs: number): string {
+  if (remainingMs <= 0) return "arriving";
+  const totalMin = Math.ceil(remainingMs / 60000);
+  if (totalMin < 60) return `${totalMin} min`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
+}
+
 /** Human-readable label for a ShipDispatchMode value. */
 export function dispatchModeLabel(mode: string): string {
   switch (mode) {

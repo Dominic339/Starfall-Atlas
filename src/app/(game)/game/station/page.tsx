@@ -25,7 +25,7 @@ import { UnloadButton } from "../_components/ColonyActions";
 import { RefineForm } from "../_components/RefineControls";
 import { ShipDispatchForm } from "../_components/ShipDispatchForm";
 import { ShipModeButton } from "../_components/ShipModeButton";
-import { autoStateLabel, dispatchModeLabel } from "@/lib/game/shipAutomation";
+import { autoStateLabel, dispatchModeLabel, formatEtaMs } from "@/lib/game/shipAutomation";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import { runEngineTick } from "@/lib/game/engineTick";
 
@@ -119,7 +119,7 @@ export default async function StationPage() {
     }
   }
 
-  const [invRes, cargoRes, colonyInvRes] = await Promise.all([
+  const [invRes, cargoRes, colonyInvRes, travelJobsRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -140,6 +140,12 @@ export default async function StationPage() {
           .eq("location_type", "colony")
           .in("location_id", activeColonyIds)
       : Promise.resolve({ data: [] }),
+    // Active travel jobs — for ETA display on traveling ships
+    admin
+      .from("travel_jobs")
+      .select("ship_id, arrive_at")
+      .eq("player_id", player.id)
+      .eq("status", "pending"),
   ]);
 
   const stationInventory = (invRes.data ?? []) as Pick<
@@ -165,6 +171,12 @@ export default async function StationPage() {
       (colonyStockpileTotals.get(row.location_id) ?? 0) + row.quantity,
     );
   }
+
+  // shipId → arrive_at ISO string for active travel jobs
+  type TravelJobRow = { ship_id: string; arrive_at: string };
+  const arriveAtByShipId = new Map<string, string>(
+    ((travelJobsRes.data ?? []) as TravelJobRow[]).map((tj) => [tj.ship_id, tj.arrive_at]),
+  );
 
   const totalIron = stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
   const totalFood = stationInventory.find((r) => r.resource_type === "food")?.quantity ?? 0;
@@ -340,7 +352,7 @@ export default async function StationPage() {
                     {mode !== "manual" && (
                       <p className="mt-1.5 text-xs text-zinc-700">
                         Auto ships collect colony stockpiles and return here automatically.
-                        {" "}No movement? Use <strong className="text-zinc-500">Extract</strong> on a colony to populate its stockpile.
+                        Colony resources accumulate passively — no manual action needed.
                       </p>
                     )}
                   </div>
@@ -385,9 +397,28 @@ export default async function StationPage() {
                 : undefined;
               const isIdleAuto = isAuto && (autoState === "idle" || autoState === null);
               const isTraveling = ship.current_system_id === null;
-              const destName = isTraveling && ship.destination_system_id
+              const destName = ship.destination_system_id
                 ? systemDisplayName(ship.destination_system_id)
                 : null;
+
+              // ETA for traveling ships
+              const arriveAtStr = isTraveling ? arriveAtByShipId.get(ship.id) : undefined;
+              const etaMs = arriveAtStr
+                ? new Date(arriveAtStr).getTime() - requestTime.getTime()
+                : null;
+              const etaLabel = etaMs !== null ? formatEtaMs(Math.max(0, etaMs)) : null;
+
+              // Travel purpose line: what the ship is doing while in transit
+              const travelPurpose: string | null = isTraveling
+                ? autoState === "traveling_to_colony"
+                  ? `Collecting → ${targetSystemName ?? destName ?? "colony"}`
+                  : autoState === "traveling_to_station"
+                    ? `Returning to station`
+                    : destName
+                      ? `→ ${destName}`
+                      : "In transit"
+                : null;
+
               return (
                 <div
                   key={ship.id}
@@ -399,9 +430,7 @@ export default async function StationPage() {
                       <p className="text-sm font-semibold text-zinc-300">{ship.name}</p>
                       <p className="text-xs text-zinc-600">
                         {isTraveling ? (
-                          destName
-                            ? <span className="text-indigo-400">In transit → {destName}</span>
-                            : <span>In transit…</span>
+                          <span className="text-indigo-400">{travelPurpose}</span>
                         ) : (
                           systemDisplayName(ship.current_system_id!)
                         )}
@@ -410,10 +439,13 @@ export default async function StationPage() {
                             · {autoStateLabel(autoState as Parameters<typeof autoStateLabel>[0], targetSystemName)}
                           </span>
                         )}
+                        {etaLabel && (
+                          <span className="ml-2 text-zinc-500">· ETA {etaLabel}</span>
+                        )}
                       </p>
                       {isIdleAuto && !isTraveling && (
-                        <p className="mt-0.5 text-xs text-amber-600">
-                          Idle — no colony stockpile to collect. Use Extract on a colony first.
+                        <p className="mt-0.5 text-xs text-zinc-600">
+                          Idle — waiting for colony resources to accumulate.
                         </p>
                       )}
                     </div>
