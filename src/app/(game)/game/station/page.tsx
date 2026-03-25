@@ -27,6 +27,7 @@ import { ShipDispatchForm } from "../_components/ShipDispatchForm";
 import { ShipModeButton } from "../_components/ShipModeButton";
 import { autoStateLabel, dispatchModeLabel } from "@/lib/game/shipAutomation";
 import { runTravelResolution } from "@/lib/game/travelResolution";
+import { runEngineTick } from "@/lib/game/engineTick";
 
 export const dynamic = "force-dynamic";
 
@@ -46,9 +47,13 @@ export default async function StationPage() {
   );
   if (!player) redirect("/login");
 
+  // Resolve colony growth, upkeep, biomass→food conversion, and passive
+  // extraction so colony inventories are current before auto-haul reads them.
+  const requestTime = new Date();
+  await runEngineTick(admin, player.id, requestTime);
+
   // Advance auto-ship state machines so ships that arrived since the last
   // map/command visit are properly landed and ready to act.
-  const requestTime = new Date();
   await runTravelResolution(admin, player.id, requestTime);
 
   // Parallel fetches

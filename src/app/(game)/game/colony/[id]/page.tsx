@@ -41,6 +41,7 @@ import type {
 } from "@/lib/types/game";
 import { CollectButton, ExtractButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
+import { runEngineTick } from "@/lib/game/engineTick";
 import type { BodyType } from "@/lib/types/enums";
 
 export const dynamic = "force-dynamic";
@@ -72,6 +73,10 @@ export default async function ColonyPage({
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
   );
   if (!player) redirect("/login");
+
+  // Materialise colony inventory and resolve upkeep so this page always shows
+  // current state even when navigated directly (without visiting map/command).
+  await runEngineTick(admin, player.id, new Date());
 
   const { data: colony } = maybeSingleResult<Colony>(
     await admin
@@ -343,7 +348,7 @@ export default async function ColonyPage({
                   <p className="mt-1 text-sm font-medium text-teal-300">{extractSummary}</p>
                   {isCapped && (
                     <p className="mt-0.5 text-xs text-amber-500">
-                      Accumulation capped — extract or dispatch a ship to collect.
+                      Accumulation capped — dispatch a ship to collect.
                     </p>
                   )}
                   <div className="mt-2">
@@ -366,8 +371,8 @@ export default async function ColonyPage({
                   Rate: <span className="text-zinc-400">{totalRatePerHr} u/hr</span>
                   {" · "}
                   {elapsedHours < 1
-                    ? `${Math.round(elapsedHours * 60)}m since last extract`
-                    : `${elapsedHours.toFixed(1)}h since last extract`}
+                    ? `${Math.round(elapsedHours * 60)}m since last collection`
+                    : `${elapsedHours.toFixed(1)}h since last collection`}
                   {" · "}cap at {BALANCE.extraction.accumulationCapHours}h
                   {extractorTier > 0 && (
                     <span className="ml-1 text-teal-700"> · Extractor T{extractorTier}</span>
@@ -416,8 +421,12 @@ export default async function ColonyPage({
               Colony inventory is empty.
             </p>
             <p className="mt-1 text-xs text-zinc-700">
-              Use <strong className="text-zinc-600">Extract</strong> above to push accrued resources here,
-              then dispatch a ship to haul them to your station.
+              Resources accumulate automatically and are ready to haul once accrued.
+              Dispatch a ship from your{" "}
+              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                station
+              </Link>{" "}
+              to collect them.
             </p>
           </div>
         )}
