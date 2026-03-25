@@ -54,7 +54,13 @@ function bodyTypeLabel(type: string): string {
   return labels[type] ?? type;
 }
 
-export default async function ColonyPage({ params }: { params: { id: string } }) {
+export default async function ColonyPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id: colonyId } = await params;
+
   const user = await getUser();
   if (!user) redirect("/login");
 
@@ -70,7 +76,7 @@ export default async function ColonyPage({ params }: { params: { id: string } })
     await admin
       .from("colonies")
       .select("*")
-      .eq("id", params.id)
+      .eq("id", colonyId)
       .eq("owner_id", player.id)
       .maybeSingle(),
   );
@@ -140,7 +146,8 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
   const healthMult = extractionMultiplier(colony.upkeep_missed_periods);
   const resourceNodes = survey?.resource_nodes ?? [];
-  const lastExtractAt = colony.last_extract_at ?? now.toISOString();
+  // Fall back to colony founding time so extraction accrues from day 1
+  const lastExtractAt = colony.last_extract_at ?? colony.created_at;
   const rawAccruedExtraction = calculateAccumulatedExtraction(
     resourceNodes,
     colony.population_tier,
@@ -212,7 +219,7 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   const inventoryTotal = colonyInventory.reduce((s, r) => s + r.quantity, 0);
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-5xl p-6 space-y-6">
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>

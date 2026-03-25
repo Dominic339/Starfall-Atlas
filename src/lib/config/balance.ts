@@ -87,6 +87,25 @@ export const BALANCE = {
 
     /** Default colony storage capacity in resource units */
     defaultStorageCap: 1000,
+
+    /**
+     * Colony slot (colony_slots) progression.
+     *
+     * players.colony_slots controls how many active colonies a player may own.
+     * The DB default is 20. Higher tiers are unlocked via gameplay milestones.
+     *
+     *   20   — base (default for all new and existing players)
+     *   30   — Upgrade 1 (future milestone)
+     *   40   — Upgrade 2 (future milestone)
+     *   9999 — Unlimited tier (sentinel — effectively uncapped)
+     *
+     * The sentinel value (9999) is used as a DB integer; UI code should
+     * display "Unlimited" whenever colony_slots >= colonySlotsUnlimited.
+     */
+    slotsDefault: 20,
+    slotsUpgrade1: 30,
+    slotsUpgrade2: 40,
+    slotsUnlimited: 9999,
   },
 
   // -------------------------------------------------------------------------
