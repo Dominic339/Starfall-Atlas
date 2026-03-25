@@ -17,7 +17,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { systemDisplayName, getCatalogEntry } from "@/lib/catalog";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
-import { colonyHealthStatus, upkeepDescription } from "@/lib/game/colonyUpkeep";
+import { colonyHealthStatus, upkeepDescription, extractionMultiplier } from "@/lib/game/colonyUpkeep";
 import { isHarshPlanetType } from "@/lib/game/habitability";
 import {
   getStructureTier,
@@ -25,7 +25,9 @@ import {
   upkeepReductionFraction,
   effectiveStorageCap,
   structureBuildCost,
+  extractionBonusMultiplier,
 } from "@/lib/game/colonyStructures";
+import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
 import { BALANCE } from "@/lib/config/balance";
 import type {
   Player,
@@ -34,8 +36,9 @@ import type {
   PlayerStation,
   ResourceInventoryRow,
   PlayerResearch,
+  SurveyResult,
 } from "@/lib/types/game";
-import { CollectButton } from "../../_components/ColonyActions";
+import { CollectButton, ExtractButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import type { BodyType } from "@/lib/types/enums";
 
@@ -74,7 +77,7 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   if (!colony) notFound();
 
   // Parallel data fetches
-  const [invRes, structuresRes, stationRes, researchRes] = await Promise.all([
+  const [invRes, structuresRes, stationRes, researchRes, surveyRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -88,11 +91,17 @@ export default async function ColonyPage({ params }: { params: { id: string } })
       .eq("is_active", true),
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin.from("player_research").select("research_id").eq("player_id", player.id),
+    admin
+      .from("survey_results")
+      .select("resource_nodes")
+      .eq("body_id", colony.body_id)
+      .maybeSingle(),
   ]);
 
   const colonyInventory = (invRes.data ?? []) as Pick<ResourceInventoryRow, "resource_type" | "quantity">[];
   const structures = (structuresRes.data ?? []) as Structure[];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
+  const survey = (surveyRes.data as Pick<SurveyResult, "resource_nodes"> | null) ?? null;
   const unlockedResearchIds = new Set(
     (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
       (r) => r.research_id,
@@ -119,11 +128,30 @@ export default async function ColonyPage({ params }: { params: { id: string } })
   // Structure tiers
   const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
   const storageResearchLvl = researchLevel(unlockedResearchIds, "storage");
+  const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
   const warehouseTier = getStructureTier(structures, "warehouse");
   const habitatTier = getStructureTier(structures, "habitat_module");
+  const extractorTier = getStructureTier(structures, "extractor");
   const upkeepRedFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const _storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
+
+  // Extraction estimate
+  const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
+  const healthMult = extractionMultiplier(colony.upkeep_missed_periods);
+  const resourceNodes = survey?.resource_nodes ?? [];
+  const lastExtractAt = colony.last_extract_at ?? now.toISOString();
+  const rawAccruedExtraction = calculateAccumulatedExtraction(
+    resourceNodes,
+    colony.population_tier,
+    lastExtractAt,
+    now,
+    extBonusMult,
+  );
+  const accruedExtraction = rawAccruedExtraction
+    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * healthMult) }))
+    .filter((item) => item.quantity > 0);
+  const extractSummary = formatExtractionSummary(accruedExtraction);
 
   // Planet type (needed for isHarsh)
   const catalogEntry = getCatalogEntry(colony.system_id);
@@ -257,28 +285,55 @@ export default async function ColonyPage({ params }: { params: { id: string } })
         </div>
       )}
 
-      {/* Tax yield */}
+      {/* Tax + Extraction yield */}
       {colony.status === "active" && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Yield
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-            <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
-            {accrued > 0 ? (
-              <>
-                <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
-                  {accrued} ¢
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {/* Tax */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+              <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
+              {accrued > 0 ? (
+                <>
+                  <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
+                    {accrued} ¢
+                  </p>
+                  <div className="mt-2">
+                    <CollectButton colonyId={colony.id} accrued={accrued} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-zinc-500">
+                  {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
                 </p>
-                <div className="mt-2">
-                  <CollectButton colonyId={colony.id} accrued={accrued} />
-                </div>
-              </>
-            ) : (
-              <p className="mt-1 text-sm text-zinc-500">
-                {BALANCE.colony.taxPerHourByTier[colony.population_tier]} ¢/hr
-              </p>
-            )}
+              )}
+            </div>
+
+            {/* Extraction */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+              <p className="text-xs text-zinc-600 uppercase tracking-wider">Resources accrued</p>
+              {resourceNodes.length === 0 ? (
+                <p className="mt-1 text-sm text-zinc-600">No survey data</p>
+              ) : extractSummary ? (
+                <>
+                  <p className="mt-1 text-sm font-medium text-teal-300">{extractSummary}</p>
+                  <div className="mt-2">
+                    <ExtractButton colonyId={colony.id} summary={extractSummary} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-zinc-500">
+                  Accumulating…
+                  {extractorTier > 0 && (
+                    <span className="ml-1 text-xs text-zinc-600">
+                      (Extractor T{extractorTier})
+                    </span>
+                  )}
+                </p>
+              )}
+            </div>
           </div>
         </section>
       )}
