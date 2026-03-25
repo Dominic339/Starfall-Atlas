@@ -77,11 +77,13 @@ export function requireColonySlot(
   player: Player,
   currentColonyCount: number,
 ): ActionResult<void> {
+  const unlimited = 9999; // matches BALANCE.colony.slotsUnlimited
+  if (player.colony_slots >= unlimited) return { ok: true, data: undefined };
   if (currentColonyCount >= player.colony_slots) {
     return fail(
       "colony_limit_reached",
       `Colony limit reached (${player.colony_slots}). ` +
-        "Earn more slots through gameplay or a Colony Permit.",
+        "Expand your network by reaching the next progression milestone.",
     );
   }
   return { ok: true, data: undefined };

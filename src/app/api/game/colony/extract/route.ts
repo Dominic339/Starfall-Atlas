@@ -63,7 +63,7 @@ export async function POST(request: NextRequest) {
   const { data: colony } = singleResult<Colony>(
     await admin
       .from("colonies")
-      .select("id, owner_id, body_id, population_tier, status, last_extract_at, upkeep_missed_periods")
+      .select("id, owner_id, body_id, population_tier, status, last_extract_at, upkeep_missed_periods, created_at")
       .eq("id", colonyId)
       .single(),
   );
@@ -131,8 +131,8 @@ export async function POST(request: NextRequest) {
 
   // ── Calculate accumulated extraction ──────────────────────────────────────
   const now = new Date();
-  // Fall back to now (= 0 yield) if last_extract_at is somehow null.
-  const lastExtractAt = colony.last_extract_at ?? now.toISOString();
+  // Fall back to colony founding time so first-time extraction accrues from day 1.
+  const lastExtractAt = colony.last_extract_at ?? colony.created_at;
 
   const rawExtracted = calculateAccumulatedExtraction(
     survey.resource_nodes,

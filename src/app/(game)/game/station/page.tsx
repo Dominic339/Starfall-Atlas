@@ -24,6 +24,9 @@ import type { Player, Ship, PlayerStation, ResourceInventoryRow, Colony } from "
 import { UnloadButton } from "../_components/ColonyActions";
 import { RefineForm } from "../_components/RefineControls";
 import { ShipDispatchForm } from "../_components/ShipDispatchForm";
+import { ShipModeButton } from "../_components/ShipModeButton";
+import { autoStateLabel, dispatchModeLabel } from "@/lib/game/shipAutomation";
+import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +46,17 @@ export default async function StationPage() {
   );
   if (!player) redirect("/login");
 
+  // Advance auto-ship state machines so ships that arrived since the last
+  // map/command visit are properly landed and ready to act.
+  const requestTime = new Date();
+  await runTravelResolution(admin, player.id, requestTime);
+
   // Parallel fetches
   const [stationRes, shipsRes, coloniesRes] = await Promise.all([
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin
       .from("ships")
-      .select("*")
+      .select("id, name, current_system_id, speed_ly_per_hr, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
     admin
@@ -64,6 +72,11 @@ export default async function StationPage() {
 
   type ColonyRow = Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">;
   const colonies = (listResult<ColonyRow>(coloniesRes).data ?? []);
+
+  // Used to resolve auto_target_colony_id → system display name for away ships
+  const colonySystemNameById = new Map(
+    colonies.map((c) => [c.id, systemDisplayName(c.system_id)]),
+  );
 
   if (!station) {
     return (
@@ -218,7 +231,7 @@ export default async function StationPage() {
         )}
       </section>
 
-      {/* Docked ships — with dispatch and unload */}
+      {/* Docked ships — with dispatch, unload, and mode controls */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Docked Ships ({dockedShips.length})
@@ -232,15 +245,16 @@ export default async function StationPage() {
                 (r) => `${r.quantity} ${r.resource_type.replace(/_/g, " ")}`,
               );
               const cargoSummary = cargoParts.join(", ") || "empty";
-              // Dispatch targets: nearby systems excluding the ship's current location
               const dispatchTargets = nearbySystems.filter(
                 (s) => s.id !== ship.current_system_id,
               );
+              const mode = (ship.dispatch_mode ?? "manual") as "manual" | "auto_collect_nearest" | "auto_collect_highest";
               return (
                 <div
                   key={ship.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2"
                 >
+                  {/* Ship header */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
@@ -250,14 +264,14 @@ export default async function StationPage() {
                         {cargoUsed}/{ship.cargo_cap} cargo
                       </p>
                     </div>
-                    <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400">
+                    <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400 shrink-0">
                       Docked
                     </span>
                   </div>
 
                   {/* Unload cargo */}
                   {cargo.length > 0 && (
-                    <div className="mt-2 border-t border-zinc-800 pt-2">
+                    <div className="border-t border-zinc-800 pt-2">
                       <p className="text-xs text-zinc-500 mb-1">
                         Cargo: <span className="text-zinc-400">{cargoSummary}</span>
                       </p>
@@ -265,14 +279,33 @@ export default async function StationPage() {
                     </div>
                   )}
 
-                  {/* Dispatch to a system */}
-                  <div className="mt-2 border-t border-zinc-800 pt-2">
-                    <p className="text-xs text-zinc-600 mb-1">Dispatch to system:</p>
-                    <ShipDispatchForm
-                      shipId={ship.id}
-                      targetSystems={dispatchTargets}
-                    />
+                  {/* Dispatch mode */}
+                  <div className="border-t border-zinc-800 pt-2">
+                    <p className="text-xs text-zinc-600 mb-1.5">
+                      Haul mode:{" "}
+                      <span className={mode !== "manual" ? "text-teal-400" : "text-zinc-400"}>
+                        {dispatchModeLabel(mode)}
+                      </span>
+                    </p>
+                    <ShipModeButton shipId={ship.id} currentMode={mode} />
+                    {mode !== "manual" && (
+                      <p className="mt-1 text-xs text-zinc-700">
+                        Auto ships collect colony stockpiles and return to station automatically.
+                        {" "}If the ship stays docked, use <strong className="text-zinc-600">Extract</strong> on a colony to populate its stockpile.
+                      </p>
+                    )}
                   </div>
+
+                  {/* Manual dispatch (only shown when in manual mode) */}
+                  {mode === "manual" && dispatchTargets.length > 0 && (
+                    <div className="border-t border-zinc-800 pt-2">
+                      <p className="text-xs text-zinc-600 mb-1">Manual dispatch:</p>
+                      <ShipDispatchForm
+                        shipId={ship.id}
+                        targetSystems={dispatchTargets}
+                      />
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -333,29 +366,59 @@ export default async function StationPage() {
             Ships Away
           </h2>
           <div className="space-y-2">
-            {[...awayShips, ...travelingShips].map((ship) => (
-              <div
-                key={ship.id}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
-              >
-                <div>
-                  <p className="text-sm text-zinc-300">{ship.name}</p>
-                  <p className="text-xs text-zinc-600">
-                    {ship.current_system_id
-                      ? systemDisplayName(ship.current_system_id)
-                      : "In transit…"}
-                  </p>
+            {[...awayShips, ...travelingShips].map((ship) => {
+              const mode = (ship.dispatch_mode ?? "manual") as "manual" | "auto_collect_nearest" | "auto_collect_highest";
+              const autoState = ship.auto_state as string | null;
+              const isAuto = mode !== "manual";
+              const targetSystemName = ship.auto_target_colony_id
+                ? colonySystemNameById.get(ship.auto_target_colony_id)
+                : undefined;
+              const isIdleAuto = isAuto && (autoState === "idle" || autoState === null);
+              return (
+                <div
+                  key={ship.id}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-zinc-300">{ship.name}</p>
+                      <p className="text-xs text-zinc-600">
+                        {ship.current_system_id
+                          ? systemDisplayName(ship.current_system_id)
+                          : "In transit…"}
+                        {isAuto && (
+                          <span className="ml-2 text-teal-500">
+                            · {autoStateLabel(autoState as Parameters<typeof autoStateLabel>[0], targetSystemName)}
+                          </span>
+                        )}
+                      </p>
+                      {isIdleAuto && (
+                        <p className="mt-0.5 text-xs text-amber-600">
+                          Waiting for colony stockpile — use Extract on a colony first.
+                        </p>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {isAuto && (
+                        <span className="text-xs text-teal-600">{dispatchModeLabel(mode)}</span>
+                      )}
+                      {ship.current_system_id && (
+                        <Link
+                          href={`/game/system/${encodeURIComponent(ship.current_system_id)}`}
+                          className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
+                        >
+                          System →
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                  {/* Allow switching mode even when away */}
+                  <div className="mt-2 border-t border-zinc-800 pt-2">
+                    <ShipModeButton shipId={ship.id} currentMode={mode} />
+                  </div>
                 </div>
-                {ship.current_system_id && (
-                  <Link
-                    href={`/game/system/${encodeURIComponent(ship.current_system_id)}`}
-                    className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
-                  >
-                    System →
-                  </Link>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}
