@@ -21,6 +21,7 @@ import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { systemDisplayName } from "@/lib/catalog";
+import { BALANCE } from "@/lib/config/balance";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import type { Player, Ship, Colony, PlayerStation, ResourceInventoryRow, TravelJob } from "@/lib/types/game";
@@ -148,7 +149,13 @@ export default async function CommandPage() {
           }`}>
             <p className="text-xs text-zinc-600 uppercase tracking-wider">Colonies</p>
             <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
-              {activeColonies.length} active
+              {activeColonies.length}
+              <span className="text-sm font-normal text-zinc-600">
+                {" / "}
+                {player.colony_slots >= BALANCE.colony.slotsUnlimited
+                  ? "∞"
+                  : player.colony_slots}
+              </span>
               {neglectedColonies.length > 0 && (
                 <span className="ml-1 text-sm text-red-400">
                   {neglectedColonies.length} neglected

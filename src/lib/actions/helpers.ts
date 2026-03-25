@@ -7,6 +7,7 @@ import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult } from "@/lib/supabase/utils";
 import { fail, type ActionResult, type AuthContext } from "./types";
+import { BALANCE } from "@/lib/config/balance";
 import type { Player, PlayerId } from "@/lib/types/game";
 import type { ApiError } from "@/lib/types/api";
 
@@ -77,8 +78,7 @@ export function requireColonySlot(
   player: Player,
   currentColonyCount: number,
 ): ActionResult<void> {
-  const unlimited = 9999; // matches BALANCE.colony.slotsUnlimited
-  if (player.colony_slots >= unlimited) return { ok: true, data: undefined };
+  if (player.colony_slots >= BALANCE.colony.slotsUnlimited) return { ok: true, data: undefined };
   if (currentColonyCount >= player.colony_slots) {
     return fail(
       "colony_limit_reached",
