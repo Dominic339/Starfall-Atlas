@@ -27,11 +27,12 @@ import {
   structureBuildCost,
   extractionBonusMultiplier,
 } from "@/lib/game/colonyStructures";
-import { calculateAccumulatedExtraction, formatExtractionSummary } from "@/lib/game/extraction";
+import { calculateAccumulatedExtraction, formatExtractionSummary, extractionRatePerNode } from "@/lib/game/extraction";
 import { BALANCE } from "@/lib/config/balance";
 import type {
   Player,
   Colony,
+  Ship,
   Structure,
   PlayerStation,
   ResourceInventoryRow,
@@ -83,7 +84,7 @@ export default async function ColonyPage({
   if (!colony) notFound();
 
   // Parallel data fetches
-  const [invRes, structuresRes, stationRes, researchRes, surveyRes] = await Promise.all([
+  const [invRes, structuresRes, stationRes, researchRes, surveyRes, shipsRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -102,12 +103,18 @@ export default async function ColonyPage({
       .select("resource_nodes")
       .eq("body_id", colony.body_id)
       .maybeSingle(),
+    admin
+      .from("ships")
+      .select("id, name, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
+      .eq("owner_id", player.id)
+      .eq("current_system_id", colony.system_id),
   ]);
 
   const colonyInventory = (invRes.data ?? []) as Pick<ResourceInventoryRow, "resource_type" | "quantity">[];
   const structures = (structuresRes.data ?? []) as Structure[];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
   const survey = (surveyRes.data as Pick<SurveyResult, "resource_nodes"> | null) ?? null;
+  const shipsAtSystem = (shipsRes.data ?? []) as Pick<Ship, "id" | "name" | "cargo_cap" | "dispatch_mode" | "auto_state" | "auto_target_colony_id">[];
   const unlockedResearchIds = new Set(
     (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
       (r) => r.research_id,
@@ -159,6 +166,14 @@ export default async function ColonyPage({
     .map((item) => ({ ...item, quantity: Math.floor(item.quantity * healthMult) }))
     .filter((item) => item.quantity > 0);
   const extractSummary = formatExtractionSummary(accruedExtraction);
+
+  // Extraction rate / elapsed display helpers
+  const basicNodeCount = resourceNodes.filter((n) => !n.is_rare).length;
+  const totalRatePerHr = Math.floor(
+    extractionRatePerNode(colony.population_tier) * basicNodeCount * extBonusMult * healthMult,
+  );
+  const elapsedHours = (now.getTime() - new Date(lastExtractAt).getTime()) / (1000 * 60 * 60);
+  const isCapped = elapsedHours >= BALANCE.extraction.accumulationCapHours;
 
   // Planet type (needed for isHarsh)
   const catalogEntry = getCatalogEntry(colony.system_id);
@@ -322,21 +337,40 @@ export default async function ColonyPage({
             <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
               <p className="text-xs text-zinc-600 uppercase tracking-wider">Resources accrued</p>
               {resourceNodes.length === 0 ? (
-                <p className="mt-1 text-sm text-zinc-600">No survey data</p>
+                <p className="mt-1 text-sm text-zinc-600">No survey data — conduct a survey to unlock extraction.</p>
               ) : extractSummary ? (
                 <>
                   <p className="mt-1 text-sm font-medium text-teal-300">{extractSummary}</p>
+                  {isCapped && (
+                    <p className="mt-0.5 text-xs text-amber-500">
+                      Accumulation capped — extract or dispatch a ship to collect.
+                    </p>
+                  )}
                   <div className="mt-2">
                     <ExtractButton colonyId={colony.id} summary={extractSummary} />
                   </div>
                 </>
               ) : (
                 <p className="mt-1 text-sm text-zinc-500">
-                  Accumulating…
-                  {extractorTier > 0 && (
-                    <span className="ml-1 text-xs text-zinc-600">
-                      (Extractor T{extractorTier})
+                  Accumulating…{" "}
+                  {basicNodeCount > 0 && totalRatePerHr > 0 && (
+                    <span className="text-xs text-zinc-600">
+                      ({totalRatePerHr} u/hr across {basicNodeCount} node{basicNodeCount !== 1 ? "s" : ""})
                     </span>
+                  )}
+                </p>
+              )}
+              {/* Rate line — always show when we have nodes */}
+              {basicNodeCount > 0 && (
+                <p className="mt-2 text-xs text-zinc-600 border-t border-zinc-800/60 pt-2">
+                  Rate: <span className="text-zinc-400">{totalRatePerHr} u/hr</span>
+                  {" · "}
+                  {elapsedHours < 1
+                    ? `${Math.round(elapsedHours * 60)}m since last extract`
+                    : `${elapsedHours.toFixed(1)}h since last extract`}
+                  {" · "}cap at {BALANCE.extraction.accumulationCapHours}h
+                  {extractorTier > 0 && (
+                    <span className="ml-1 text-teal-700"> · Extractor T{extractorTier}</span>
                   )}
                 </p>
               )}
@@ -379,11 +413,64 @@ export default async function ColonyPage({
         ) : (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
             <p className="text-sm text-zinc-600">
-              Colony inventory is empty — resources accumulate between ship hauls.
+              Colony inventory is empty.
+            </p>
+            <p className="mt-1 text-xs text-zinc-700">
+              Use <strong className="text-zinc-600">Extract</strong> above to push accrued resources here,
+              then dispatch a ship to haul them to your station.
             </p>
           </div>
         )}
       </section>
+
+      {/* Ships at this system */}
+      {shipsAtSystem.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Ships Here ({shipsAtSystem.length})
+          </h2>
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2">
+            {shipsAtSystem.map((ship) => {
+              const isAutoTargetingThis = ship.auto_target_colony_id === colony.id;
+              const modeLabel =
+                ship.dispatch_mode === "manual"
+                  ? "Manual"
+                  : ship.dispatch_mode === "auto_collect_nearest"
+                    ? "Auto: Nearest"
+                    : "Auto: Highest yield";
+              const stateLabel =
+                ship.auto_state === "traveling_to_colony"
+                  ? "En route here"
+                  : ship.auto_state === "traveling_to_station"
+                    ? "Returning to station"
+                    : ship.dispatch_mode !== "manual"
+                      ? "Idle (auto)"
+                      : "Docked";
+              return (
+                <div key={ship.id} className="flex items-center justify-between gap-4">
+                  <div>
+                    <span className="text-sm font-medium text-zinc-300">{ship.name}</span>
+                    {isAutoTargetingThis && (
+                      <span className="ml-2 rounded-full px-1.5 py-0.5 text-xs bg-indigo-900/50 text-indigo-400 border border-indigo-900/40">
+                        assigned
+                      </span>
+                    )}
+                    <p className="text-xs text-zinc-600">
+                      {stateLabel} · {modeLabel} · {ship.cargo_cap.toLocaleString()} cargo
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+            <p className="text-xs text-zinc-700 border-t border-zinc-800 pt-2">
+              Change ship modes from your{" "}
+              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                station
+              </Link>.
+            </p>
+          </div>
+        </section>
+      )}
 
       {/* Upkeep */}
       {colony.status === "active" && (
