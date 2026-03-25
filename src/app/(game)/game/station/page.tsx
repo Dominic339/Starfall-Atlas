@@ -56,7 +56,7 @@ export default async function StationPage() {
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin
       .from("ships")
-      .select("id, name, current_system_id, speed_ly_per_hr, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
+      .select("id, name, current_system_id, destination_system_id, speed_ly_per_hr, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
     admin
@@ -73,7 +73,7 @@ export default async function StationPage() {
   type ColonyRow = Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">;
   const colonies = (listResult<ColonyRow>(coloniesRes).data ?? []);
 
-  // Used to resolve auto_target_colony_id → system display name for away ships
+  // Resolve auto_target_colony_id → system display name for away ships
   const colonySystemNameById = new Map(
     colonies.map((c) => [c.id, systemDisplayName(c.system_id)]),
   );
@@ -93,7 +93,7 @@ export default async function StationPage() {
     );
   }
 
-  // Fetch station inventory, ship cargo, and colony stockpile totals
+  // Bucket ships
   const dockedShips = ships.filter((s) => s.current_system_id === station.current_system_id);
   const travelingShips = ships.filter((s) => s.current_system_id === null);
   const awayShips = ships.filter(
@@ -103,6 +103,16 @@ export default async function StationPage() {
   );
   const dockedShipIds = dockedShips.map((s) => s.id);
   const activeColonyIds = colonies.map((c) => c.id);
+
+  // Build map: colonyId → names of auto ships targeting it
+  const assignedShipNamesByColonyId = new Map<string, string[]>();
+  for (const ship of ships) {
+    if (ship.auto_target_colony_id) {
+      const list = assignedShipNamesByColonyId.get(ship.auto_target_colony_id) ?? [];
+      list.push(ship.name);
+      assignedShipNamesByColonyId.set(ship.auto_target_colony_id, list);
+    }
+  }
 
   const [invRes, cargoRes, colonyInvRes] = await Promise.all([
     admin
@@ -151,17 +161,25 @@ export default async function StationPage() {
     );
   }
 
-  const totalIron =
-    stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
+  const totalIron = stationInventory.find((r) => r.resource_type === "iron")?.quantity ?? 0;
+  const totalFood = stationInventory.find((r) => r.resource_type === "food")?.quantity ?? 0;
+  const totalStationUnits = stationInventory.reduce((s, r) => s + r.quantity, 0);
 
   // Systems within travel range of the station (for dispatch controls)
+  // Annotate entries that have an active colony so they're easy to spot in the dropdown.
+  const colonySystemIds = new Set(colonies.map((c) => c.system_id as string));
   const nearbySystems = getNearbySystems(station.current_system_id, BALANCE.lanes.baseRangeLy).map(
-    (s) => ({ id: s.id, name: s.name }),
+    (s) => ({
+      id: s.id,
+      name: colonySystemIds.has(s.id) ? `${s.name} ★` : s.name,
+    }),
   );
+
+  const allShipsAway = awayShips.length + travelingShips.length;
 
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-8">
-      {/* Header */}
+      {/* ── Header ──────────────────────────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">{station.name}</h1>
@@ -184,25 +202,45 @@ export default async function StationPage() {
         </Link>
       </div>
 
-      {/* Credits + Iron summary */}
-      <div className="rounded-lg border border-amber-900/50 bg-zinc-900 px-4 py-3">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
-            <p className="mt-0.5 font-mono text-2xl font-semibold text-amber-300">
-              {player.credits.toLocaleString()}
-            </p>
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-zinc-600 uppercase tracking-wider">Iron</p>
-            <p className="mt-0.5 font-mono text-lg font-medium text-zinc-200">
-              {totalIron.toLocaleString()}
-            </p>
-          </div>
+      {/* ── Summary bar ─────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-amber-900/40 bg-zinc-900 px-4 py-3">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
+          <p className="mt-0.5 font-mono text-xl font-semibold text-amber-300">
+            {player.credits.toLocaleString()}
+          </p>
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">Iron</p>
+          <p className="mt-0.5 font-mono text-xl font-semibold text-zinc-200">
+            {totalIron.toLocaleString()}
+          </p>
+        </div>
+        <div className={`rounded-lg border px-4 py-3 ${
+          totalFood === 0 && colonies.length > 0
+            ? "border-amber-900/50 bg-amber-950/20"
+            : "border-zinc-800 bg-zinc-900"
+        }`}>
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">Food</p>
+          <p className={`mt-0.5 font-mono text-xl font-semibold ${
+            totalFood === 0 && colonies.length > 0 ? "text-amber-400" : "text-zinc-200"
+          }`}>
+            {totalFood.toLocaleString()}
+          </p>
+          {totalFood === 0 && colonies.length > 0 && (
+            <p className="text-xs text-amber-600 mt-0.5">Refine biomass+water</p>
+          )}
+        </div>
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">Inventory</p>
+          <p className="mt-0.5 font-mono text-xl font-semibold text-zinc-200">
+            {totalStationUnits.toLocaleString()}
+            <span className="text-sm font-normal text-zinc-600"> units</span>
+          </p>
         </div>
       </div>
 
-      {/* Station inventory */}
+      {/* ── Station inventory ───────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Inventory
@@ -231,7 +269,7 @@ export default async function StationPage() {
         )}
       </section>
 
-      {/* Docked ships — with dispatch, unload, and mode controls */}
+      {/* ── Docked ships ────────────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Docked Ships ({dockedShips.length})
@@ -252,54 +290,63 @@ export default async function StationPage() {
               return (
                 <div
                   key={ship.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-3"
                 >
                   {/* Ship header */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-medium text-zinc-200">{ship.name}</p>
+                      <p className="text-sm font-semibold text-zinc-200">{ship.name}</p>
                       <p className="text-xs text-zinc-500">
-                        {Number(ship.speed_ly_per_hr).toFixed(2)} ly/hr
+                        {Number(ship.speed_ly_per_hr).toFixed(1)} ly/hr
                         {" · "}
-                        {cargoUsed}/{ship.cargo_cap} cargo
+                        <span className={cargoUsed > 0 ? "text-teal-400" : "text-zinc-600"}>
+                          {cargoUsed}/{ship.cargo_cap} cargo
+                        </span>
                       </p>
                     </div>
-                    <span className="rounded-full bg-emerald-900/40 px-2 py-0.5 text-xs text-emerald-400 shrink-0">
+                    <span className="rounded-full bg-emerald-900/40 border border-emerald-900/30 px-2 py-0.5 text-xs text-emerald-400 shrink-0">
                       Docked
                     </span>
                   </div>
 
-                  {/* Unload cargo */}
-                  {cargo.length > 0 && (
-                    <div className="border-t border-zinc-800 pt-2">
-                      <p className="text-xs text-zinc-500 mb-1">
-                        Cargo: <span className="text-zinc-400">{cargoSummary}</span>
-                      </p>
-                      <UnloadButton shipId={ship.id} summary={cargoSummary} />
-                    </div>
-                  )}
+                  {/* Cargo / unload */}
+                  <div className="border-t border-zinc-800 pt-2">
+                    {cargo.length > 0 ? (
+                      <>
+                        <p className="text-xs text-zinc-500 mb-1.5">
+                          Cargo: <span className="text-zinc-300">{cargoSummary}</span>
+                        </p>
+                        <UnloadButton shipId={ship.id} summary={cargoSummary} />
+                      </>
+                    ) : (
+                      <p className="text-xs text-zinc-700">No cargo to unload.</p>
+                    )}
+                  </div>
 
-                  {/* Dispatch mode */}
+                  {/* Haul mode */}
                   <div className="border-t border-zinc-800 pt-2">
                     <p className="text-xs text-zinc-600 mb-1.5">
-                      Haul mode:{" "}
-                      <span className={mode !== "manual" ? "text-teal-400" : "text-zinc-400"}>
+                      Mode:{" "}
+                      <span className={mode !== "manual" ? "text-teal-400 font-medium" : "text-zinc-400"}>
                         {dispatchModeLabel(mode)}
                       </span>
                     </p>
                     <ShipModeButton shipId={ship.id} currentMode={mode} />
                     {mode !== "manual" && (
-                      <p className="mt-1 text-xs text-zinc-700">
-                        Auto ships collect colony stockpiles and return to station automatically.
-                        {" "}If the ship stays docked, use <strong className="text-zinc-600">Extract</strong> on a colony to populate its stockpile.
+                      <p className="mt-1.5 text-xs text-zinc-700">
+                        Auto ships collect colony stockpiles and return here automatically.
+                        {" "}No movement? Use <strong className="text-zinc-500">Extract</strong> on a colony to populate its stockpile.
                       </p>
                     )}
                   </div>
 
-                  {/* Manual dispatch (only shown when in manual mode) */}
+                  {/* Manual dispatch — only when in manual mode */}
                   {mode === "manual" && dispatchTargets.length > 0 && (
                     <div className="border-t border-zinc-800 pt-2">
-                      <p className="text-xs text-zinc-600 mb-1">Manual dispatch:</p>
+                      <p className="text-xs text-zinc-600 mb-1">
+                        Send to:{" "}
+                        <span className="text-zinc-700 font-normal">(★ = colony system)</span>
+                      </p>
                       <ShipDispatchForm
                         shipId={ship.id}
                         targetSystems={dispatchTargets}
@@ -317,53 +364,11 @@ export default async function StationPage() {
         )}
       </section>
 
-      {/* Colonies — stockpile overview */}
-      {colonies.length > 0 && (
+      {/* ── Ships away ──────────────────────────────────────────────────────── */}
+      {allShipsAway > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Colonies ({colonies.length})
-          </h2>
-          <div className="space-y-2">
-            {colonies.map((colony) => {
-              const stockpile = colonyStockpileTotals.get(colony.id) ?? 0;
-              const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
-              return (
-                <div
-                  key={colony.id}
-                  className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
-                >
-                  <div>
-                    <p className="text-sm text-zinc-300">
-                      {systemDisplayName(colony.system_id)}
-                      <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIdx}</span>
-                      <span className="ml-1.5 text-xs text-zinc-600">T{colony.population_tier}</span>
-                    </p>
-                    {stockpile > 0 ? (
-                      <p className="text-xs text-teal-400">
-                        {stockpile} units ready to haul
-                      </p>
-                    ) : (
-                      <p className="text-xs text-zinc-700">Stockpile empty</p>
-                    )}
-                  </div>
-                  <Link
-                    href={`/game/colony/${colony.id}`}
-                    className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors"
-                  >
-                    Details →
-                  </Link>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      )}
-
-      {/* Ships away */}
-      {(awayShips.length > 0 || travelingShips.length > 0) && (
-        <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Ships Away
+            Ships Away ({allShipsAway})
           </h2>
           <div className="space-y-2">
             {[...awayShips, ...travelingShips].map((ship) => {
@@ -374,33 +379,44 @@ export default async function StationPage() {
                 ? colonySystemNameById.get(ship.auto_target_colony_id)
                 : undefined;
               const isIdleAuto = isAuto && (autoState === "idle" || autoState === null);
+              const isTraveling = ship.current_system_id === null;
+              const destName = isTraveling && ship.destination_system_id
+                ? systemDisplayName(ship.destination_system_id)
+                : null;
               return (
                 <div
                   key={ship.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-3 space-y-2"
                 >
-                  <div className="flex items-center justify-between gap-3">
+                  {/* Ship header row */}
+                  <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm text-zinc-300">{ship.name}</p>
+                      <p className="text-sm font-semibold text-zinc-300">{ship.name}</p>
                       <p className="text-xs text-zinc-600">
-                        {ship.current_system_id
-                          ? systemDisplayName(ship.current_system_id)
-                          : "In transit…"}
-                        {isAuto && (
+                        {isTraveling ? (
+                          destName
+                            ? <span className="text-indigo-400">In transit → {destName}</span>
+                            : <span>In transit…</span>
+                        ) : (
+                          systemDisplayName(ship.current_system_id!)
+                        )}
+                        {isAuto && !isTraveling && (
                           <span className="ml-2 text-teal-500">
                             · {autoStateLabel(autoState as Parameters<typeof autoStateLabel>[0], targetSystemName)}
                           </span>
                         )}
                       </p>
-                      {isIdleAuto && (
+                      {isIdleAuto && !isTraveling && (
                         <p className="mt-0.5 text-xs text-amber-600">
-                          Waiting for colony stockpile — use Extract on a colony first.
+                          Idle — no colony stockpile to collect. Use Extract on a colony first.
                         </p>
                       )}
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                       {isAuto && (
-                        <span className="text-xs text-teal-600">{dispatchModeLabel(mode)}</span>
+                        <span className="rounded px-1.5 py-0.5 text-xs bg-teal-900/40 text-teal-400 border border-teal-900/30">
+                          {dispatchModeLabel(mode)}
+                        </span>
                       )}
                       {ship.current_system_id && (
                         <Link
@@ -412,8 +428,10 @@ export default async function StationPage() {
                       )}
                     </div>
                   </div>
-                  {/* Allow switching mode even when away */}
-                  <div className="mt-2 border-t border-zinc-800 pt-2">
+
+                  {/* Mode controls */}
+                  <div className="border-t border-zinc-800 pt-2">
+                    <p className="text-xs text-zinc-700 mb-1">Mode:</p>
                     <ShipModeButton shipId={ship.id} currentMode={mode} />
                   </div>
                 </div>
@@ -423,7 +441,59 @@ export default async function StationPage() {
         </section>
       )}
 
-      {/* Refining */}
+      {/* ── Colonies ────────────────────────────────────────────────────────── */}
+      {colonies.length > 0 && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Colonies ({colonies.length})
+          </h2>
+          <div className="space-y-2">
+            {colonies.map((colony) => {
+              const stockpile = colonyStockpileTotals.get(colony.id) ?? 0;
+              const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
+              const assignedShips = assignedShipNamesByColonyId.get(colony.id) ?? [];
+              return (
+                <div
+                  key={colony.id}
+                  className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-zinc-300">
+                        {systemDisplayName(colony.system_id)}
+                        <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIdx}</span>
+                        <span className="ml-1.5 text-xs text-zinc-600">T{colony.population_tier}</span>
+                      </p>
+                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                        {stockpile > 0 ? (
+                          <p className="text-xs text-teal-400">
+                            {stockpile.toLocaleString()} units ready to haul
+                          </p>
+                        ) : (
+                          <p className="text-xs text-zinc-700">Stockpile empty</p>
+                        )}
+                        {assignedShips.length > 0 && (
+                          <p className="text-xs text-indigo-400">
+                            {assignedShips.join(", ")} assigned
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <Link
+                      href={`/game/colony/${colony.id}`}
+                      className="text-xs text-indigo-500 hover:text-indigo-300 transition-colors shrink-0"
+                    >
+                      Details →
+                    </Link>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      {/* ── Refining ────────────────────────────────────────────────────────── */}
       <section>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Refine
