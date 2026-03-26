@@ -54,6 +54,8 @@ export interface GalaxySystem {
   isStationLocation: boolean;
   /** A ship is currently traveling to this system */
   isInTransitTarget: boolean;
+  /** A ship departed from this system and is currently in transit */
+  isTransitOrigin: boolean;
 }
 
 export interface GalaxyShip {
@@ -141,12 +143,16 @@ export interface GalaxyTravelLine {
   /** SVG position of the destination system */
   x2: number;
   y2: number;
+  /** System IDs for origin/destination (used for selected-system highlighting). */
+  fromSystemId: string;
+  toSystemId: string;
   /** Short label shown near midpoint (e.g. ship name) */
   label: string;
   /** True = fleet travel (slightly different styling) */
   isFleet: boolean;
-  /** ISO timestamp of expected arrival for ETA display. */
+  /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
+  departAt: string | null;
 }
 
 interface GalaxyMapClientProps {
@@ -728,42 +734,98 @@ export function GalaxyMapClient({
             {travelLines.map((tl) => {
               const midX = (tl.x1 + tl.x2) / 2;
               const midY = (tl.y1 + tl.y2) / 2;
+              const lineColor  = tl.isFleet ? "#a78bfa" : "#818cf8";
+              const labelColor = tl.isFleet ? "#c4b5fd" : "#a5b4fc";
+
+              // Interpolated ship position along the route
+              let shipX: number | null = null;
+              let shipY: number | null = null;
+              if (tl.departAt && tl.arriveAt) {
+                const now = Date.now();
+                const depart = new Date(tl.departAt).getTime();
+                const arrive = new Date(tl.arriveAt).getTime();
+                const total = arrive - depart;
+                if (total > 0) {
+                  const t = Math.max(0, Math.min(1, (now - depart) / total));
+                  shipX = tl.x1 + (tl.x2 - tl.x1) * t;
+                  shipY = tl.y1 + (tl.y2 - tl.y1) * t;
+                }
+              }
+
+              // ETA string for midpoint label
+              const etaStr = tl.arriveAt
+                ? (() => {
+                    const msLeft = new Date(tl.arriveAt).getTime() - Date.now();
+                    return msLeft > 0 ? ` · ${formatEta(Math.max(0, msLeft / 3600000))}` : " · arriving";
+                  })()
+                : "";
+
+              // Dim this line if a different system is selected and this line doesn't touch it
+              const hasSelection = selectedId !== null;
+              const isRelated = !hasSelection || tl.fromSystemId === selectedId || tl.toSystemId === selectedId;
+              const lineOpacity = isRelated ? 1 : 0.25;
+
               return (
-                <g key={tl.key} pointerEvents="none">
-                  {/* Animated dashed travel line */}
+                <g key={tl.key} pointerEvents="none" opacity={lineOpacity}>
+                  {/* Soft glow underlay — gives the line visual weight on dark bg */}
                   <line
-                    x1={tl.x1}
-                    y1={tl.y1}
-                    x2={tl.x2}
-                    y2={tl.y2}
-                    stroke={tl.isFleet ? "#a78bfa" : "#6366f1"}
-                    strokeWidth={1.5 / scale}
-                    strokeDasharray={`${8 / scale} ${4 / scale}`}
-                    opacity={0.65}
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={10 / scale}
+                    opacity={0.07}
                   />
-                  {/* Arrowhead at destination */}
+                  {/* Main dashed line — brighter and slightly thicker than before */}
+                  <line
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={2 / scale}
+                    strokeDasharray={`${8 / scale} ${5 / scale}`}
+                    opacity={0.80}
+                  />
+                  {/* Origin dot — marks departure point */}
                   <circle
-                    cx={tl.x2}
-                    cy={tl.y2}
+                    cx={tl.x1} cy={tl.y1}
                     r={3 / scale}
-                    fill={tl.isFleet ? "#a78bfa" : "#6366f1"}
-                    opacity={0.8}
+                    fill={lineColor}
+                    opacity={0.55}
                   />
-                  {/* Ship name + ETA label at midpoint (visible when zoomed in) */}
-                  {scale >= 1.5 && (
+                  {/* Destination: outer ring + solid center */}
+                  <circle
+                    cx={tl.x2} cy={tl.y2}
+                    r={6 / scale}
+                    fill="none"
+                    stroke={lineColor}
+                    strokeWidth={1.5 / scale}
+                    opacity={0.75}
+                  />
+                  <circle
+                    cx={tl.x2} cy={tl.y2}
+                    r={2.5 / scale}
+                    fill={lineColor}
+                    opacity={0.95}
+                  />
+                  {/* Ship marker — actual interpolated position along route */}
+                  {shipX !== null && shipY !== null && (
+                    <circle
+                      cx={shipX} cy={shipY}
+                      r={4.5 / scale}
+                      fill={labelColor}
+                      stroke="#06060a"
+                      strokeWidth={1.5 / scale}
+                      filter="url(#glow)"
+                    />
+                  )}
+                  {/* Label: ship name + ETA — visible at moderate zoom */}
+                  {scale >= 0.8 && (
                     <text
                       x={midX}
-                      y={midY - 5 / scale}
-                      fill={tl.isFleet ? "#c4b5fd" : "#a5b4fc"}
-                      fontSize={9 / scale}
+                      y={midY - 8 / scale}
+                      fill={labelColor}
+                      fontSize={9 / scale < 7 ? 7 : 9 / scale > 11 ? 11 : 9 / scale}
                       textAnchor="middle"
-                      opacity={0.8}
+                      opacity={0.90}
                     >
-                      {tl.label}
-                      {tl.arriveAt ? (() => {
-                        const msLeft = new Date(tl.arriveAt).getTime() - Date.now();
-                        return msLeft > 0 ? ` · ${formatEta(Math.max(0, msLeft / 3600000))}` : " · arriving";
-                      })() : ""}
+                      {tl.label}{etaStr}
                     </text>
                   )}
                 </g>
@@ -876,16 +938,29 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* In-transit target marker */}
+                  {/* Transit origin marker — ship departed from here */}
+                  {sys.isTransitOrigin && !sys.isCurrentLocation && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 7}
+                      fill="none"
+                      stroke="#6366f1"
+                      strokeWidth={1 / scale}
+                      opacity={0.35}
+                    />
+                  )}
+                  {/* In-transit destination marker — ship is heading here */}
                   {sys.isInTransitTarget && (
                     <circle
                       cx={sys.svgX}
                       cy={sys.svgY}
-                      r={r + 4}
+                      r={r + 5}
                       fill="none"
-                      stroke="#6366f1"
-                      strokeWidth={1 / scale}
-                      strokeDasharray={`${3 / scale} ${3 / scale}`}
+                      stroke="#818cf8"
+                      strokeWidth={1.5 / scale}
+                      strokeDasharray={`${4 / scale} ${3 / scale}`}
+                      opacity={0.80}
                     />
                   )}
 

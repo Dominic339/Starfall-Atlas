@@ -140,10 +140,10 @@ export default async function GalaxyMapPage() {
       .eq("player_id", player.id)
       .neq("status", "disbanded"),
 
-    // Active travel jobs (in-transit: need from+to for travel lines + arrive_at for ETA)
+    // Active travel jobs (in-transit: need from+to for travel lines + arrive_at/depart_at for ETA + position)
     admin
       .from("travel_jobs")
-      .select("id, ship_id, fleet_id, from_system_id, to_system_id, arrive_at")
+      .select("id, ship_id, fleet_id, from_system_id, to_system_id, arrive_at, depart_at")
       .eq("player_id", player.id)
       .eq("status", "pending"),
 
@@ -199,7 +199,7 @@ export default async function GalaxyMapPage() {
   type ColonyRow = { system_id: string };
   type DiscoveryRow = { system_id: string };
   type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
-  type TravelRow = { id: string; ship_id: string; fleet_id: string | null; from_system_id: string; to_system_id: string; arrive_at: string };
+  type TravelRow = { id: string; ship_id: string; fleet_id: string | null; from_system_id: string; to_system_id: string; arrive_at: string; depart_at: string };
   type StewardRow = { system_id: string; steward_id: string };
   type AsteroidRow = {
     id: string; system_id: string;
@@ -286,10 +286,11 @@ export default async function GalaxyMapPage() {
   for (const c of colonies) {
     colonySystemIds.set(c.system_id, (colonySystemIds.get(c.system_id) ?? 0) + 1);
   }
-  const shipSystemIds    = new Set(ships.filter((s) => s.current_system_id).map((s) => s.current_system_id!));
-  const fleetSystemIds   = new Set(fleets.filter((f) => f.current_system_id).map((f) => f.current_system_id!));
-  const inTransitTargets = new Set(travelJobs.map((t) => t.to_system_id));
-  const stewardMap       = new Map(stewardships.map((s) => [s.system_id, s.steward_id]));
+  const shipSystemIds       = new Set(ships.filter((s) => s.current_system_id).map((s) => s.current_system_id!));
+  const fleetSystemIds      = new Set(fleets.filter((f) => f.current_system_id).map((f) => f.current_system_id!));
+  const inTransitTargets    = new Set(travelJobs.map((t) => t.to_system_id));
+  const inTransitOrigins    = new Set(travelJobs.map((t) => t.from_system_id));
+  const stewardMap          = new Map(stewardships.map((s) => [s.system_id, s.steward_id]));
 
   // Set of fleet IDs that are currently harvesting
   const harvestingFleetIds = new Set(myHarvests.map((h) => h.fleet_id));
@@ -342,6 +343,7 @@ export default async function GalaxyMapPage() {
       isCurrentLocation: entry.id === currentShipSystemId,
       isStationLocation: entry.id === stationSystemId,
       isInTransitTarget: inTransitTargets.has(entry.id),
+      isTransitOrigin: inTransitOrigins.has(entry.id),
     };
   });
 
@@ -388,9 +390,12 @@ export default async function GalaxyMapPage() {
         key: `fleet-${tj.fleet_id}`,
         x1: fromPos.svgX, y1: fromPos.svgY,
         x2: toPos.svgX,   y2: toPos.svgY,
+        fromSystemId: tj.from_system_id,
+        toSystemId: tj.to_system_id,
         label: fleet?.name ?? "Fleet",
         isFleet: true,
         arriveAt: tj.arrive_at,
+        departAt: tj.depart_at,
       });
     } else {
       // Ship job: one line per ship
@@ -399,9 +404,12 @@ export default async function GalaxyMapPage() {
         key: `ship-${tj.id}`,
         x1: fromPos.svgX, y1: fromPos.svgY,
         x2: toPos.svgX,   y2: toPos.svgY,
+        fromSystemId: tj.from_system_id,
+        toSystemId: tj.to_system_id,
         label: ship?.name ?? "Ship",
         isFleet: false,
         arriveAt: tj.arrive_at,
+        departAt: tj.depart_at,
       });
     }
   }
