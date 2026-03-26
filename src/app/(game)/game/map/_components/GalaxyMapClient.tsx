@@ -314,6 +314,19 @@ export function GalaxyMapClient({
   const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
   const [shipDispatchError, setShipDispatchError] = useState<string | null>(null);
 
+  // ── Drag-to-dispatch state ─────────────────────────────────────────────────
+  interface DragInfo {
+    ship: GalaxyShip;
+    clientX: number;
+    clientY: number;
+    targetId: string | null;
+  }
+  const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
+  const dragInfoRef = useRef<DragInfo | null>(null);
+  dragInfoRef.current = dragInfo; // latest-value pattern: always fresh in callbacks
+  const [dragError, setDragError] = useState<string | null>(null);
+  const didDragRef = useRef(false); // suppresses click events immediately after a drag ends
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
@@ -377,6 +390,22 @@ export function GalaxyMapClient({
   }
   const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
 
+  // latest-value refs (avoid stale closures in useCallback handlers)
+  const latestTransform = useRef(transform);
+  latestTransform.current = transform;
+  const systemsRef = useRef(systems);
+  systemsRef.current = systems;
+
+  // Ships grouped by system for drag marker positioning
+  const shipsBySystem = new Map<string, GalaxyShip[]>();
+  for (const ship of ships) {
+    if (ship.systemId) {
+      const list = shipsBySystem.get(ship.systemId) ?? [];
+      list.push(ship);
+      shipsBySystem.set(ship.systemId, list);
+    }
+  }
+
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
   const clientToSvg = useCallback(
@@ -409,6 +438,37 @@ export function GalaxyMapClient({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
+      // ── Drag: ship marker being dragged ──────────────────────────────────
+      if (dragInfoRef.current !== null) {
+        const current = dragInfoRef.current;
+        const svg = svgRef.current;
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        // Client → viewbox → base SVG coords
+        const vx = ((e.clientX - rect.left) / rect.width) * viewboxW;
+        const vy = ((e.clientY - rect.top) / rect.height) * viewboxH;
+        const { tx, ty, scale } = latestTransform.current;
+        const bx = (vx - tx) / scale;
+        const by = (vy - ty) / scale;
+        // Find nearest system within hit radius (base SVG units)
+        const HIT = 22;
+        let nearest: string | null = null;
+        let nearestDist = HIT;
+        for (const sys of systemsRef.current) {
+          const d = Math.sqrt((sys.svgX - bx) ** 2 + (sys.svgY - by) ** 2);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = sys.id;
+          }
+        }
+        // Don't target the ship's own system
+        if (nearest === current.ship.systemId) nearest = null;
+        const updated: DragInfo = { ...current, clientX: e.clientX, clientY: e.clientY, targetId: nearest };
+        setDragInfo(updated);
+        dragInfoRef.current = updated;
+        return;
+      }
+      // ── Pan ───────────────────────────────────────────────────────────────
       if (!isPanning.current) return;
       const dx = e.clientX - panStart.current.x;
       const dy = e.clientY - panStart.current.y;
@@ -427,9 +487,51 @@ export function GalaxyMapClient({
     [viewboxW, viewboxH],
   );
 
-  const endPan = useCallback(() => {
+  function handleMouseLeave() {
     isPanning.current = false;
-  }, []);
+    if (dragInfoRef.current) {
+      setDragInfo(null);
+      dragInfoRef.current = null;
+    }
+  }
+
+  async function handleMouseUp() {
+    // ── Drag completion ───────────────────────────────────────────────────
+    if (dragInfoRef.current !== null) {
+      const info = dragInfoRef.current;
+      didDragRef.current = true; // suppress the upcoming click event
+      setDragInfo(null);
+      dragInfoRef.current = null;
+      isPanning.current = false;
+      if (info.targetId && info.targetId !== info.ship.systemId) {
+        setShipDispatchLoading(info.ship.id);
+        setDragError(null);
+        try {
+          const res = await fetch("/api/game/travel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              destinationSystemId: info.targetId,
+              shipId: info.ship.id,
+            }),
+          });
+          const json = await res.json();
+          if (json.ok) {
+            router.refresh();
+          } else {
+            setDragError(json.error?.message ?? "Dispatch failed.");
+          }
+        } catch {
+          setDragError("Network error.");
+        } finally {
+          setShipDispatchLoading(null);
+        }
+      }
+      return;
+    }
+    // ── Pan end ───────────────────────────────────────────────────────────
+    isPanning.current = false;
+  }
 
   // ── Zoom handler ──────────────────────────────────────────────────────────
   const handleWheel = useCallback(
@@ -458,6 +560,13 @@ export function GalaxyMapClient({
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
 
+  // Auto-clear drag dispatch error after 3 s
+  useEffect(() => {
+    if (!dragError) return;
+    const t = setTimeout(() => setDragError(null), 3000);
+    return () => clearTimeout(t);
+  }, [dragError]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -478,7 +587,17 @@ export function GalaxyMapClient({
   }
 
   // ── Click: select / deselect ──────────────────────────────────────────────
+  function handleShipMarkerMouseDown(e: React.MouseEvent, ship: GalaxyShip) {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const info: DragInfo = { ship, clientX: e.clientX, clientY: e.clientY, targetId: null };
+    setDragInfo(info);
+    dragInfoRef.current = info;
+  }
+
   function handleStarClick(e: React.MouseEvent, systemId: string) {
+    // Suppress click after a drag ended over this star
+    if (didDragRef.current) { didDragRef.current = false; return; }
     e.stopPropagation();
     setSelectedId((prev) => (prev === systemId ? null : systemId));
     setSelectedAsteroidId(null);
@@ -496,6 +615,8 @@ export function GalaxyMapClient({
   }
 
   function handleMapClick() {
+    // Suppress deselect after a drag ends on the map background
+    if (didDragRef.current) { didDragRef.current = false; return; }
     setSelectedId(null);
     setSelectedAsteroidId(null);
     setTravelError(null);
@@ -636,11 +757,11 @@ export function GalaxyMapClient({
           ref={svgRef}
           viewBox={`0 0 ${viewboxW} ${viewboxH}`}
           className="h-full w-full"
-          style={{ cursor: isPanning.current ? "grabbing" : "grab" }}
+          style={{ cursor: dragInfo ? (dragInfo.targetId ? "copy" : "grabbing") : isPanning.current ? "grabbing" : "grab" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
-          onMouseUp={endPan}
-          onMouseLeave={endPan}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
           onClick={handleMapClick}
         >
           {/* ── Defs: glow filter, markers ──────────────────────────────── */}
@@ -892,6 +1013,20 @@ export function GalaxyMapClient({
                     />
                   )}
 
+                  {/* Drag-target highlight ring — shown when dragging a ship toward this system */}
+                  {dragInfo?.targetId === sys.id && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 10}
+                      fill="none"
+                      stroke="#a5b4fc"
+                      strokeWidth={2 / scale}
+                      opacity={0.9}
+                      filter="url(#glow)"
+                    />
+                  )}
+
                   {/* Star glow (discovered/important only) */}
                   {(sys.isDiscovered || sys.colonyCount > 0) && (
                     <circle
@@ -1083,6 +1218,47 @@ export function GalaxyMapClient({
               );
             })}
 
+            {/* ── Docked ship markers (draggable) ─────────────────────────── */}
+            {ships.filter((s) => s.systemId !== null).map((ship) => {
+              const sys = systemMap.get(ship.systemId!);
+              if (!sys) return null;
+              const shipsAtSys = shipsBySystem.get(ship.systemId!) ?? [];
+              const idx = shipsAtSys.indexOf(ship);
+              const count = shipsAtSys.length;
+              const starR = nodeRadius(sys);
+              // Spread horizontally above the star
+              const mx = sys.svgX + (idx - (count - 1) / 2) * 11;
+              const my = sys.svgY - starR - 14;
+              const isDraggingThis = dragInfo?.ship.id === ship.id;
+              return (
+                <g
+                  key={`shipmarker-${ship.id}`}
+                  style={{ cursor: "grab" }}
+                  onMouseDown={(e) => handleShipMarkerMouseDown(e, ship)}
+                >
+                  {/* Outer ring */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={6 / scale}
+                    fill="none"
+                    stroke="#6366f1"
+                    strokeWidth={1.5 / scale}
+                    opacity={isDraggingThis ? 0.25 : 0.65}
+                  />
+                  {/* Inner dot */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={3.5 / scale}
+                    fill={isDraggingThis ? "#a5b4fc" : "#818cf8"}
+                    stroke="#06060a"
+                    strokeWidth={0.8 / scale}
+                    filter="url(#glow)"
+                    opacity={isDraggingThis ? 0.4 : 1}
+                  />
+                </g>
+              );
+            })}
+
             {/* ── Alliance beacons ─────────────────────────────────────────── */}
             {systems.map((sys) => {
               const sysBeacons = beaconsBySystem.get(sys.id);
@@ -1163,6 +1339,30 @@ export function GalaxyMapClient({
             })}
           </g>
         </svg>
+
+        {/* ── Drag ghost overlay ───────────────────────────────────────── */}
+        {dragInfo && (
+          <div
+            className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-indigo-700 bg-indigo-950/95 px-2 py-1 text-xs text-indigo-200 shadow-lg"
+            style={{ left: dragInfo.clientX + 14, top: dragInfo.clientY - 14 }}
+          >
+            <span>{dragInfo.ship.name}</span>
+            {dragInfo.targetId ? (
+              <span className="text-indigo-400">
+                → {systemMap.get(dragInfo.targetId)?.name ?? dragInfo.targetId}
+              </span>
+            ) : (
+              <span className="text-indigo-700">drag to system</span>
+            )}
+          </div>
+        )}
+
+        {/* ── Drag dispatch error ───────────────────────────────────────── */}
+        {dragError && (
+          <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-red-800 bg-red-950/90 px-3 py-1.5 text-xs text-red-300 shadow-lg">
+            {dragError}
+          </div>
+        )}
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
