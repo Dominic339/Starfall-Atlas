@@ -113,10 +113,10 @@ export default async function GalaxyMapPage() {
     beaconsRes,
     disputesRes,
   ] = await Promise.all([
-    // Ships — need current_system_id, destination_system_id for travel state + dispatch UI
+    // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
       .from("ships")
-      .select("id, name, current_system_id, destination_system_id, speed_ly_per_hr, cargo_cap")
+      .select("id, name, current_system_id, destination_system_id, dispatch_mode, auto_state, speed_ly_per_hr, cargo_cap")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
 
@@ -195,7 +195,7 @@ export default async function GalaxyMapPage() {
   await resolveOverdueDisputes(admin);
 
   // ── Parse results ─────────────────────────────────────────────────────────
-  type ShipRow = { id: string; name: string; current_system_id: string | null; destination_system_id: string | null; speed_ly_per_hr: number; cargo_cap: number };
+  type ShipRow = { id: string; name: string; current_system_id: string | null; destination_system_id: string | null; dispatch_mode: string; auto_state: string | null; speed_ly_per_hr: number; cargo_cap: number };
   type ColonyRow = { system_id: string };
   type DiscoveryRow = { system_id: string };
   type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
@@ -359,6 +359,8 @@ export default async function GalaxyMapPage() {
       systemId: s.current_system_id,
       destinationSystemId: s.destination_system_id ?? null,
       arriveAt: job?.arrive_at ?? null,
+      dispatchMode: s.dispatch_mode,
+      autoState: s.auto_state,
       speedLyPerHr: Number(s.speed_ly_per_hr),
       cargoCap: s.cargo_cap,
     };

@@ -66,6 +66,10 @@ export interface GalaxyShip {
   destinationSystemId: string | null;
   /** ISO timestamp of expected arrival; null when not in transit. */
   arriveAt: string | null;
+  /** "manual" | "auto_collect_nearest" | "auto_collect_highest" */
+  dispatchMode: string;
+  /** "idle" | "traveling_to_colony" | "traveling_to_station" | null */
+  autoState: string | null;
   speedLyPerHr: number;
   cargoCap: number;
 }
@@ -1580,100 +1584,144 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* ── Per-ship dispatch ─────────────────────────────────────── */}
-              {ships.length > 0 && (
-                <div className="py-2">
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-600">
-                    Ships
-                  </p>
-                  {shipDispatchError && (
-                    <p className="mb-1 text-xs text-red-400">{shipDispatchError}</p>
-                  )}
-                  <div className="space-y-1.5">
-                    {ships.map((ship) => {
-                      const isHere = ship.systemId === selectedSystem.id;
-                      const isInTransit = ship.systemId === null;
-                      const shipCurrentSystem =
-                        !isHere && !isInTransit
-                          ? (systems.find((s) => s.id === ship.systemId) ?? null)
-                          : null;
-                      const distLy = shipCurrentSystem
-                        ? dist3D(shipCurrentSystem, selectedSystem)
-                        : null;
-                      const inRange = distLy !== null && distLy <= baseRangeLy + 0.01;
-                      const etaHr =
-                        inRange && distLy !== null
-                          ? distLy / ship.speedLyPerHr
-                          : null;
-                      return (
-                        <div
-                          key={ship.id}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs text-zinc-300">
-                              {ship.name}
-                            </p>
-                            {!isHere && !isInTransit && distLy !== null && (
-                              <p className="text-xs text-zinc-700">
-                                {formatDist(distLy)}
-                                {etaHr !== null
-                                  ? ` · ${formatEta(etaHr)}`
-                                  : ""}
-                              </p>
-                            )}
+              {/* ── Ship dispatch ─────────────────────────────────────── */}
+              {ships.length > 0 && (() => {
+                // Categorise ships relative to the selected system
+                const shipsHere = ships.filter((s) => s.systemId === selectedSystem.id);
+                const shipsInTransit = ships.filter((s) => s.systemId === null);
+
+                // Ships docked elsewhere — compute range + ETA
+                type Candidate = { ship: GalaxyShip; sys: GalaxySystem; distLy: number; etaHr: number; inRange: boolean };
+                const candidates: Candidate[] = ships
+                  .filter((s) => s.systemId !== null && s.systemId !== selectedSystem.id)
+                  .flatMap((ship) => {
+                    const sys = systemMap.get(ship.systemId!);
+                    if (!sys) return [];
+                    const distLy = dist3D(sys, selectedSystem);
+                    const inRange = distLy <= baseRangeLy + 0.01;
+                    return [{ ship, sys, distLy, etaHr: distLy / ship.speedLyPerHr, inRange }];
+                  });
+                const inRange = candidates.filter((c) => c.inRange);
+                const outOfRange = candidates.filter((c) => !c.inRange);
+
+                return (
+                  <div className="py-2">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                      Ships
+                    </p>
+                    {shipDispatchError && (
+                      <p className="mb-2 text-xs text-red-400">{shipDispatchError}</p>
+                    )}
+
+                    {/* Ships already docked here */}
+                    {shipsHere.length > 0 && (
+                      <div className="mb-3 space-y-1">
+                        <p className="text-xs text-zinc-700">Docked here</p>
+                        {shipsHere.map((ship) => (
+                          <div key={ship.id} className="flex items-center justify-between gap-2">
+                            <p className="truncate text-xs text-zinc-300">{ship.name}</p>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {ship.dispatchMode !== "manual" && (
+                                <span className="text-xs text-teal-600">Auto</span>
+                              )}
+                              <span className="text-xs text-emerald-500">Here</span>
+                            </div>
                           </div>
-                          <div className="shrink-0 text-right">
-                            {isHere ? (
-                              <span className="text-xs text-emerald-500">
-                                Docked
-                              </span>
-                            ) : isInTransit ? (
-                              <div>
-                                {ship.destinationSystemId && (
-                                  <p className="text-xs text-indigo-400">
-                                    → {systemMap.get(ship.destinationSystemId)?.name ?? ship.destinationSystemId}
-                                  </p>
-                                )}
-                                {ship.arriveAt && (() => {
-                                  const msLeft = new Date(ship.arriveAt).getTime() - Date.now();
-                                  return (
-                                    <p className="text-xs text-zinc-600">
-                                      {msLeft > 0 ? `ETA ${formatEta(Math.max(0, msLeft / 3600000))}` : "Arriving"}
-                                    </p>
-                                  );
-                                })()}
-                                {!ship.destinationSystemId && !ship.arriveAt && (
-                                  <span className="text-xs text-zinc-600">In transit</span>
-                                )}
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Eligible ships to dispatch here */}
+                    {inRange.length > 0 && (
+                      <div className="mb-3">
+                        <p className="mb-1.5 text-xs text-zinc-700">
+                          Send here
+                          <span className="ml-1 text-zinc-800">({inRange.length})</span>
+                        </p>
+                        <div className="space-y-1.5">
+                          {inRange.map(({ ship, sys, etaHr }) => (
+                            <div
+                              key={ship.id}
+                              className="flex items-center justify-between gap-2 rounded border border-zinc-800 bg-zinc-900/50 px-2.5 py-2"
+                            >
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-xs font-medium text-zinc-200">
+                                  {ship.name}
+                                </p>
+                                <p className="text-xs text-zinc-600">
+                                  {sys.name}
+                                  {" · "}{formatEta(etaHr)}
+                                  {ship.dispatchMode !== "manual" && (
+                                    <span className="ml-1 text-amber-600/80">· Auto</span>
+                                  )}
+                                </p>
                               </div>
-                            ) : (
                               <button
                                 onClick={() => handleDispatchShip(ship.id)}
-                                disabled={
-                                  !inRange ||
-                                  shipDispatchLoading === ship.id
-                                }
-                                className={`rounded border px-2 py-0.5 text-xs transition-colors ${
-                                  inRange
-                                    ? "border-indigo-700 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50"
-                                    : "cursor-not-allowed border-zinc-800 text-zinc-700"
-                                }`}
+                                disabled={shipDispatchLoading === ship.id}
+                                className="shrink-0 rounded border border-indigo-700 bg-indigo-950/50 px-2.5 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 disabled:opacity-50 transition-colors"
                               >
-                                {shipDispatchLoading === ship.id
-                                  ? "…"
-                                  : inRange
-                                    ? "Dispatch"
-                                    : "Out of range"}
+                                {shipDispatchLoading === ship.id ? "…" : "Send"}
                               </button>
-                            )}
-                          </div>
+                            </div>
+                          ))}
                         </div>
-                      );
-                    })}
+                      </div>
+                    )}
+
+                    {/* Out-of-range ships (dimmed, no button) */}
+                    {outOfRange.length > 0 && (
+                      <div className="mb-3 space-y-1">
+                        <p className="text-xs text-zinc-800">Out of range</p>
+                        {outOfRange.map(({ ship, sys }) => (
+                          <div key={ship.id} className="flex items-center justify-between gap-2">
+                            <p className="truncate text-xs text-zinc-700">{ship.name}</p>
+                            <p className="text-xs text-zinc-800 shrink-0">{sys.name}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* In-transit ships */}
+                    {shipsInTransit.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-zinc-700">In transit</p>
+                        {shipsInTransit.map((ship) => {
+                          const destName = ship.destinationSystemId
+                            ? (systemMap.get(ship.destinationSystemId)?.name ?? ship.destinationSystemId)
+                            : null;
+                          const msLeft = ship.arriveAt
+                            ? new Date(ship.arriveAt).getTime() - Date.now()
+                            : null;
+                          return (
+                            <div key={ship.id} className="flex items-center justify-between gap-2">
+                              <p className="truncate text-xs text-zinc-600">{ship.name}</p>
+                              <div className="text-right shrink-0">
+                                {destName && (
+                                  <p className="text-xs text-indigo-400/70">→ {destName}</p>
+                                )}
+                                {msLeft !== null && (
+                                  <p className="text-xs text-zinc-700">
+                                    {msLeft > 0 ? formatEta(Math.max(0, msLeft / 3600000)) : "Arriving"}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Empty state — all ships accounted for but none dispatchable */}
+                    {inRange.length === 0 && shipsHere.length === 0 && shipsInTransit.length === 0 && outOfRange.length === 0 && (
+                      <p className="text-xs text-zinc-700">No ships available.</p>
+                    )}
+                    {inRange.length === 0 && shipsHere.length + shipsInTransit.length + outOfRange.length === ships.length && (
+                      <p className="text-xs text-zinc-800 text-center mt-1">No ships in range to dispatch here.</p>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Action buttons */}
