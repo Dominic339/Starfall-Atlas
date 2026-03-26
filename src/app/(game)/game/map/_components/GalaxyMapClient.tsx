@@ -327,6 +327,18 @@ export function GalaxyMapClient({
   const [dragError, setDragError] = useState<string | null>(null);
   const didDragRef = useRef(false); // suppresses click events immediately after a drag ends
 
+  // ── Station drag-to-relocate state ────────────────────────────────────────
+  interface StationDragInfo {
+    clientX: number;
+    clientY: number;
+    targetId: string | null;
+  }
+  const [stationDrag, setStationDrag] = useState<StationDragInfo | null>(null);
+  const stationDragRef = useRef<StationDragInfo | null>(null);
+  stationDragRef.current = stationDrag;
+  const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
+  const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
@@ -468,6 +480,34 @@ export function GalaxyMapClient({
         dragInfoRef.current = updated;
         return;
       }
+      // ── Station drag: relocate station ────────────────────────────────────
+      if (stationDragRef.current !== null) {
+        const current = stationDragRef.current;
+        const svg = svgRef.current;
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const vx = ((e.clientX - rect.left) / rect.width) * viewboxW;
+        const vy = ((e.clientY - rect.top) / rect.height) * viewboxH;
+        const { tx, ty, scale } = latestTransform.current;
+        const bx = (vx - tx) / scale;
+        const by = (vy - ty) / scale;
+        const HIT = 22;
+        let nearest: string | null = null;
+        let nearestDist = HIT;
+        for (const sys of systemsRef.current) {
+          const d = Math.sqrt((sys.svgX - bx) ** 2 + (sys.svgY - by) ** 2);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = sys.id;
+          }
+        }
+        // Don't target the current station system
+        if (stationSystem && nearest === stationSystem.id) nearest = null;
+        const updated: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: nearest };
+        setStationDrag(updated);
+        stationDragRef.current = updated;
+        return;
+      }
       // ── Pan ───────────────────────────────────────────────────────────────
       if (!isPanning.current) return;
       const dx = e.clientX - panStart.current.x;
@@ -492,6 +532,10 @@ export function GalaxyMapClient({
     if (dragInfoRef.current) {
       setDragInfo(null);
       dragInfoRef.current = null;
+    }
+    if (stationDragRef.current) {
+      setStationDrag(null);
+      stationDragRef.current = null;
     }
   }
 
@@ -525,6 +569,36 @@ export function GalaxyMapClient({
           setDragError("Network error.");
         } finally {
           setShipDispatchLoading(null);
+        }
+      }
+      return;
+    }
+    // ── Station drag completion ───────────────────────────────────────────
+    if (stationDragRef.current !== null) {
+      const info = stationDragRef.current;
+      didDragRef.current = true;
+      setStationDrag(null);
+      stationDragRef.current = null;
+      isPanning.current = false;
+      if (info.targetId) {
+        setStationRelocateLoading(true);
+        setStationRelocateError(null);
+        try {
+          const res = await fetch("/api/game/station/relocate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destinationSystemId: info.targetId }),
+          });
+          const json = await res.json();
+          if (json.ok) {
+            router.refresh();
+          } else {
+            setStationRelocateError(json.error?.message ?? "Relocation failed.");
+          }
+        } catch {
+          setStationRelocateError("Network error.");
+        } finally {
+          setStationRelocateLoading(false);
         }
       }
       return;
@@ -567,6 +641,13 @@ export function GalaxyMapClient({
     return () => clearTimeout(t);
   }, [dragError]);
 
+  // Auto-clear station relocation error after 3 s
+  useEffect(() => {
+    if (!stationRelocateError) return;
+    const t = setTimeout(() => setStationRelocateError(null), 3000);
+    return () => clearTimeout(t);
+  }, [stationRelocateError]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -593,6 +674,14 @@ export function GalaxyMapClient({
     const info: DragInfo = { ship, clientX: e.clientX, clientY: e.clientY, targetId: null };
     setDragInfo(info);
     dragInfoRef.current = info;
+  }
+
+  function handleStationMarkerMouseDown(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const info: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: null };
+    setStationDrag(info);
+    stationDragRef.current = info;
   }
 
   function handleStarClick(e: React.MouseEvent, systemId: string) {
@@ -757,7 +846,7 @@ export function GalaxyMapClient({
           ref={svgRef}
           viewBox={`0 0 ${viewboxW} ${viewboxH}`}
           className="h-full w-full"
-          style={{ cursor: dragInfo ? (dragInfo.targetId ? "copy" : "grabbing") : isPanning.current ? "grabbing" : "grab" }}
+          style={{ cursor: (dragInfo || stationDrag) ? ((dragInfo?.targetId ?? stationDrag?.targetId) ? "copy" : "grabbing") : isPanning.current ? "grabbing" : "grab" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
@@ -1013,14 +1102,14 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Drag-target highlight ring — shown when dragging a ship toward this system */}
-                  {dragInfo?.targetId === sys.id && (
+                  {/* Drag-target highlight ring — ship drag or station relocation */}
+                  {(dragInfo?.targetId === sys.id || stationDrag?.targetId === sys.id) && (
                     <circle
                       cx={sys.svgX}
                       cy={sys.svgY}
                       r={r + 10}
                       fill="none"
-                      stroke="#a5b4fc"
+                      stroke={stationDrag?.targetId === sys.id ? "#fbbf24" : "#a5b4fc"}
                       strokeWidth={2 / scale}
                       opacity={0.9}
                       filter="url(#glow)"
@@ -1259,6 +1348,57 @@ export function GalaxyMapClient({
               );
             })}
 
+            {/* ── Station marker (draggable to relocate) ──────────────────── */}
+            {stationSystem && (() => {
+              const sys = stationSystem;
+              const starR = nodeRadius(sys);
+              // Position station marker below-right of the star (avoids ship marker area)
+              const mx = sys.svgX + starR + 10;
+              const my = sys.svgY + starR + 10;
+              const isDragging = stationDrag !== null;
+              return (
+                <g
+                  key="station-marker"
+                  style={{ cursor: stationRelocateLoading ? "wait" : "grab" }}
+                  onMouseDown={handleStationMarkerMouseDown}
+                >
+                  {/* Outer amber ring */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={7 / scale}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={1.5 / scale}
+                    opacity={isDragging ? 0.25 : 0.80}
+                  />
+                  {/* Inner amber dot */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={4 / scale}
+                    fill={isDragging ? "#fcd34d" : "#f59e0b"}
+                    stroke="#06060a"
+                    strokeWidth={0.8 / scale}
+                    filter="url(#glow)"
+                    opacity={isDragging ? 0.35 : 1}
+                  />
+                  {/* "S" label at higher zoom */}
+                  {scale >= 1.5 && (
+                    <text
+                      x={mx}
+                      y={my + 3.5 / scale}
+                      textAnchor="middle"
+                      fontSize={5 / scale < 4 ? 4 : 5 / scale > 7 ? 7 : 5 / scale}
+                      fill="#06060a"
+                      fontWeight="bold"
+                      className="select-none pointer-events-none"
+                    >
+                      S
+                    </text>
+                  )}
+                </g>
+              );
+            })()}
+
             {/* ── Alliance beacons ─────────────────────────────────────────── */}
             {systems.map((sys) => {
               const sysBeacons = beaconsBySystem.get(sys.id);
@@ -1357,10 +1497,27 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── Station drag ghost overlay ────────────────────────────────── */}
+        {stationDrag && (
+          <div
+            className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-amber-700 bg-amber-950/95 px-2 py-1 text-xs text-amber-200 shadow-lg"
+            style={{ left: stationDrag.clientX + 14, top: stationDrag.clientY - 14 }}
+          >
+            <span>Station</span>
+            {stationDrag.targetId ? (
+              <span className="text-amber-400">
+                → {systemMap.get(stationDrag.targetId)?.name ?? stationDrag.targetId}
+              </span>
+            ) : (
+              <span className="text-amber-800">drag to system</span>
+            )}
+          </div>
+        )}
+
         {/* ── Drag dispatch error ───────────────────────────────────────── */}
-        {dragError && (
+        {(dragError || stationRelocateError) && (
           <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-red-800 bg-red-950/90 px-3 py-1.5 text-xs text-red-300 shadow-lg">
-            {dragError}
+            {dragError ?? stationRelocateError}
           </div>
         )}
 
@@ -1406,6 +1563,10 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-amber-400" />
             Steward
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />
+            Station (drag to move)
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
