@@ -119,15 +119,19 @@ export default async function StationPage() {
   const dockedShipIds = dockedShips.map((s) => s.id);
   const activeColonyIds = colonies.map((c) => c.id);
 
-  // Build map: colonyId → names of auto ships targeting it
-  const assignedShipNamesByColonyId = new Map<string, string[]>();
+  // Build map: colonyId → names of ships PINNED to it (player-set intent via pinned_colony_id)
+  const pinnedShipNamesByColonyId = new Map<string, string[]>();
   for (const ship of ships) {
-    if (ship.auto_target_colony_id) {
-      const list = assignedShipNamesByColonyId.get(ship.auto_target_colony_id) ?? [];
+    if (ship.pinned_colony_id) {
+      const list = pinnedShipNamesByColonyId.get(ship.pinned_colony_id) ?? [];
       list.push(ship.name);
-      assignedShipNamesByColonyId.set(ship.auto_target_colony_id, list);
+      pinnedShipNamesByColonyId.set(ship.pinned_colony_id, list);
     }
   }
+
+  // Coverage stats — colonies with at least one pinned ship vs. without
+  const servedCount = colonies.filter((c) => pinnedShipNamesByColonyId.has(c.id)).length;
+  const unservedCount = colonies.length - servedCount;
 
   const [invRes, cargoRes, colonyInvRes, travelJobsRes] = await Promise.all([
     admin
@@ -314,6 +318,9 @@ export default async function StationPage() {
                 (s) => s.id !== ship.current_system_id,
               );
               const mode = (ship.dispatch_mode ?? "manual") as "manual" | "auto_collect_nearest" | "auto_collect_highest";
+              const dockedPinnedLabel = ship.pinned_colony_id
+                ? colonySystemNameById.get(ship.pinned_colony_id)
+                : undefined;
               return (
                 <div
                   key={ship.id}
@@ -322,7 +329,17 @@ export default async function StationPage() {
                   {/* Ship header */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-zinc-200">{ship.name}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-zinc-200">{ship.name}</p>
+                        {mode !== "manual" && dockedPinnedLabel && (
+                          <span className="rounded border border-indigo-900/50 bg-indigo-950/40 px-1.5 py-0.5 text-xs text-indigo-400">
+                            → {dockedPinnedLabel}
+                          </span>
+                        )}
+                        {mode !== "manual" && !dockedPinnedLabel && (
+                          <span className="text-xs text-zinc-700">unassigned</span>
+                        )}
+                      </div>
                       <p className="text-xs text-zinc-500">
                         {Number(ship.speed_ly_per_hr).toFixed(1)} ly/hr
                         {" · "}
@@ -425,6 +442,9 @@ export default async function StationPage() {
               const targetSystemName = ship.auto_target_colony_id
                 ? colonySystemNameById.get(ship.auto_target_colony_id)
                 : undefined;
+              const pinnedColonySystemName = ship.pinned_colony_id
+                ? colonySystemNameById.get(ship.pinned_colony_id)
+                : undefined;
               const isIdleAuto = isAuto && (autoState === "idle" || autoState === null);
               const isTraveling = ship.current_system_id === null;
               const destName = ship.destination_system_id
@@ -457,7 +477,17 @@ export default async function StationPage() {
                   {/* Ship header row */}
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <p className="text-sm font-semibold text-zinc-300">{ship.name}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="text-sm font-semibold text-zinc-300">{ship.name}</p>
+                        {pinnedColonySystemName && (
+                          <span className="rounded border border-indigo-900/50 bg-indigo-950/40 px-1.5 py-0.5 text-xs text-indigo-400">
+                            → {pinnedColonySystemName}
+                          </span>
+                        )}
+                        {isAuto && !pinnedColonySystemName && (
+                          <span className="text-xs text-zinc-700">unassigned</span>
+                        )}
+                      </div>
                       <p className="text-xs text-zinc-600">
                         {isTraveling ? (
                           <span className="text-indigo-400">{travelPurpose}</span>
@@ -511,38 +541,70 @@ export default async function StationPage() {
       {/* ── Colonies ────────────────────────────────────────────────────────── */}
       {colonies.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Colonies ({colonies.length})
-          </h2>
+          <div className="mb-3 flex items-baseline gap-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+              Colonies ({colonies.length})
+            </h2>
+            {colonies.length > 0 && (
+              <span className="text-xs text-zinc-700">
+                {servedCount > 0 && (
+                  <span className="text-indigo-500">{servedCount} served</span>
+                )}
+                {servedCount > 0 && unservedCount > 0 && (
+                  <span className="text-zinc-700"> · </span>
+                )}
+                {unservedCount > 0 && (
+                  <span className="text-amber-500">{unservedCount} unserved</span>
+                )}
+              </span>
+            )}
+          </div>
           <div className="space-y-2">
             {colonies.map((colony) => {
               const stockpile = colonyStockpileTotals.get(colony.id) ?? 0;
               const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
-              const assignedShips = assignedShipNamesByColonyId.get(colony.id) ?? [];
+              const pinnedShips = pinnedShipNamesByColonyId.get(colony.id) ?? [];
+              const isServed = pinnedShips.length > 0;
               return (
                 <div
                   key={colony.id}
-                  className="rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                  className={`rounded-lg border px-4 py-2.5 ${
+                    isServed
+                      ? "border-zinc-800 bg-zinc-900/70"
+                      : "border-amber-900/30 bg-zinc-900/70"
+                  }`}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div>
+                    <div className="min-w-0">
                       <p className="text-sm text-zinc-300">
                         {systemDisplayName(colony.system_id)}
                         <span className="ml-1.5 text-xs text-zinc-600">· Body {bodyIdx}</span>
                         <span className="ml-1.5 text-xs text-zinc-600">T{colony.population_tier}</span>
                       </p>
-                      <div className="flex items-center gap-3 mt-0.5 flex-wrap">
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        {/* Stockpile status */}
                         {stockpile > 0 ? (
-                          <p className="text-xs text-teal-400">
-                            {stockpile.toLocaleString()} units ready to haul
-                          </p>
+                          <span className="text-xs text-teal-400">
+                            {stockpile.toLocaleString()} u ready
+                          </span>
                         ) : (
-                          <p className="text-xs text-zinc-700">Stockpile empty</p>
+                          <span className="text-xs text-zinc-700">Empty stockpile</span>
                         )}
-                        {assignedShips.length > 0 && (
-                          <p className="text-xs text-indigo-400">
-                            {assignedShips.join(", ")} assigned
-                          </p>
+                        {/* Coverage indicator */}
+                        {isServed ? (
+                          <span className="flex items-center gap-1 flex-wrap">
+                            {pinnedShips.map((name) => (
+                              <span
+                                key={name}
+                                className="rounded border border-indigo-900/50 bg-indigo-950/40 px-1.5 py-0.5 text-xs text-indigo-400"
+                              >
+                                {name}
+                              </span>
+                            ))}
+                            <span className="text-xs text-indigo-600">assigned</span>
+                          </span>
+                        ) : (
+                          <span className="text-xs text-amber-600">No ship assigned</span>
                         )}
                       </div>
                     </div>
