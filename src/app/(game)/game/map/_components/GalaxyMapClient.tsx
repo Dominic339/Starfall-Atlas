@@ -314,6 +314,10 @@ export function GalaxyMapClient({
   const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
   const [shipDispatchError, setShipDispatchError] = useState<string | null>(null);
 
+  // ── Multi-ship selection + batch dispatch ──────────────────────────────────
+  const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
+  const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
+
   // ── Drag-to-dispatch state ─────────────────────────────────────────────────
   interface DragInfo {
     ship: GalaxyShip;
@@ -648,6 +652,11 @@ export function GalaxyMapClient({
     return () => clearTimeout(t);
   }, [stationRelocateError]);
 
+  // Clear ship multi-selection when the selected system changes
+  useEffect(() => {
+    setSelectedShipIds(new Set());
+  }, [selectedId]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -668,6 +677,44 @@ export function GalaxyMapClient({
   }
 
   // ── Click: select / deselect ──────────────────────────────────────────────
+  function toggleShipSelection(shipId: string) {
+    setSelectedShipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(shipId)) next.delete(shipId);
+      else next.add(shipId);
+      return next;
+    });
+  }
+
+  async function handleDispatchSelected(shipIds: string[]) {
+    if (!selectedSystem || shipIds.length === 0) return;
+    setMultiDispatchLoading(true);
+    setShipDispatchError(null);
+    const errors: string[] = [];
+    await Promise.all(
+      shipIds.map(async (shipId) => {
+        try {
+          const res = await fetch("/api/game/travel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destinationSystemId: selectedSystem.id, shipId }),
+          });
+          const json = await res.json();
+          if (!json.ok) errors.push(json.error?.message ?? "Dispatch failed.");
+        } catch {
+          errors.push("Network error.");
+        }
+      }),
+    );
+    setMultiDispatchLoading(false);
+    if (errors.length > 0) {
+      setShipDispatchError(errors[0]);
+    } else {
+      setSelectedShipIds(new Set());
+      router.refresh();
+    }
+  }
+
   function handleShipMarkerMouseDown(e: React.MouseEvent, ship: GalaxyShip) {
     e.stopPropagation();
     if (e.button !== 0) return;
@@ -1965,6 +2012,10 @@ export function GalaxyMapClient({
                 const inRange = candidates.filter((c) => c.inRange);
                 const outOfRange = candidates.filter((c) => !c.inRange);
 
+                // Multi-select helpers
+                const selectedInRange = inRange.filter((c) => selectedShipIds.has(c.ship.id));
+                const allInRangeSelected = inRange.length > 0 && inRange.every((c) => selectedShipIds.has(c.ship.id));
+
                 return (
                   <div className="py-2">
                     <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-600">
@@ -1976,57 +2027,122 @@ export function GalaxyMapClient({
 
                     {/* Ships already docked here */}
                     {shipsHere.length > 0 && (
-                      <div className="mb-3 space-y-1">
-                        <p className="text-xs text-zinc-700">Docked here</p>
-                        {shipsHere.map((ship) => (
-                          <div key={ship.id} className="flex items-center justify-between gap-2">
-                            <p className="truncate text-xs text-zinc-300">{ship.name}</p>
-                            <div className="flex items-center gap-1.5 shrink-0">
+                      <div className="mb-3">
+                        <p className="mb-1.5 text-xs text-zinc-700">
+                          {selectedSystem.isStationLocation ? "At station" : "In system"}
+                        </p>
+                        <div className="space-y-1">
+                          {shipsHere.map((ship) => (
+                            <div
+                              key={ship.id}
+                              className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-900/40 px-2.5 py-1.5"
+                            >
+                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 opacity-70" />
+                              <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
                               {ship.dispatchMode !== "manual" && (
-                                <span className="text-xs text-teal-600">Auto</span>
+                                <span className="shrink-0 rounded border border-teal-900/50 bg-teal-950/40 px-1 py-0.5 text-xs text-teal-600">
+                                  Auto
+                                </span>
                               )}
-                              <span className="text-xs text-emerald-500">Here</span>
                             </div>
-                          </div>
-                        ))}
+                          ))}
+                        </div>
                       </div>
                     )}
 
                     {/* Eligible ships to dispatch here */}
                     {inRange.length > 0 && (
                       <div className="mb-3">
-                        <p className="mb-1.5 text-xs text-zinc-700">
-                          Send here
-                          <span className="ml-1 text-zinc-800">({inRange.length})</span>
-                        </p>
-                        <div className="space-y-1.5">
-                          {inRange.map(({ ship, sys, etaHr }) => (
-                            <div
-                              key={ship.id}
-                              className="flex items-center justify-between gap-2 rounded border border-zinc-800 bg-zinc-900/50 px-2.5 py-2"
+                        {/* Section header with select-all toggle */}
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <p className="text-xs text-zinc-700">
+                            Send here
+                            <span className="ml-1 text-zinc-800">({inRange.length})</span>
+                          </p>
+                          {inRange.length > 1 && (
+                            <button
+                              onClick={() =>
+                                allInRangeSelected
+                                  ? setSelectedShipIds(new Set())
+                                  : setSelectedShipIds(new Set(inRange.map((c) => c.ship.id)))
+                              }
+                              className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
                             >
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-xs font-medium text-zinc-200">
-                                  {ship.name}
-                                </p>
-                                <p className="text-xs text-zinc-600">
-                                  {sys.name}
-                                  {" · "}{formatEta(etaHr)}
-                                  {ship.dispatchMode !== "manual" && (
-                                    <span className="ml-1 text-amber-600/80">· Auto</span>
-                                  )}
-                                </p>
-                              </div>
-                              <button
-                                onClick={() => handleDispatchShip(ship.id)}
-                                disabled={shipDispatchLoading === ship.id}
-                                className="shrink-0 rounded border border-indigo-700 bg-indigo-950/50 px-2.5 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 disabled:opacity-50 transition-colors"
-                              >
-                                {shipDispatchLoading === ship.id ? "…" : "Send"}
-                              </button>
-                            </div>
-                          ))}
+                              {allInRangeSelected ? "Deselect all" : "Select all"}
+                            </button>
+                          )}
                         </div>
+
+                        {/* Ship rows with checkboxes */}
+                        <div className="space-y-1.5">
+                          {inRange.map(({ ship, sys, etaHr }) => {
+                            const isSelected = selectedShipIds.has(ship.id);
+                            return (
+                              <div
+                                key={ship.id}
+                                className={`flex items-center gap-2 rounded border px-2 py-1.5 transition-colors ${
+                                  isSelected
+                                    ? "border-indigo-700/50 bg-indigo-950/30"
+                                    : "border-zinc-800 bg-zinc-900/50"
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleShipSelection(ship.id)}
+                                  className="shrink-0 cursor-pointer accent-indigo-500"
+                                />
+                                {/* Clicking the info area also toggles */}
+                                <div
+                                  className="min-w-0 flex-1 cursor-pointer"
+                                  onClick={() => toggleShipSelection(ship.id)}
+                                >
+                                  <p className="truncate text-xs font-medium text-zinc-200">
+                                    {ship.name}
+                                  </p>
+                                  <p className="text-xs text-zinc-600">
+                                    {sys.name} · {formatEta(etaHr)}
+                                    {ship.dispatchMode !== "manual" && (
+                                      <span className="ml-1 text-amber-600/80">· Auto</span>
+                                    )}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => handleDispatchShip(ship.id)}
+                                  disabled={shipDispatchLoading === ship.id || multiDispatchLoading}
+                                  className="shrink-0 rounded border border-indigo-700 bg-indigo-950/50 px-2.5 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 disabled:opacity-50 transition-colors"
+                                >
+                                  {shipDispatchLoading === ship.id ? "…" : "Send"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Batch action buttons */}
+                        {inRange.length > 1 && (
+                          <div className="mt-2">
+                            {selectedInRange.length > 0 ? (
+                              <button
+                                onClick={() => handleDispatchSelected(selectedInRange.map((c) => c.ship.id))}
+                                disabled={multiDispatchLoading}
+                                className="w-full rounded border border-indigo-600 bg-indigo-950/60 px-2 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-900/60 disabled:opacity-50 transition-colors"
+                              >
+                                {multiDispatchLoading
+                                  ? "Sending…"
+                                  : `Send selected (${selectedInRange.length})`}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDispatchSelected(inRange.map((c) => c.ship.id))}
+                                disabled={multiDispatchLoading}
+                                className="w-full rounded border border-zinc-700 bg-zinc-900/50 px-2 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-50 transition-colors"
+                              >
+                                {multiDispatchLoading ? "Sending…" : `Send all (${inRange.length})`}
+                              </button>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -2073,7 +2189,7 @@ export function GalaxyMapClient({
                       </div>
                     )}
 
-                    {/* Empty state — all ships accounted for but none dispatchable */}
+                    {/* Empty state */}
                     {inRange.length === 0 && shipsHere.length === 0 && shipsInTransit.length === 0 && outOfRange.length === 0 && (
                       <p className="text-xs text-zinc-700">No ships available.</p>
                     )}
