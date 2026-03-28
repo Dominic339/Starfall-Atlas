@@ -264,27 +264,19 @@ export default async function AlliancePage() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-4">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2">
         <Link
           href="/game/command"
-          className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
         >
           ← Command
         </Link>
-        <h1 className="text-lg font-semibold text-zinc-100">Alliance</h1>
-        {allianceData && (
-          <span className="font-mono text-xs text-indigo-400 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded">
-            [{allianceData.tag}]
-          </span>
-        )}
+        <span className="text-zinc-800 text-xs">/</span>
+        <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+          Alliance
+        </span>
       </div>
-
-      {!allianceData && (
-        <p className="text-sm text-zinc-500">
-          You are not currently in an alliance. Found one or use an invite code to join.
-        </p>
-      )}
 
       <AlliancePanel
         alliance={allianceData}

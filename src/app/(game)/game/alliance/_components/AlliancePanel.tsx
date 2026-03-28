@@ -86,6 +86,42 @@ function canManageBeacons(role: AllianceRole): boolean {
 }
 
 // ---------------------------------------------------------------------------
+// Small reusable UI pieces (alliance-specific)
+// ---------------------------------------------------------------------------
+
+function SectionHeading({ title, meta }: { title: string; meta?: string }) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <h3 className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+        <span className="inline-block h-3.5 w-0.5 rounded-full bg-indigo-700" />
+        {title}
+      </h3>
+      {meta !== undefined && (
+        <span className="text-xs text-zinc-600 tabular-nums">{meta}</span>
+      )}
+    </div>
+  );
+}
+
+function RoleBadge({ role }: { role: AllianceRole }) {
+  const styles: Record<AllianceRole, string> = {
+    founder: "bg-amber-900/50 border border-amber-700/50 text-amber-300",
+    officer: "bg-indigo-900/50 border border-indigo-700/50 text-indigo-300",
+    member:  "bg-zinc-800/80 border border-zinc-700/40 text-zinc-500",
+  };
+  const labels: Record<AllianceRole, string> = {
+    founder: "★ Founder",
+    officer: "◈ Officer",
+    member:  "Member",
+  };
+  return (
+    <span className={`rounded px-2.5 py-1 text-xs font-semibold tracking-wide ${styles[role]}`}>
+      {labels[role]}
+    </span>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -218,44 +254,66 @@ export function AlliancePanel({
   // ── No alliance ───────────────────────────────────────────────────────────
   if (!alliance || !membership) {
     return (
-      <div className="space-y-8">
-        {/* Feedback */}
-        {actionError   && <p className="text-sm text-red-400">{actionError}</p>}
-        {actionSuccess && <p className="text-sm text-emerald-400">{actionSuccess}</p>}
+      <div className="space-y-5">
+        {/* Atmospheric intro */}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center">
+          <div className="mb-3 font-mono text-3xl font-black tracking-widest text-zinc-800 select-none">
+            ◉
+          </div>
+          <p className="text-sm font-semibold text-zinc-300 mb-1.5">No Faction</p>
+          <p className="text-xs text-zinc-600 max-w-xs mx-auto leading-relaxed">
+            Found or join an alliance to place beacons, claim territory, and
+            coordinate with other commanders.
+          </p>
+        </div>
 
-        {/* Create */}
-        <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-zinc-200">Found an Alliance</h2>
-          <p className="mb-4 text-xs text-zinc-500">
-            Cost: 100 iron from your station inventory.
+        {/* Feedback */}
+        {actionError   && <p className="text-sm text-red-400 px-1">{actionError}</p>}
+        {actionSuccess && <p className="text-sm text-emerald-400 px-1">{actionSuccess}</p>}
+
+        {/* Found */}
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-block h-3.5 w-0.5 rounded-full bg-indigo-700" />
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+              Found an Alliance
+            </h2>
+          </div>
+          <p className="text-xs text-zinc-600 mb-5 leading-relaxed">
+            Establish your faction. Other commanders can join using the invite code.
+            Costs 100 iron from your station inventory.
           </p>
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-zinc-500">Alliance Name (3–40 chars)</label>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-500">
+                Alliance Name <span className="text-zinc-700">(3–40 characters)</span>
+              </label>
               <input
                 type="text"
                 value={createName}
                 onChange={(e) => setCreateName(e.target.value)}
                 maxLength={40}
                 placeholder="e.g. Iron Vanguard"
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-200 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 placeholder-zinc-700 focus:border-indigo-600 focus:outline-none transition-colors"
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-zinc-500">Tag (2–5 alphanumeric, shown on map)</label>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-500">
+                Tag <span className="text-zinc-700">(2–5 alphanumeric · shown on map)</span>
+              </label>
               <input
                 type="text"
                 value={createTag}
                 onChange={(e) => setCreateTag(e.target.value.toUpperCase())}
                 maxLength={5}
-                placeholder="e.g. IRNV"
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm font-mono text-zinc-200 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                placeholder="IRNV"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono font-bold text-indigo-200 placeholder-zinc-700 focus:border-indigo-600 focus:outline-none transition-colors"
               />
             </div>
             <button
               onClick={handleCreate}
               disabled={actionLoading || createName.length < 3 || createTag.length < 2}
-              className="rounded border border-indigo-700 bg-indigo-950/60 px-4 py-2 text-sm font-medium text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50 transition-colors"
+              className="w-full rounded-lg border border-indigo-700 bg-indigo-950/70 px-4 py-2.5 text-sm font-semibold text-indigo-300 hover:bg-indigo-900/70 hover:border-indigo-600 disabled:opacity-50 transition-colors"
             >
               {actionLoading ? "Creating…" : "Found Alliance"}
             </button>
@@ -263,27 +321,32 @@ export function AlliancePanel({
         </section>
 
         {/* Join */}
-        <section className="rounded border border-zinc-800 bg-zinc-900/50 p-5">
-          <h2 className="mb-3 text-sm font-semibold text-zinc-200">Join an Alliance</h2>
-          <p className="mb-4 text-xs text-zinc-500">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-block h-3.5 w-0.5 rounded-full bg-zinc-600" />
+            <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
+              Join an Alliance
+            </h2>
+          </div>
+          <p className="text-xs text-zinc-600 mb-5">
             Enter an invite code shared by an alliance founder.
           </p>
           <div className="space-y-3">
             <div>
-              <label className="mb-1 block text-xs text-zinc-500">Invite Code</label>
+              <label className="mb-1.5 block text-xs font-medium text-zinc-500">Invite Code</label>
               <input
                 type="text"
                 value={joinCode}
                 onChange={(e) => setJoinCode(e.target.value.toLowerCase())}
                 maxLength={64}
                 placeholder="e.g. a1b2c3d4"
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm font-mono text-zinc-200 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm font-mono text-zinc-200 placeholder-zinc-700 focus:border-zinc-500 focus:outline-none transition-colors"
               />
             </div>
             <button
               onClick={handleJoin}
               disabled={actionLoading || joinCode.length < 1}
-              className="rounded border border-zinc-700 bg-zinc-900 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+              className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-4 py-2.5 text-sm font-semibold text-zinc-300 hover:bg-zinc-700/60 hover:border-zinc-600 disabled:opacity-50 transition-colors"
             >
               {actionLoading ? "Joining…" : "Join Alliance"}
             </button>
@@ -300,34 +363,45 @@ export function AlliancePanel({
 
   return (
     <div className="space-y-4">
-      {/* ── Guild header ──────────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-indigo-900/60 bg-zinc-900 px-5 py-4">
+
+      {/* ── Alliance Identity Panel ──────────────────────────────────────── */}
+      <div className="rounded-xl border border-indigo-900/60 bg-gradient-to-br from-indigo-950/40 via-zinc-900 to-zinc-900 px-6 py-5 shadow-lg shadow-black/30">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2.5">
-              <span className="font-mono text-sm font-bold text-indigo-300 bg-indigo-950/70 border border-indigo-700/60 px-2 py-0.5 rounded">
+          <div className="min-w-0">
+            {/* Tag + name */}
+            <div className="flex items-baseline gap-3 flex-wrap">
+              <span className="font-mono text-2xl font-black tracking-widest text-indigo-200 border border-indigo-700/60 bg-indigo-950/70 px-2.5 py-0.5 rounded-md leading-tight">
                 [{alliance.tag}]
               </span>
-              <h2 className="text-lg font-semibold text-zinc-100">{alliance.name}</h2>
+              <h2 className="text-xl font-bold text-zinc-100 truncate">{alliance.name}</h2>
             </div>
-            <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-zinc-500">
-              <span>{alliance.memberCount} {alliance.memberCount === 1 ? "member" : "members"}</span>
-              <span>{activeBeaconCount} {activeBeaconCount === 1 ? "beacon" : "beacons"}</span>
+            {/* Stats row */}
+            <div className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-xs">
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-zinc-500 shrink-0" />
+                <span className="font-semibold text-zinc-300 tabular-nums">{alliance.memberCount}</span>
+                <span className="text-zinc-600">{alliance.memberCount === 1 ? "member" : "members"}</span>
+              </span>
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />
+                <span className="font-semibold text-zinc-300 tabular-nums">{activeBeaconCount}</span>
+                <span className="text-zinc-600">/ 20 beacons</span>
+              </span>
               {territory.hasValidTerritory && (
-                <span className="text-indigo-400">{territory.systemCount} system{territory.systemCount !== 1 ? "s" : ""} claimed</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-400 shrink-0" />
+                  <span className="font-semibold text-indigo-300 tabular-nums">{territory.systemCount}</span>
+                  <span className="text-indigo-600">
+                    {territory.systemCount === 1 ? "system" : "systems"} claimed
+                  </span>
+                </span>
               )}
             </div>
           </div>
-          <div className="shrink-0 flex flex-col items-end gap-1.5">
-            <span className={`rounded px-2 py-0.5 text-xs font-medium ${
-              membership.role === "founder"
-                ? "bg-amber-900/40 text-amber-400"
-                : membership.role === "officer"
-                  ? "bg-indigo-900/40 text-indigo-400"
-                  : "bg-zinc-800 text-zinc-400"
-            }`}>
-              {roleLabel(membership.role)}
-            </span>
+
+          {/* Role badge + leave */}
+          <div className="shrink-0 flex flex-col items-end gap-2">
+            <RoleBadge role={membership.role} />
             {!isFounder && (
               <button
                 onClick={handleLeave}
@@ -342,62 +416,73 @@ export function AlliancePanel({
 
         {/* Invite code (founder only) */}
         {isFounder && (
-          <div className="mt-3 rounded border border-zinc-800 bg-zinc-950 px-3 py-2">
-            <p className="text-xs text-zinc-600">Invite code:</p>
-            <p className="mt-0.5 font-mono text-sm text-zinc-300 select-all">{alliance.inviteCode}</p>
+          <div className="mt-5 rounded-lg border border-zinc-800 bg-zinc-950/80 px-4 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mb-1.5">
+              Invite Code
+            </p>
+            <p className="font-mono text-sm text-zinc-300 select-all break-all">
+              {alliance.inviteCode}
+            </p>
+            <p className="mt-1.5 text-[10px] text-zinc-700">
+              Share with players to let them join your alliance.
+            </p>
           </div>
         )}
       </div>
 
+      {/* Feedback */}
+      {actionError && <p className="text-sm text-red-400 px-1">{actionError}</p>}
+
       {/* ── Members ───────────────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
-        <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-          Members ({members.length})
-        </h3>
-        <div className="divide-y divide-zinc-800/50">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <SectionHeading title="Members" meta={String(members.length)} />
+        <div className="divide-y divide-zinc-800/60">
           {members.map((m) => (
-            <div key={m.id} className="flex items-center justify-between py-2">
-              <span className={`text-sm ${m.playerId === playerId ? "text-zinc-200 font-medium" : "text-zinc-400"}`}>
-                {m.handle}
-                {m.playerId === playerId && <span className="ml-1.5 text-xs text-zinc-600">(you)</span>}
-              </span>
-              <span className={`text-xs ${
-                m.role === "founder" ? "text-amber-400" :
-                m.role === "officer" ? "text-indigo-400" :
-                "text-zinc-600"
-              }`}>
-                {roleLabel(m.role)}
-              </span>
+            <div key={m.id} className="flex items-center justify-between py-2.5 gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className={`text-sm truncate ${
+                  m.playerId === playerId
+                    ? "font-semibold text-zinc-200"
+                    : "text-zinc-400"
+                }`}>
+                  {m.handle}
+                </span>
+                {m.playerId === playerId && (
+                  <span className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 shrink-0">
+                    you
+                  </span>
+                )}
+              </div>
+              <div className="shrink-0">
+                <RoleBadge role={m.role} />
+              </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* Feedback */}
-      {actionError && <p className="text-sm text-red-400">{actionError}</p>}
-
-      {/* ── Management actions (founder only) ─────────────────────────────── */}
+      {/* ── Manage Roles (founder only) ───────────────────────────────────── */}
       {isFounder && otherMembers.length > 0 && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-            Manage Roles
-          </h3>
-          {promoteError && <p className="mb-2 text-xs text-red-400">{promoteError}</p>}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+          <SectionHeading title="Manage Roles" />
+          {promoteError && <p className="mb-3 text-xs text-red-400">{promoteError}</p>}
           <div className="flex flex-wrap gap-2">
             <select
               value={promoteTarget}
               onChange={(e) => setPromoteTarget(e.target.value)}
-              className="flex-1 min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-300 focus:border-zinc-500 focus:outline-none"
+              className="flex-1 min-w-0 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 focus:border-zinc-500 focus:outline-none"
             >
               <option value="">Select member…</option>
               {otherMembers.map((m) => (
-                <option key={m.id} value={m.playerId}>{m.handle} ({roleLabel(m.role)})</option>
+                <option key={m.id} value={m.playerId}>
+                  {m.handle} ({roleLabel(m.role)})
+                </option>
               ))}
             </select>
             <select
               value={promoteRole}
               onChange={(e) => setPromoteRole(e.target.value as typeof promoteRole)}
-              className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-300 focus:border-zinc-500 focus:outline-none"
+              className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 focus:border-zinc-500 focus:outline-none"
             >
               <option value="officer">→ Officer</option>
               <option value="member">→ Member</option>
@@ -406,7 +491,7 @@ export function AlliancePanel({
             <button
               onClick={handlePromote}
               disabled={promoteLoading || !promoteTarget}
-              className="rounded border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-300 hover:bg-zinc-800 disabled:opacity-50 transition-colors"
+              className="rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-700 disabled:opacity-50 transition-colors"
             >
               {promoteLoading ? "Saving…" : "Apply"}
             </button>
@@ -415,22 +500,24 @@ export function AlliancePanel({
       )}
 
       {/* ── Beacons ───────────────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Beacons</h3>
-        <p className="mb-3 text-xs text-zinc-600">
-          {activeBeaconCount} active · max 20
-        </p>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <SectionHeading
+          title="Territory Beacons"
+          meta={`${activeBeaconCount} / 20 active`}
+        />
 
-        {/* Place beacon (officer/founder) */}
+        {/* Place beacon control (officer / founder) */}
         {isPrivileged && (
-          <div className="mb-4 space-y-2">
+          <div className="mb-5 rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3 space-y-2.5">
             {beaconError && <p className="text-xs text-red-400">{beaconError}</p>}
-            <p className="text-xs text-zinc-500">Cost: 50 iron from station inventory.</p>
+            <p className="text-xs text-zinc-600">
+              Place a beacon on any catalog system · 50 iron per beacon
+            </p>
             <div className="flex gap-2">
               <select
                 value={beaconSystem}
                 onChange={(e) => setBeaconSystem(e.target.value)}
-                className="flex-1 min-w-0 rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-sm text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                className="flex-1 min-w-0 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-300 focus:border-indigo-600 focus:outline-none"
               >
                 <option value="">Select system…</option>
                 {catalogSystems.map((s) => (
@@ -440,7 +527,7 @@ export function AlliancePanel({
               <button
                 onClick={handlePlaceBeacon}
                 disabled={beaconLoading || !beaconSystem}
-                className="shrink-0 rounded border border-indigo-700 bg-indigo-950/60 px-3 py-1.5 text-sm text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50 transition-colors"
+                className="shrink-0 rounded-lg border border-indigo-700 bg-indigo-950/70 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-900/70 hover:border-indigo-600 disabled:opacity-50 transition-colors"
               >
                 {beaconLoading ? "Placing…" : "Place Beacon"}
               </button>
@@ -450,14 +537,22 @@ export function AlliancePanel({
 
         {/* Beacon list */}
         {beacons.length === 0 ? (
-          <p className="text-xs text-zinc-700">No beacons placed yet.</p>
+          <div className="py-5 text-center">
+            <p className="text-xs text-zinc-700">No beacons placed yet.</p>
+            {isPrivileged && (
+              <p className="mt-1 text-xs text-zinc-800">
+                Place beacons on catalog systems to begin claiming territory.
+              </p>
+            )}
+          </div>
         ) : (
-          <div className="divide-y divide-zinc-800/50">
+          <div className="divide-y divide-zinc-800/60">
             {beacons.map((b) => (
-              <div key={b.id} className="flex items-center justify-between py-2">
-                <div>
-                  <span className="text-sm text-zinc-300">{b.systemName}</span>
-                  <span className="ml-2 text-xs text-zinc-600">
+              <div key={b.id} className="flex items-center justify-between py-2.5 gap-3">
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="h-1.5 w-1.5 rounded-full bg-indigo-500 shrink-0" />
+                  <span className="text-sm text-zinc-300 truncate">{b.systemName}</span>
+                  <span className="text-xs text-zinc-700 shrink-0">
                     {new Date(b.placedAt).toLocaleDateString()}
                   </span>
                 </div>
@@ -465,7 +560,7 @@ export function AlliancePanel({
                   <button
                     onClick={() => handleRemoveBeacon(b.id)}
                     disabled={beaconLoading}
-                    className="text-xs text-zinc-600 hover:text-red-400 transition-colors disabled:opacity-50"
+                    className="shrink-0 text-xs text-zinc-700 hover:text-red-400 transition-colors disabled:opacity-50"
                   >
                     Remove
                   </button>
@@ -477,32 +572,66 @@ export function AlliancePanel({
       </div>
 
       {/* ── Territory ─────────────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
-        <h3 className="mb-1 text-xs font-semibold uppercase tracking-wider text-zinc-500">Territory</h3>
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <SectionHeading title="Territory Control" />
+
         {activeBeaconCount < 3 ? (
-          <p className="text-xs text-zinc-600">
-            Place at least 3 beacons to form a territory loop.{" "}
-            {activeBeaconCount > 0 && `(${activeBeaconCount}/3 placed)`}
-          </p>
-        ) : !territory.hasValidTerritory ? (
-          <p className="text-xs text-zinc-600">
-            {activeBeaconCount} beacons placed, but no valid territory loop detected.
-            Ensure beacon systems are within 10 ly of each other (2D map distance).
-          </p>
-        ) : (
-          <div className="space-y-2">
-            <p className="text-xs text-zinc-400">
-              Active territory loop · {territory.linkCount} beacon links ·{" "}
-              <span className="text-indigo-400">
-                {territory.systemCount} {territory.systemCount === 1 ? "system" : "systems"} claimed
+          <div className="space-y-3">
+            {/* Progress pips */}
+            <div className="flex items-center gap-2">
+              {[0, 1, 2].map((i) => (
+                <span
+                  key={i}
+                  className={`h-2.5 w-2.5 rounded-sm border transition-colors ${
+                    i < activeBeaconCount
+                      ? "bg-indigo-600 border-indigo-500"
+                      : "bg-zinc-800 border-zinc-700"
+                  }`}
+                />
+              ))}
+              <span className="ml-1 text-xs text-zinc-600">
+                {activeBeaconCount === 0
+                  ? "3 beacons needed to form a territory loop"
+                  : `${3 - activeBeaconCount} more beacon${3 - activeBeaconCount !== 1 ? "s" : ""} needed`}
               </span>
+            </div>
+            <p className="text-xs text-zinc-700 leading-relaxed">
+              Place beacons on systems within 10 ly of each other. Three linked
+              beacons form a closed loop and activate territory control.
             </p>
+          </div>
+        ) : !territory.hasValidTerritory ? (
+          <div className="space-y-2.5">
+            <div className="flex items-center gap-2 text-xs text-amber-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-amber-600 shrink-0" />
+              {activeBeaconCount} beacons placed — no valid loop detected
+            </div>
+            <p className="text-xs text-zinc-700 leading-relaxed">
+              Ensure beacon systems are within 10 ly of each other (2D map
+              distance) to form a closed territory loop.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs">
+              <span className="flex items-center gap-1.5 text-emerald-400 font-medium">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                Territory active
+              </span>
+              <span className="text-zinc-700">·</span>
+              <span className="text-zinc-500">{territory.linkCount} beacon links</span>
+              <span className="text-zinc-700">·</span>
+              <span className="text-indigo-400 font-semibold">
+                {territory.systemCount}{" "}
+                {territory.systemCount === 1 ? "system" : "systems"} claimed
+              </span>
+            </div>
             {territory.systemNames.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {territory.systemNames.map((name) => (
                   <span
                     key={name}
-                    className="rounded bg-indigo-950/60 border border-indigo-800/40 px-1.5 py-0.5 text-xs text-indigo-300"
+                    className="rounded-md border border-indigo-800/50 bg-indigo-950/60 px-2 py-1 text-xs text-indigo-300"
                   >
                     {name}
                   </span>
@@ -518,77 +647,72 @@ export function AlliancePanel({
 
       {/* ── Disputes ──────────────────────────────────────────────────────── */}
       {disputes.length > 0 && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-5 py-4">
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Disputes</h3>
-          {disputeError && <p className="mb-2 text-xs text-red-400">{disputeError}</p>}
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+          <SectionHeading title="Disputes" meta={String(disputes.length)} />
+          {disputeError && <p className="mb-3 text-xs text-red-400">{disputeError}</p>}
           <div className="space-y-3">
             {disputes.map((d) => {
-              const isOpen       = d.status === "open";
-              const now          = Date.now();
-              const msLeft       = new Date(d.resolvesAt).getTime() - now;
-              const hLeft        = Math.max(0, msLeft / (1000 * 60 * 60));
-              const timeStr      = hLeft < 1
+              const isOpen        = d.status === "open";
+              const msLeft        = new Date(d.resolvesAt).getTime() - Date.now();
+              const hLeft         = Math.max(0, msLeft / (1000 * 60 * 60));
+              const timeStr       = hLeft < 1
                 ? `${Math.ceil(hLeft * 60)} min`
                 : `${hLeft.toFixed(1)} hr`;
-              const loading      = disputeLoading[d.id] ?? false;
+              const loading       = disputeLoading[d.id] ?? false;
               const selectedFleet = disputeFleetId[d.id] ?? "";
+
+              const chipStyle = isOpen
+                ? "border-orange-800/60 bg-orange-950/60 text-orange-300"
+                : d.status === "resolved"
+                  ? d.winnerAllianceId === alliance?.id
+                    ? "border-emerald-800/60 bg-emerald-950/60 text-emerald-300"
+                    : "border-red-800/60 bg-red-950/60 text-red-400"
+                  : "border-zinc-700/60 bg-zinc-800/60 text-zinc-500";
+
+              const chipLabel = isOpen
+                ? "Open"
+                : d.status === "resolved"
+                  ? d.winnerAllianceId === alliance?.id ? "Won" : "Lost"
+                  : "Expired";
 
               return (
                 <div
                   key={d.id}
-                  className={`rounded border p-3 ${
+                  className={`rounded-lg border p-4 ${
                     isOpen
-                      ? "border-orange-800/50 bg-orange-950/20"
+                      ? "border-orange-800/40 bg-orange-950/20"
                       : "border-zinc-800 bg-zinc-900/30"
                   }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
+                  <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="text-xs font-medium text-zinc-300 truncate">
+                      <div className="text-sm font-semibold text-zinc-200 truncate">
                         {d.beaconSystemName}
-                        {d.isDefender
-                          ? <span className="ml-1.5 text-orange-400">(your beacon)</span>
-                          : <span className="ml-1.5 text-indigo-400">(challenge)</span>}
                       </div>
                       <div className="mt-0.5 text-xs text-zinc-600">
-                        {d.isDefender ? "Attacker challenging you" : "You are challenging"}
+                        {d.isDefender
+                          ? "Defending — attacker challenging your beacon"
+                          : "Attacking — you are challenging this beacon"}
                       </div>
                     </div>
-                    <span
-                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs ${
-                        isOpen
-                          ? "bg-orange-900/60 text-orange-300"
-                          : d.status === "resolved"
-                            ? d.winnerAllianceId === alliance?.id
-                              ? "bg-emerald-900/60 text-emerald-300"
-                              : "bg-red-900/60 text-red-400"
-                            : "bg-zinc-800 text-zinc-500"
-                      }`}
-                    >
-                      {isOpen
-                        ? "Open"
-                        : d.status === "resolved"
-                          ? d.winnerAllianceId === alliance?.id
-                            ? "Won"
-                            : "Lost"
-                          : "Expired"}
+                    <span className={`shrink-0 rounded border px-2 py-0.5 text-xs font-semibold ${chipStyle}`}>
+                      {chipLabel}
                     </span>
                   </div>
 
                   {isOpen && (
-                    <div className="mt-1.5 text-xs text-orange-600">
+                    <div className="mt-2 text-xs font-medium text-orange-500">
                       Resolves in ~{timeStr}
                     </div>
                   )}
                   {!isOpen && d.resolvedAt && (
-                    <div className="mt-1 text-xs text-zinc-700">
+                    <div className="mt-1.5 text-xs text-zinc-700">
                       Resolved {new Date(d.resolvedAt).toLocaleDateString()}
                     </div>
                   )}
 
-                  {/* Reinforce button (only for open disputes) */}
                   {isOpen && (
-                    <div className="mt-2 flex gap-2">
+                    <div className="mt-3 flex gap-2">
                       <input
                         type="text"
                         placeholder="Fleet ID to commit…"
@@ -596,12 +720,12 @@ export function AlliancePanel({
                         onChange={(e) =>
                           setDisputeFleetId((prev) => ({ ...prev, [d.id]: e.target.value }))
                         }
-                        className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
+                        className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
                       />
                       <button
                         onClick={() => handleReinforce(d.id)}
                         disabled={loading || !selectedFleet}
-                        className="shrink-0 rounded border border-orange-700 bg-orange-950/60 px-2.5 py-1 text-xs text-orange-300 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+                        className="shrink-0 rounded-lg border border-orange-700 bg-orange-950/60 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
                       >
                         {loading ? "…" : "Reinforce"}
                       </button>
