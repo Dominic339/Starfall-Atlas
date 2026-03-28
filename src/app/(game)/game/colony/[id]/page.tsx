@@ -1,13 +1,14 @@
 /**
  * /game/colony/[id] — Dedicated Colony page.
  *
- * Shows a colony's current state: tier, health, inventory,
- * structures, growth timeline, and actions (collect tax, build).
+ * Shows a colony's current state: tier, health, stockpile,
+ * structures, growth timeline, and logistics context.
  *
- * The colony is a production node in the logistics chain:
- *   - Produces resources (extraction) and tax (credits)
- *   - Requires food (and iron on harsh worlds) shipped from the station
- *   - Ships haul colony inventory back to the station
+ * The colony is a passive production node in the logistics chain:
+ *   - Resources accumulate automatically via engine tick (no manual extract required)
+ *   - Tax accrues over time and can be collected
+ *   - Ships haul the colony stockpile back to the station automatically or on demand
+ *   - Colony requires food (and iron on harsh worlds) shipped from the station
  */
 
 import { redirect, notFound } from "next/navigation";
@@ -312,13 +313,95 @@ export default async function ColonyPage({
         </div>
       )}
 
-      {/* Tax + Extraction yield */}
+      {/* ── Stockpile (primary focus) ──────────────────────────────────────── */}
+      <section>
+        <div className="mb-3 flex items-baseline justify-between gap-2">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Stockpile
+          </h2>
+          <span className="text-xs text-zinc-600">
+            {inventoryTotal > 0 ? `${inventoryTotal.toLocaleString()} units ready to haul` : "empty"}
+          </span>
+        </div>
+        {colonyInventory.length > 0 ? (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+              {colonyInventory.map((row) => (
+                <div key={row.resource_type} className="flex items-center justify-between">
+                  <span className="text-xs text-zinc-500 capitalize">
+                    {row.resource_type.replace(/_/g, " ")}
+                  </span>
+                  <span className="font-mono text-sm font-medium text-zinc-200">
+                    {row.quantity.toLocaleString()}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <p className="mt-3 text-xs text-zinc-600 border-t border-zinc-800 pt-2">
+              Haul this cargo: dispatch a ship from the{" "}
+              <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                map
+              </Link>{" "}
+              or set a ship to{" "}
+              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                auto-collect
+              </Link>.
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
+            <p className="text-sm text-zinc-600">Stockpile is empty.</p>
+            <p className="mt-1 text-xs text-zinc-700">
+              Resources accumulate automatically.{" "}
+              {basicNodeCount > 0 && totalRatePerHr > 0 && (
+                <span>At {totalRatePerHr} u/hr the stockpile will build up over time.</span>
+              )}
+            </p>
+          </div>
+        )}
+      </section>
+
+      {/* ── Output — production rate + tax ─────────────────────────────────── */}
       {colony.status === "active" && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Yield
+            Output
           </h2>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+
+            {/* Production rate */}
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+              <p className="text-xs text-zinc-600 uppercase tracking-wider">Resource production</p>
+              {resourceNodes.length === 0 ? (
+                <p className="mt-1 text-sm text-zinc-600">
+                  No survey — conduct a survey to unlock extraction.
+                </p>
+              ) : (
+                <>
+                  <p className="mt-1 text-sm font-medium text-teal-300">
+                    {totalRatePerHr > 0
+                      ? `${totalRatePerHr} u/hr`
+                      : <span className="text-zinc-500">Paused (supply issue)</span>}
+                  </p>
+                  <p className="mt-0.5 text-xs text-zinc-600">
+                    {basicNodeCount} node{basicNodeCount !== 1 ? "s" : ""}
+                    {extractorTier > 0 && ` · Extractor T${extractorTier}`}
+                    {healthMult < 1 && (
+                      <span className="ml-1 text-amber-600">· yield reduced</span>
+                    )}
+                  </p>
+                  {isCapped && (
+                    <p className="mt-1.5 text-xs text-amber-500">
+                      Accumulation cap reached — send a ship to haul.
+                    </p>
+                  )}
+                  <p className="mt-2 text-xs text-zinc-700 border-t border-zinc-800/60 pt-2">
+                    Flows into stockpile automatically · cap at {BALANCE.extraction.accumulationCapHours}h
+                  </p>
+                </>
+              )}
+            </div>
+
             {/* Tax */}
             <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
               <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
@@ -337,144 +420,59 @@ export default async function ColonyPage({
                 </p>
               )}
             </div>
-
-            {/* Extraction */}
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-              <p className="text-xs text-zinc-600 uppercase tracking-wider">Resources accrued</p>
-              {resourceNodes.length === 0 ? (
-                <p className="mt-1 text-sm text-zinc-600">No survey data — conduct a survey to unlock extraction.</p>
-              ) : extractSummary ? (
-                <>
-                  <p className="mt-1 text-sm font-medium text-teal-300">{extractSummary}</p>
-                  {isCapped && (
-                    <p className="mt-0.5 text-xs text-amber-500">
-                      Accumulation capped — dispatch a ship to collect.
-                    </p>
-                  )}
-                  <div className="mt-2">
-                    <ExtractButton colonyId={colony.id} summary={extractSummary} />
-                  </div>
-                </>
-              ) : (
-                <p className="mt-1 text-sm text-zinc-500">
-                  Accumulating…{" "}
-                  {basicNodeCount > 0 && totalRatePerHr > 0 && (
-                    <span className="text-xs text-zinc-600">
-                      ({totalRatePerHr} u/hr across {basicNodeCount} node{basicNodeCount !== 1 ? "s" : ""})
-                    </span>
-                  )}
-                </p>
-              )}
-              {/* Rate line — always show when we have nodes */}
-              {basicNodeCount > 0 && (
-                <p className="mt-2 text-xs text-zinc-600 border-t border-zinc-800/60 pt-2">
-                  Rate: <span className="text-zinc-400">{totalRatePerHr} u/hr</span>
-                  {" · "}
-                  {elapsedHours < 1
-                    ? `${Math.round(elapsedHours * 60)}m since last collection`
-                    : `${elapsedHours.toFixed(1)}h since last collection`}
-                  {" · "}cap at {BALANCE.extraction.accumulationCapHours}h
-                  {extractorTier > 0 && (
-                    <span className="ml-1 text-teal-700"> · Extractor T{extractorTier}</span>
-                  )}
-                </p>
-              )}
-            </div>
           </div>
         </section>
       )}
 
-      {/* Colony inventory */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-          Colony Inventory ({inventoryTotal} units)
-        </h2>
-        {colonyInventory.length > 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
-              {colonyInventory.map((row) => (
-                <div key={row.resource_type} className="flex items-center justify-between">
-                  <span className="text-xs text-zinc-500 capitalize">
-                    {row.resource_type.replace(/_/g, " ")}
-                  </span>
-                  <span className="font-mono text-sm font-medium text-zinc-200">
-                    {row.quantity.toLocaleString()}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <p className="mt-3 text-xs text-zinc-600 border-t border-zinc-800 pt-2">
-              Dispatch a ship to this system from the{" "}
-              <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
-                map
-              </Link>{" "}
-              or your{" "}
-              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
-                station
-              </Link>{" "}
-              to haul this cargo.
-            </p>
-          </div>
-        ) : (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
-            <p className="text-sm text-zinc-600">
-              Colony inventory is empty.
-            </p>
-            <p className="mt-1 text-xs text-zinc-700">
-              Resources accumulate automatically and are ready to haul once accrued.
-              Dispatch a ship from your{" "}
-              <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
-                station
-              </Link>{" "}
-              to collect them.
-            </p>
-          </div>
-        )}
-      </section>
-
-      {/* Ships at this system */}
+      {/* ── Ships ──────────────────────────────────────────────────────────── */}
       {shipsAtSystem.length > 0 && (
         <section>
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Ships Here ({shipsAtSystem.length})
+            Ships in System ({shipsAtSystem.length})
           </h2>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2">
             {shipsAtSystem.map((ship) => {
-              const isAutoTargetingThis = ship.auto_target_colony_id === colony.id;
-              const modeLabel =
-                ship.dispatch_mode === "manual"
-                  ? "Manual"
-                  : ship.dispatch_mode === "auto_collect_nearest"
-                    ? "Auto: Nearest"
-                    : "Auto: Highest yield";
+              const isAssigned = ship.auto_target_colony_id === colony.id;
+              const isAuto = ship.dispatch_mode !== "manual";
               const stateLabel =
                 ship.auto_state === "traveling_to_colony"
                   ? "En route here"
                   : ship.auto_state === "traveling_to_station"
-                    ? "Returning to station"
-                    : ship.dispatch_mode !== "manual"
-                      ? "Idle (auto)"
-                      : "Docked";
+                    ? "Returning to station with cargo"
+                    : isAuto
+                      ? "Idle — waiting to haul"
+                      : "Docked (manual)";
               return (
-                <div key={ship.id} className="flex items-center justify-between gap-4">
+                <div key={ship.id} className="flex items-start justify-between gap-4">
                   <div>
-                    <span className="text-sm font-medium text-zinc-300">{ship.name}</span>
-                    {isAutoTargetingThis && (
-                      <span className="ml-2 rounded-full px-1.5 py-0.5 text-xs bg-indigo-900/50 text-indigo-400 border border-indigo-900/40">
-                        assigned
-                      </span>
-                    )}
-                    <p className="text-xs text-zinc-600">
-                      {stateLabel} · {modeLabel} · {ship.cargo_cap.toLocaleString()} cargo
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-medium text-zinc-300">{ship.name}</span>
+                      {isAssigned && (
+                        <span className="rounded-full px-1.5 py-0.5 text-xs bg-indigo-900/50 text-indigo-400 border border-indigo-900/40">
+                          assigned here
+                        </span>
+                      )}
+                      {isAuto && !isAssigned && (
+                        <span className="rounded-full px-1.5 py-0.5 text-xs bg-teal-900/40 text-teal-600 border border-teal-900/30">
+                          auto
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-0.5 text-xs text-zinc-600">
+                      {stateLabel} · {ship.cargo_cap.toLocaleString()} cargo cap
                     </p>
                   </div>
                 </div>
               );
             })}
             <p className="text-xs text-zinc-700 border-t border-zinc-800 pt-2">
-              Change ship modes from your{" "}
+              Assign ships to auto-collect from this colony via your{" "}
               <Link href="/game/station" className="text-indigo-400 hover:text-indigo-300 transition-colors">
                 station
+              </Link>{" "}
+              or dispatch manually from the{" "}
+              <Link href="/game/map" className="text-indigo-400 hover:text-indigo-300 transition-colors">
+                map
               </Link>.
             </p>
           </div>
@@ -559,6 +557,21 @@ export default async function ColonyPage({
             )}
           </div>
         </section>
+      )}
+
+      {/* ── Manual override (dev / fallback) ───────────────────────────────── */}
+      {colony.status === "active" && resourceNodes.length > 0 && extractSummary && (
+        <details className="rounded-lg border border-zinc-800/50 bg-zinc-900/30 px-4 py-2 text-xs">
+          <summary className="cursor-pointer text-zinc-700 hover:text-zinc-500 transition-colors select-none">
+            Manual extraction override
+          </summary>
+          <div className="mt-3 space-y-2 pb-1">
+            <p className="text-zinc-600">
+              Resources accumulate automatically on page load. Use this only if you need to force-sync mid-cycle.
+            </p>
+            <ExtractButton colonyId={colony.id} summary={extractSummary} />
+          </div>
+        </details>
       )}
     </div>
   );
