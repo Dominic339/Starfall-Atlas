@@ -541,8 +541,8 @@ export default async function ColonyPage({
                         canAfford={canAfford}
                         label={
                           currentTier === 0
-                            ? `Build T1 (${cost.iron}⛏ ${cost.carbon} carbon)`
-                            : `Upgrade T${targetTier} (${cost.iron}⛏ ${cost.carbon} carbon)`
+                            ? `Build T1 (${cost.iron}⛏${cost.carbon > 0 ? ` ${cost.carbon} carbon` : ""})`
+                            : `Upgrade T${targetTier} (${cost.iron}⛏${cost.carbon > 0 ? ` ${cost.carbon} carbon` : ""})`
                         }
                       />
                     ) : null}

@@ -206,6 +206,41 @@ export async function runTravelResolution(
     ships = resolvedShips;
   }
 
+  // ── 8.5. Resolve travel jobs + auto-unload for manual ships ─────────────────
+  // Auto-haul ships land via the loop above. Manual ships (skipped there) need
+  // their travel jobs completed and cargo auto-transferred when they reach station.
+  if (station) {
+    for (const ship of ships) {
+      if (ship.dispatch_mode !== "manual") continue; // auto ships handled above
+      if (shipIdsInFleet.has(ship.id)) continue; // fleet ships handled in step 9
+      const pendingJob = travelJobByShipId.get(ship.id);
+      if (!pendingJob) continue;
+      if (new Date(pendingJob.arrive_at) > requestTime) continue;
+
+      const arrivingAtStation = pendingJob.to_system_id === station.current_system_id;
+
+      await admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id);
+      await admin.from("ships").update({
+        current_system_id: pendingJob.to_system_id,
+        current_body_id: null,
+        ship_state: arrivingAtStation ? "idle_at_station" : "idle_in_system",
+        last_known_system_id: pendingJob.to_system_id,
+        destination_system_id: null,
+      }).eq("id", ship.id);
+
+      if (arrivingAtStation) {
+        const landedShip: Ship = {
+          ...ship,
+          current_system_id: pendingJob.to_system_id as SystemId,
+        };
+        await doUnload(admin, landedShip, station.id, cargoByShipId);
+      }
+
+      travelJobByShipId.delete(ship.id);
+      jobsResolved++;
+    }
+  }
+
   // ── 9. Resolve fleet travel (Step 5.5 equivalent) ─────────────────────────
   for (let fi = 0; fi < fleets.length; fi++) {
     const fleet = fleets[fi];

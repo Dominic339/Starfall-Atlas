@@ -323,6 +323,17 @@ export function GalaxyMapClient({
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
   const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
 
+  // ── Animation tick — re-renders every second while ships are in transit ────
+  // The SVG travel-line code computes interpolated ship position from Date.now()
+  // on each render; without this tick the position freezes at initial render.
+  const [, setAnimTick] = useState(0);
+  const hasTravelLines = travelLines.length > 0;
+  useEffect(() => {
+    if (!hasTravelLines) return;
+    const id = setInterval(() => setAnimTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [hasTravelLines]);
+
   // ── Drag-to-dispatch state ─────────────────────────────────────────────────
   interface DragInfo {
     ship: GalaxyShip;

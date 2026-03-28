@@ -393,10 +393,10 @@ export const BALANCE = {
      * Index 0 is unused.
      */
     buildCostByTier: [
-      null,                        // 0: unused
-      { iron: 20, carbon: 10 },   // 1: initial build
-      { iron: 50, carbon: 25 },   // 2: upgrade to tier 2
-      { iron: 100, carbon: 50 },  // 3: upgrade to tier 3
+      null,                       // 0: unused
+      { iron: 30, carbon: 0 },   // 1: initial build
+      { iron: 75, carbon: 0 },   // 2: upgrade to tier 2
+      { iron: 150, carbon: 0 },  // 3: upgrade to tier 3
     ] as (null | { iron: number; carbon: number })[],
 
     /** Extractor: additional extraction multiplier per tier (additive). */
