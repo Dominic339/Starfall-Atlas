@@ -95,6 +95,13 @@ export interface Ship {
   auto_state: "idle" | "traveling_to_colony" | "traveling_to_station" | null;
   /** The colony being targeted in the current automation cycle. NULL when idle or manual. */
   auto_target_colony_id: ColonyId | null;
+  /**
+   * Player-set assignment: auto-haul preferentially collects from this colony.
+   * NULL = no preference; auto-haul uses nearest/highest logic.
+   * Persists across mode switches. Cleared only by the player or when the
+   * colony is deleted (ON DELETE SET NULL in DB).
+   */
+  pinned_colony_id: ColonyId | null;
   skin_entitlement_id: string | null;
   /** Per-stat upgrade levels (0–10). Research controls soft caps. */
   hull_level: number;

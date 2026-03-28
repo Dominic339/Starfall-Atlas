@@ -428,6 +428,7 @@ async function dispatchToNextColony(
     colonies as Colony[],
     colonyInvTotals,
     mode,
+    ship.pinned_colony_id ?? undefined,
   );
 
   if (fullCandidates.length === 0) {

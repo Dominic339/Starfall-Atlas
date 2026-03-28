@@ -111,7 +111,7 @@ export default async function ColonyPage({
       .maybeSingle(),
     admin
       .from("ships")
-      .select("id, name, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
+      .select("id, name, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id, pinned_colony_id")
       .eq("owner_id", player.id)
       .eq("current_system_id", colony.system_id),
   ]);
@@ -120,7 +120,7 @@ export default async function ColonyPage({
   const structures = (structuresRes.data ?? []) as Structure[];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
   const survey = (surveyRes.data as Pick<SurveyResult, "resource_nodes"> | null) ?? null;
-  const shipsAtSystem = (shipsRes.data ?? []) as Pick<Ship, "id" | "name" | "cargo_cap" | "dispatch_mode" | "auto_state" | "auto_target_colony_id">[];
+  const shipsAtSystem = (shipsRes.data ?? []) as Pick<Ship, "id" | "name" | "cargo_cap" | "dispatch_mode" | "auto_state" | "auto_target_colony_id" | "pinned_colony_id">[];
   const unlockedResearchIds = new Set(
     (listResult<Pick<PlayerResearch, "research_id">>(researchRes).data ?? []).map(
       (r) => r.research_id,
@@ -432,7 +432,7 @@ export default async function ColonyPage({
           </h2>
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2">
             {shipsAtSystem.map((ship) => {
-              const isAssigned = ship.auto_target_colony_id === colony.id;
+              const isAssigned = ship.pinned_colony_id === colony.id;
               const isAuto = ship.dispatch_mode !== "manual";
               const stateLabel =
                 ship.auto_state === "traveling_to_colony"

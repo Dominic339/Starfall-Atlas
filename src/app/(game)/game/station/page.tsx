@@ -25,6 +25,7 @@ import { UnloadButton } from "../_components/ColonyActions";
 import { RefineForm } from "../_components/RefineControls";
 import { ShipDispatchForm } from "../_components/ShipDispatchForm";
 import { ShipModeButton } from "../_components/ShipModeButton";
+import { ShipAssignColonyControl } from "../_components/ShipAssignColonyControl";
 import { autoStateLabel, dispatchModeLabel, formatEtaMs } from "@/lib/game/shipAutomation";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import { runEngineTick } from "@/lib/game/engineTick";
@@ -61,7 +62,7 @@ export default async function StationPage() {
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin
       .from("ships")
-      .select("id, name, current_system_id, destination_system_id, speed_ly_per_hr, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id")
+      .select("id, name, current_system_id, destination_system_id, speed_ly_per_hr, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id, pinned_colony_id")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
     admin
@@ -82,6 +83,15 @@ export default async function StationPage() {
   const colonySystemNameById = new Map(
     colonies.map((c) => [c.id, systemDisplayName(c.system_id)]),
   );
+
+  // Pre-formatted colony options for the assignment control
+  const colonySelectOptions = colonies.map((c) => {
+    const bodyIdx = c.body_id.slice(c.body_id.lastIndexOf(":") + 1);
+    return {
+      id: c.id,
+      label: `${systemDisplayName(c.system_id)} · Body ${bodyIdx} (T${c.population_tier})`,
+    };
+  });
 
   if (!station) {
     return (
@@ -357,6 +367,26 @@ export default async function StationPage() {
                     )}
                   </div>
 
+                  {/* Colony assignment — only visible in auto mode */}
+                  {mode !== "manual" && colonySelectOptions.length > 0 && (
+                    <div className="border-t border-zinc-800 pt-2">
+                      <p className="text-xs text-zinc-600 mb-1.5">
+                        Assigned colony:{" "}
+                        {ship.pinned_colony_id ? (
+                          <span className="text-indigo-400">
+                            {colonySelectOptions.find((c) => c.id === ship.pinned_colony_id)?.label ?? "Unknown"}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-600">None (auto-select)</span>
+                        )}
+                      </p>
+                      <ShipAssignColonyControl
+                        shipId={ship.id}
+                        currentPinnedColonyId={ship.pinned_colony_id ?? null}
+                        colonies={colonySelectOptions}
+                      />
+                    </div>
+                  )}
                   {/* Manual dispatch — only when in manual mode */}
                   {mode === "manual" && dispatchTargets.length > 0 && (
                     <div className="border-t border-zinc-800 pt-2">
