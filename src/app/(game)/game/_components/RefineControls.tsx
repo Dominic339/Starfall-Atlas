@@ -52,15 +52,17 @@ export function RefineForm() {
   }
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap items-end gap-2">
-        <div className="space-y-1">
-          <label className="text-xs text-zinc-500">Output</label>
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2.5">
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+            Output
+          </label>
           <select
             value={resourceType}
             onChange={(e) => setResourceType(e.target.value)}
             disabled={loading}
-            className="rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+            className="rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none transition-colors"
           >
             {REFINABLE.map((r) => (
               <option key={r.value} value={r.value}>
@@ -69,8 +71,10 @@ export function RefineForm() {
             ))}
           </select>
         </div>
-        <div className="space-y-1">
-          <label className="text-xs text-zinc-500">Amount</label>
+        <div className="space-y-1.5">
+          <label className="block text-[10px] font-bold uppercase tracking-widest text-zinc-600">
+            Amount
+          </label>
           <input
             type="number"
             min="1"
@@ -78,22 +82,22 @@ export function RefineForm() {
             value={amount}
             onChange={(e) => setAmount(e.target.value)}
             disabled={loading}
-            className="w-20 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:outline-none focus:border-zinc-500"
+            className="w-24 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 focus:border-zinc-500 focus:outline-none transition-colors"
           />
         </div>
         <button
           onClick={handleRefine}
           disabled={loading}
-          className="rounded bg-teal-800 px-3 py-1 text-xs font-medium text-teal-100 hover:bg-teal-700 transition-colors disabled:opacity-60"
+          className="rounded-lg border border-teal-700 bg-teal-950/70 px-4 py-2 text-sm font-semibold text-teal-300 hover:bg-teal-900/70 hover:border-teal-600 disabled:opacity-50 transition-colors"
         >
           {loading ? "Refining…" : "Refine"}
         </button>
       </div>
       {selectedRecipe && (
-        <p className="text-xs text-zinc-600">{selectedRecipe.recipe}</p>
+        <p className="text-xs text-zinc-700">{selectedRecipe.recipe}</p>
       )}
       {message && (
-        <p className={`text-xs ${message.ok ? "text-teal-400" : "text-red-400"}`}>
+        <p className={`text-xs font-medium ${message.ok ? "text-teal-400" : "text-red-400"}`}>
           {message.text}
         </p>
       )}
