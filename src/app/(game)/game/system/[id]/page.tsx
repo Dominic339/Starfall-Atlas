@@ -425,6 +425,10 @@ export default async function SystemPage({
   );
   const activeColonyCount = playerActiveColonies?.length ?? 0;
   const isFirstColony = !player.first_colony_placed && activeColonyCount === 0;
+  // True when the player has filled their current slot tier (unlimited tier bypasses this).
+  const atSlotCap =
+    player.colony_slots < BALANCE.colony.slotsUnlimited &&
+    activeColonyCount >= player.colony_slots;
 
   return (
     <div className="space-y-6">
@@ -638,13 +642,16 @@ export default async function SystemPage({
             const habitabilityGateMet = isHarshBody ? true : body.canHostColony;
 
             // Sol bodies can never be colonized (GAME_RULES.md §1.1).
+            // Also suppress the button when the player is at their slot cap
+            // (atSlotCap is false for unlimited tier players).
             const canFoundColonyHere =
               canActOnBodies &&
               !isSol &&
               survey !== null &&
               habitabilityGateMet &&
               harshGateMet &&
-              !bodyIsOccupied;
+              !bodyIsOccupied &&
+              !atSlotCap;
 
             return (
               <div
@@ -881,6 +888,20 @@ export default async function SystemPage({
                       />
                     )}
                   </div>
+                )}
+
+                {/* Slot cap notice — body is eligible but player is at their cap */}
+                {atSlotCap &&
+                  canActOnBodies &&
+                  !isSol &&
+                  survey !== null &&
+                  habitabilityGateMet &&
+                  harshGateMet &&
+                  !bodyIsOccupied && (
+                  <p className="mt-2 text-xs text-amber-600">
+                    Colony limit reached ({player.colony_slots} / {player.colony_slots}).{" "}
+                    Reach the next progression milestone to expand.
+                  </p>
                 )}
 
                 {/* Sol: surveying is allowed, colonizing is not */}

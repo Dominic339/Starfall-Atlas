@@ -54,14 +54,29 @@ export interface GalaxySystem {
   isStationLocation: boolean;
   /** A ship is currently traveling to this system */
   isInTransitTarget: boolean;
+  /** A ship departed from this system and is currently in transit */
+  isTransitOrigin: boolean;
 }
 
 export interface GalaxyShip {
   id: string;
   name: string;
   systemId: string | null;
+  /** Populated when ship is currently in transit (current_system_id = null). */
+  destinationSystemId: string | null;
+  /** ISO timestamp of expected arrival; null when not in transit. */
+  arriveAt: string | null;
+  /** "manual" | "auto_collect_nearest" | "auto_collect_highest" */
+  dispatchMode: string;
+  /** "idle" | "traveling_to_colony" | "traveling_to_station" | null */
+  autoState: string | null;
   speedLyPerHr: number;
   cargoCap: number;
+  /**
+   * System ID of the player's pinned colony for this ship (derived server-side
+   * from pinned_colony_id → colonies.system_id). Null when unassigned.
+   */
+  pinnedColonySystemId: string | null;
 }
 
 export interface GalaxyFleet {
@@ -137,10 +152,16 @@ export interface GalaxyTravelLine {
   /** SVG position of the destination system */
   x2: number;
   y2: number;
+  /** System IDs for origin/destination (used for selected-system highlighting). */
+  fromSystemId: string;
+  toSystemId: string;
   /** Short label shown near midpoint (e.g. ship name) */
   label: string;
   /** True = fleet travel (slightly different styling) */
   isFleet: boolean;
+  /** ISO timestamps for ETA display and ship-position interpolation. */
+  arriveAt: string | null;
+  departAt: string | null;
 }
 
 interface GalaxyMapClientProps {
@@ -298,6 +319,35 @@ export function GalaxyMapClient({
   const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
   const [shipDispatchError, setShipDispatchError] = useState<string | null>(null);
 
+  // ── Multi-ship selection + batch dispatch ──────────────────────────────────
+  const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
+  const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
+
+  // ── Drag-to-dispatch state ─────────────────────────────────────────────────
+  interface DragInfo {
+    ship: GalaxyShip;
+    clientX: number;
+    clientY: number;
+    targetId: string | null;
+  }
+  const [dragInfo, setDragInfo] = useState<DragInfo | null>(null);
+  const dragInfoRef = useRef<DragInfo | null>(null);
+  dragInfoRef.current = dragInfo; // latest-value pattern: always fresh in callbacks
+  const [dragError, setDragError] = useState<string | null>(null);
+  const didDragRef = useRef(false); // suppresses click events immediately after a drag ends
+
+  // ── Station drag-to-relocate state ────────────────────────────────────────
+  interface StationDragInfo {
+    clientX: number;
+    clientY: number;
+    targetId: string | null;
+  }
+  const [stationDrag, setStationDrag] = useState<StationDragInfo | null>(null);
+  const stationDragRef = useRef<StationDragInfo | null>(null);
+  stationDragRef.current = stationDrag;
+  const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
+  const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
@@ -361,6 +411,22 @@ export function GalaxyMapClient({
   }
   const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
 
+  // latest-value refs (avoid stale closures in useCallback handlers)
+  const latestTransform = useRef(transform);
+  latestTransform.current = transform;
+  const systemsRef = useRef(systems);
+  systemsRef.current = systems;
+
+  // Ships grouped by system for drag marker positioning
+  const shipsBySystem = new Map<string, GalaxyShip[]>();
+  for (const ship of ships) {
+    if (ship.systemId) {
+      const list = shipsBySystem.get(ship.systemId) ?? [];
+      list.push(ship);
+      shipsBySystem.set(ship.systemId, list);
+    }
+  }
+
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
   const clientToSvg = useCallback(
@@ -393,6 +459,65 @@ export function GalaxyMapClient({
 
   const handleMouseMove = useCallback(
     (e: React.MouseEvent<SVGSVGElement>) => {
+      // ── Drag: ship marker being dragged ──────────────────────────────────
+      if (dragInfoRef.current !== null) {
+        const current = dragInfoRef.current;
+        const svg = svgRef.current;
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        // Client → viewbox → base SVG coords
+        const vx = ((e.clientX - rect.left) / rect.width) * viewboxW;
+        const vy = ((e.clientY - rect.top) / rect.height) * viewboxH;
+        const { tx, ty, scale } = latestTransform.current;
+        const bx = (vx - tx) / scale;
+        const by = (vy - ty) / scale;
+        // Find nearest system within hit radius (base SVG units)
+        const HIT = 22;
+        let nearest: string | null = null;
+        let nearestDist = HIT;
+        for (const sys of systemsRef.current) {
+          const d = Math.sqrt((sys.svgX - bx) ** 2 + (sys.svgY - by) ** 2);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = sys.id;
+          }
+        }
+        // Don't target the ship's own system
+        if (nearest === current.ship.systemId) nearest = null;
+        const updated: DragInfo = { ...current, clientX: e.clientX, clientY: e.clientY, targetId: nearest };
+        setDragInfo(updated);
+        dragInfoRef.current = updated;
+        return;
+      }
+      // ── Station drag: relocate station ────────────────────────────────────
+      if (stationDragRef.current !== null) {
+        const current = stationDragRef.current;
+        const svg = svgRef.current;
+        if (!svg) return;
+        const rect = svg.getBoundingClientRect();
+        const vx = ((e.clientX - rect.left) / rect.width) * viewboxW;
+        const vy = ((e.clientY - rect.top) / rect.height) * viewboxH;
+        const { tx, ty, scale } = latestTransform.current;
+        const bx = (vx - tx) / scale;
+        const by = (vy - ty) / scale;
+        const HIT = 22;
+        let nearest: string | null = null;
+        let nearestDist = HIT;
+        for (const sys of systemsRef.current) {
+          const d = Math.sqrt((sys.svgX - bx) ** 2 + (sys.svgY - by) ** 2);
+          if (d < nearestDist) {
+            nearestDist = d;
+            nearest = sys.id;
+          }
+        }
+        // Don't target the current station system
+        if (stationSystem && nearest === stationSystem.id) nearest = null;
+        const updated: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: nearest };
+        setStationDrag(updated);
+        stationDragRef.current = updated;
+        return;
+      }
+      // ── Pan ───────────────────────────────────────────────────────────────
       if (!isPanning.current) return;
       const dx = e.clientX - panStart.current.x;
       const dy = e.clientY - panStart.current.y;
@@ -411,9 +536,85 @@ export function GalaxyMapClient({
     [viewboxW, viewboxH],
   );
 
-  const endPan = useCallback(() => {
+  function handleMouseLeave() {
     isPanning.current = false;
-  }, []);
+    if (dragInfoRef.current) {
+      setDragInfo(null);
+      dragInfoRef.current = null;
+    }
+    if (stationDragRef.current) {
+      setStationDrag(null);
+      stationDragRef.current = null;
+    }
+  }
+
+  async function handleMouseUp() {
+    // ── Drag completion ───────────────────────────────────────────────────
+    if (dragInfoRef.current !== null) {
+      const info = dragInfoRef.current;
+      didDragRef.current = true; // suppress the upcoming click event
+      setDragInfo(null);
+      dragInfoRef.current = null;
+      isPanning.current = false;
+      if (info.targetId && info.targetId !== info.ship.systemId) {
+        setShipDispatchLoading(info.ship.id);
+        setDragError(null);
+        try {
+          const res = await fetch("/api/game/travel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              destinationSystemId: info.targetId,
+              shipId: info.ship.id,
+            }),
+          });
+          const json = await res.json();
+          if (json.ok) {
+            router.refresh();
+          } else {
+            setDragError(json.error?.message ?? "Dispatch failed.");
+          }
+        } catch {
+          setDragError("Network error.");
+        } finally {
+          setShipDispatchLoading(null);
+        }
+      }
+      return;
+    }
+    // ── Station drag completion ───────────────────────────────────────────
+    if (stationDragRef.current !== null) {
+      const info = stationDragRef.current;
+      didDragRef.current = true;
+      setStationDrag(null);
+      stationDragRef.current = null;
+      isPanning.current = false;
+      if (info.targetId) {
+        setStationRelocateLoading(true);
+        setStationRelocateError(null);
+        try {
+          const res = await fetch("/api/game/station/relocate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destinationSystemId: info.targetId }),
+          });
+          const json = await res.json();
+          if (json.ok) {
+            router.refresh();
+          } else {
+            setStationRelocateError(json.error?.message ?? "Relocation failed.");
+          }
+        } catch {
+          setStationRelocateError("Network error.");
+        } finally {
+          setStationRelocateLoading(false);
+        }
+      }
+      return;
+    }
+    // ── Pan end ───────────────────────────────────────────────────────────
+    isPanning.current = false;
+  }
 
   // ── Zoom handler ──────────────────────────────────────────────────────────
   const handleWheel = useCallback(
@@ -442,6 +643,25 @@ export function GalaxyMapClient({
     return () => svg.removeEventListener("wheel", handleWheel);
   }, [handleWheel]);
 
+  // Auto-clear drag dispatch error after 3 s
+  useEffect(() => {
+    if (!dragError) return;
+    const t = setTimeout(() => setDragError(null), 3000);
+    return () => clearTimeout(t);
+  }, [dragError]);
+
+  // Auto-clear station relocation error after 3 s
+  useEffect(() => {
+    if (!stationRelocateError) return;
+    const t = setTimeout(() => setStationRelocateError(null), 3000);
+    return () => clearTimeout(t);
+  }, [stationRelocateError]);
+
+  // Clear ship multi-selection when the selected system changes
+  useEffect(() => {
+    setSelectedShipIds(new Set());
+  }, [selectedId]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -462,7 +682,63 @@ export function GalaxyMapClient({
   }
 
   // ── Click: select / deselect ──────────────────────────────────────────────
+  function toggleShipSelection(shipId: string) {
+    setSelectedShipIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(shipId)) next.delete(shipId);
+      else next.add(shipId);
+      return next;
+    });
+  }
+
+  async function handleDispatchSelected(shipIds: string[]) {
+    if (!selectedSystem || shipIds.length === 0) return;
+    setMultiDispatchLoading(true);
+    setShipDispatchError(null);
+    const errors: string[] = [];
+    await Promise.all(
+      shipIds.map(async (shipId) => {
+        try {
+          const res = await fetch("/api/game/travel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ destinationSystemId: selectedSystem.id, shipId }),
+          });
+          const json = await res.json();
+          if (!json.ok) errors.push(json.error?.message ?? "Dispatch failed.");
+        } catch {
+          errors.push("Network error.");
+        }
+      }),
+    );
+    setMultiDispatchLoading(false);
+    if (errors.length > 0) {
+      setShipDispatchError(errors[0]);
+    } else {
+      setSelectedShipIds(new Set());
+      router.refresh();
+    }
+  }
+
+  function handleShipMarkerMouseDown(e: React.MouseEvent, ship: GalaxyShip) {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const info: DragInfo = { ship, clientX: e.clientX, clientY: e.clientY, targetId: null };
+    setDragInfo(info);
+    dragInfoRef.current = info;
+  }
+
+  function handleStationMarkerMouseDown(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (e.button !== 0) return;
+    const info: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: null };
+    setStationDrag(info);
+    stationDragRef.current = info;
+  }
+
   function handleStarClick(e: React.MouseEvent, systemId: string) {
+    // Suppress click after a drag ended over this star
+    if (didDragRef.current) { didDragRef.current = false; return; }
     e.stopPropagation();
     setSelectedId((prev) => (prev === systemId ? null : systemId));
     setSelectedAsteroidId(null);
@@ -480,6 +756,8 @@ export function GalaxyMapClient({
   }
 
   function handleMapClick() {
+    // Suppress deselect after a drag ends on the map background
+    if (didDragRef.current) { didDragRef.current = false; return; }
     setSelectedId(null);
     setSelectedAsteroidId(null);
     setTravelError(null);
@@ -620,11 +898,11 @@ export function GalaxyMapClient({
           ref={svgRef}
           viewBox={`0 0 ${viewboxW} ${viewboxH}`}
           className="h-full w-full"
-          style={{ cursor: isPanning.current ? "grabbing" : "grab" }}
+          style={{ cursor: (dragInfo || stationDrag) ? ((dragInfo?.targetId ?? stationDrag?.targetId) ? "copy" : "grabbing") : isPanning.current ? "grabbing" : "grab" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
-          onMouseUp={endPan}
-          onMouseLeave={endPan}
+          onMouseUp={handleMouseUp}
+          onMouseLeave={handleMouseLeave}
           onClick={handleMapClick}
         >
           {/* ── Defs: glow filter, markers ──────────────────────────────── */}
@@ -722,38 +1000,98 @@ export function GalaxyMapClient({
             {travelLines.map((tl) => {
               const midX = (tl.x1 + tl.x2) / 2;
               const midY = (tl.y1 + tl.y2) / 2;
+              const lineColor  = tl.isFleet ? "#a78bfa" : "#818cf8";
+              const labelColor = tl.isFleet ? "#c4b5fd" : "#a5b4fc";
+
+              // Interpolated ship position along the route
+              let shipX: number | null = null;
+              let shipY: number | null = null;
+              if (tl.departAt && tl.arriveAt) {
+                const now = Date.now();
+                const depart = new Date(tl.departAt).getTime();
+                const arrive = new Date(tl.arriveAt).getTime();
+                const total = arrive - depart;
+                if (total > 0) {
+                  const t = Math.max(0, Math.min(1, (now - depart) / total));
+                  shipX = tl.x1 + (tl.x2 - tl.x1) * t;
+                  shipY = tl.y1 + (tl.y2 - tl.y1) * t;
+                }
+              }
+
+              // ETA string for midpoint label
+              const etaStr = tl.arriveAt
+                ? (() => {
+                    const msLeft = new Date(tl.arriveAt).getTime() - Date.now();
+                    return msLeft > 0 ? ` · ${formatEta(Math.max(0, msLeft / 3600000))}` : " · arriving";
+                  })()
+                : "";
+
+              // Dim this line if a different system is selected and this line doesn't touch it
+              const hasSelection = selectedId !== null;
+              const isRelated = !hasSelection || tl.fromSystemId === selectedId || tl.toSystemId === selectedId;
+              const lineOpacity = isRelated ? 1 : 0.25;
+
               return (
-                <g key={tl.key} pointerEvents="none">
-                  {/* Animated dashed travel line */}
+                <g key={tl.key} pointerEvents="none" opacity={lineOpacity}>
+                  {/* Soft glow underlay — gives the line visual weight on dark bg */}
                   <line
-                    x1={tl.x1}
-                    y1={tl.y1}
-                    x2={tl.x2}
-                    y2={tl.y2}
-                    stroke={tl.isFleet ? "#a78bfa" : "#6366f1"}
-                    strokeWidth={1.5 / scale}
-                    strokeDasharray={`${8 / scale} ${4 / scale}`}
-                    opacity={0.65}
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={10 / scale}
+                    opacity={0.07}
                   />
-                  {/* Arrowhead at destination */}
+                  {/* Main dashed line — brighter and slightly thicker than before */}
+                  <line
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={2 / scale}
+                    strokeDasharray={`${8 / scale} ${5 / scale}`}
+                    opacity={0.80}
+                  />
+                  {/* Origin dot — marks departure point */}
                   <circle
-                    cx={tl.x2}
-                    cy={tl.y2}
+                    cx={tl.x1} cy={tl.y1}
                     r={3 / scale}
-                    fill={tl.isFleet ? "#a78bfa" : "#6366f1"}
-                    opacity={0.8}
+                    fill={lineColor}
+                    opacity={0.55}
                   />
-                  {/* Ship name label at midpoint (visible when zoomed in) */}
-                  {scale >= 1.5 && (
+                  {/* Destination: outer ring + solid center */}
+                  <circle
+                    cx={tl.x2} cy={tl.y2}
+                    r={6 / scale}
+                    fill="none"
+                    stroke={lineColor}
+                    strokeWidth={1.5 / scale}
+                    opacity={0.75}
+                  />
+                  <circle
+                    cx={tl.x2} cy={tl.y2}
+                    r={2.5 / scale}
+                    fill={lineColor}
+                    opacity={0.95}
+                  />
+                  {/* Ship marker — actual interpolated position along route */}
+                  {shipX !== null && shipY !== null && (
+                    <circle
+                      cx={shipX} cy={shipY}
+                      r={4.5 / scale}
+                      fill={labelColor}
+                      stroke="#06060a"
+                      strokeWidth={1.5 / scale}
+                      filter="url(#glow)"
+                    />
+                  )}
+                  {/* Label: ship name + ETA — visible at moderate zoom */}
+                  {scale >= 0.8 && (
                     <text
                       x={midX}
-                      y={midY - 5 / scale}
-                      fill={tl.isFleet ? "#c4b5fd" : "#a5b4fc"}
-                      fontSize={9 / scale}
+                      y={midY - 8 / scale}
+                      fill={labelColor}
+                      fontSize={9 / scale < 7 ? 7 : 9 / scale > 11 ? 11 : 9 / scale}
                       textAnchor="middle"
-                      opacity={0.8}
+                      opacity={0.90}
                     >
-                      {tl.label}
+                      {tl.label}{etaStr}
                     </text>
                   )}
                 </g>
@@ -816,6 +1154,20 @@ export function GalaxyMapClient({
                     />
                   )}
 
+                  {/* Drag-target highlight ring — ship drag or station relocation */}
+                  {(dragInfo?.targetId === sys.id || stationDrag?.targetId === sys.id) && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 10}
+                      fill="none"
+                      stroke={stationDrag?.targetId === sys.id ? "#fbbf24" : "#a5b4fc"}
+                      strokeWidth={2 / scale}
+                      opacity={0.9}
+                      filter="url(#glow)"
+                    />
+                  )}
+
                   {/* Star glow (discovered/important only) */}
                   {(sys.isDiscovered || sys.colonyCount > 0) && (
                     <circle
@@ -866,16 +1218,29 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* In-transit target marker */}
+                  {/* Transit origin marker — ship departed from here */}
+                  {sys.isTransitOrigin && !sys.isCurrentLocation && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 7}
+                      fill="none"
+                      stroke="#6366f1"
+                      strokeWidth={1 / scale}
+                      opacity={0.35}
+                    />
+                  )}
+                  {/* In-transit destination marker — ship is heading here */}
                   {sys.isInTransitTarget && (
                     <circle
                       cx={sys.svgX}
                       cy={sys.svgY}
-                      r={r + 4}
+                      r={r + 5}
                       fill="none"
-                      stroke="#6366f1"
-                      strokeWidth={1 / scale}
-                      strokeDasharray={`${3 / scale} ${3 / scale}`}
+                      stroke="#818cf8"
+                      strokeWidth={1.5 / scale}
+                      strokeDasharray={`${4 / scale} ${3 / scale}`}
+                      opacity={0.80}
                     />
                   )}
 
@@ -994,6 +1359,98 @@ export function GalaxyMapClient({
               );
             })}
 
+            {/* ── Docked ship markers (draggable) ─────────────────────────── */}
+            {ships.filter((s) => s.systemId !== null).map((ship) => {
+              const sys = systemMap.get(ship.systemId!);
+              if (!sys) return null;
+              const shipsAtSys = shipsBySystem.get(ship.systemId!) ?? [];
+              const idx = shipsAtSys.indexOf(ship);
+              const count = shipsAtSys.length;
+              const starR = nodeRadius(sys);
+              // Spread horizontally above the star
+              const mx = sys.svgX + (idx - (count - 1) / 2) * 11;
+              const my = sys.svgY - starR - 14;
+              const isDraggingThis = dragInfo?.ship.id === ship.id;
+              return (
+                <g
+                  key={`shipmarker-${ship.id}`}
+                  style={{ cursor: "grab" }}
+                  onMouseDown={(e) => handleShipMarkerMouseDown(e, ship)}
+                >
+                  {/* Outer ring */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={6 / scale}
+                    fill="none"
+                    stroke="#6366f1"
+                    strokeWidth={1.5 / scale}
+                    opacity={isDraggingThis ? 0.25 : 0.65}
+                  />
+                  {/* Inner dot */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={3.5 / scale}
+                    fill={isDraggingThis ? "#a5b4fc" : "#818cf8"}
+                    stroke="#06060a"
+                    strokeWidth={0.8 / scale}
+                    filter="url(#glow)"
+                    opacity={isDraggingThis ? 0.4 : 1}
+                  />
+                </g>
+              );
+            })}
+
+            {/* ── Station marker (draggable to relocate) ──────────────────── */}
+            {stationSystem && (() => {
+              const sys = stationSystem;
+              const starR = nodeRadius(sys);
+              // Position station marker below-right of the star (avoids ship marker area)
+              const mx = sys.svgX + starR + 10;
+              const my = sys.svgY + starR + 10;
+              const isDragging = stationDrag !== null;
+              return (
+                <g
+                  key="station-marker"
+                  style={{ cursor: stationRelocateLoading ? "wait" : "grab" }}
+                  onMouseDown={handleStationMarkerMouseDown}
+                >
+                  {/* Outer amber ring */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={7 / scale}
+                    fill="none"
+                    stroke="#f59e0b"
+                    strokeWidth={1.5 / scale}
+                    opacity={isDragging ? 0.25 : 0.80}
+                  />
+                  {/* Inner amber dot */}
+                  <circle
+                    cx={mx} cy={my}
+                    r={4 / scale}
+                    fill={isDragging ? "#fcd34d" : "#f59e0b"}
+                    stroke="#06060a"
+                    strokeWidth={0.8 / scale}
+                    filter="url(#glow)"
+                    opacity={isDragging ? 0.35 : 1}
+                  />
+                  {/* "S" label at higher zoom */}
+                  {scale >= 1.5 && (
+                    <text
+                      x={mx}
+                      y={my + 3.5 / scale}
+                      textAnchor="middle"
+                      fontSize={5 / scale < 4 ? 4 : 5 / scale > 7 ? 7 : 5 / scale}
+                      fill="#06060a"
+                      fontWeight="bold"
+                      className="select-none pointer-events-none"
+                    >
+                      S
+                    </text>
+                  )}
+                </g>
+              );
+            })()}
+
             {/* ── Alliance beacons ─────────────────────────────────────────── */}
             {systems.map((sys) => {
               const sysBeacons = beaconsBySystem.get(sys.id);
@@ -1075,6 +1532,47 @@ export function GalaxyMapClient({
           </g>
         </svg>
 
+        {/* ── Drag ghost overlay ───────────────────────────────────────── */}
+        {dragInfo && (
+          <div
+            className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-indigo-700 bg-indigo-950/95 px-2 py-1 text-xs text-indigo-200 shadow-lg"
+            style={{ left: dragInfo.clientX + 14, top: dragInfo.clientY - 14 }}
+          >
+            <span>{dragInfo.ship.name}</span>
+            {dragInfo.targetId ? (
+              <span className="text-indigo-400">
+                → {systemMap.get(dragInfo.targetId)?.name ?? dragInfo.targetId}
+              </span>
+            ) : (
+              <span className="text-indigo-700">drag to system</span>
+            )}
+          </div>
+        )}
+
+        {/* ── Station drag ghost overlay ────────────────────────────────── */}
+        {stationDrag && (
+          <div
+            className="pointer-events-none fixed z-50 flex items-center gap-1.5 rounded border border-amber-700 bg-amber-950/95 px-2 py-1 text-xs text-amber-200 shadow-lg"
+            style={{ left: stationDrag.clientX + 14, top: stationDrag.clientY - 14 }}
+          >
+            <span>Station</span>
+            {stationDrag.targetId ? (
+              <span className="text-amber-400">
+                → {systemMap.get(stationDrag.targetId)?.name ?? stationDrag.targetId}
+              </span>
+            ) : (
+              <span className="text-amber-800">drag to system</span>
+            )}
+          </div>
+        )}
+
+        {/* ── Drag dispatch error ───────────────────────────────────────── */}
+        {(dragError || stationRelocateError) && (
+          <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-red-800 bg-red-950/90 px-3 py-1.5 text-xs text-red-300 shadow-lg">
+            {dragError ?? stationRelocateError}
+          </div>
+        )}
+
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
           <button
@@ -1117,6 +1615,10 @@ export function GalaxyMapClient({
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full bg-amber-400" />
             Steward
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />
+            Station (drag to move)
           </span>
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
@@ -1384,9 +1886,32 @@ export function GalaxyMapClient({
 
               {/* Colonies */}
               {selectedSystem.colonyCount > 0 && (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Your colonies</span>
-                  <span className="text-xs text-emerald-300">{selectedSystem.colonyCount}</span>
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Your colonies</span>
+                    <span className="text-xs text-emerald-300">{selectedSystem.colonyCount}</span>
+                  </div>
+                  {/* Ships whose pinned colony is in this system */}
+                  {(() => {
+                    const assignedHere = ships.filter(
+                      (s) => s.pinnedColonySystemId === selectedSystem.id,
+                    );
+                    if (assignedHere.length === 0) return null;
+                    return (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {assignedHere.map((s) => (
+                          <span
+                            key={s.id}
+                            className="rounded border border-indigo-900/50 bg-indigo-950/40 px-1.5 py-0.5 text-xs text-indigo-400"
+                            title={`${s.name} is pinned to a colony here`}
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                        <span className="text-xs text-indigo-700 self-center">assigned</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -1495,85 +2020,245 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* ── Per-ship dispatch ─────────────────────────────────────── */}
-              {ships.length > 0 && (
-                <div className="py-2">
-                  <p className="mb-1.5 text-xs font-medium uppercase tracking-wider text-zinc-600">
-                    Ships
-                  </p>
-                  {shipDispatchError && (
-                    <p className="mb-1 text-xs text-red-400">{shipDispatchError}</p>
-                  )}
-                  <div className="space-y-1.5">
-                    {ships.map((ship) => {
-                      const isHere = ship.systemId === selectedSystem.id;
-                      const isInTransit = ship.systemId === null;
-                      const shipCurrentSystem =
-                        !isHere && !isInTransit
-                          ? (systems.find((s) => s.id === ship.systemId) ?? null)
-                          : null;
-                      const distLy = shipCurrentSystem
-                        ? dist3D(shipCurrentSystem, selectedSystem)
-                        : null;
-                      const inRange = distLy !== null && distLy <= baseRangeLy + 0.01;
-                      const etaHr =
-                        inRange && distLy !== null
-                          ? distLy / ship.speedLyPerHr
-                          : null;
-                      return (
-                        <div
-                          key={ship.id}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-xs text-zinc-300">
-                              {ship.name}
-                            </p>
-                            {!isHere && !isInTransit && distLy !== null && (
-                              <p className="text-xs text-zinc-700">
-                                {formatDist(distLy)}
-                                {etaHr !== null
-                                  ? ` · ${formatEta(etaHr)}`
-                                  : ""}
-                              </p>
-                            )}
-                          </div>
-                          <div className="shrink-0">
-                            {isHere ? (
-                              <span className="text-xs text-emerald-500">
-                                Docked
-                              </span>
-                            ) : isInTransit ? (
-                              <span className="text-xs text-zinc-600">
-                                In transit
-                              </span>
-                            ) : (
-                              <button
-                                onClick={() => handleDispatchShip(ship.id)}
-                                disabled={
-                                  !inRange ||
-                                  shipDispatchLoading === ship.id
-                                }
-                                className={`rounded border px-2 py-0.5 text-xs transition-colors ${
-                                  inRange
-                                    ? "border-indigo-700 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50"
-                                    : "cursor-not-allowed border-zinc-800 text-zinc-700"
+              {/* ── Ship dispatch ─────────────────────────────────────── */}
+              {ships.length > 0 && (() => {
+                // Categorise ships relative to the selected system
+                const shipsHere = ships.filter((s) => s.systemId === selectedSystem.id);
+                const shipsInTransit = ships.filter((s) => s.systemId === null);
+
+                // Ships docked elsewhere — compute range + ETA
+                type Candidate = { ship: GalaxyShip; sys: GalaxySystem; distLy: number; etaHr: number; inRange: boolean };
+                const candidates: Candidate[] = ships
+                  .filter((s) => s.systemId !== null && s.systemId !== selectedSystem.id)
+                  .flatMap((ship) => {
+                    const sys = systemMap.get(ship.systemId!);
+                    if (!sys) return [];
+                    const distLy = dist3D(sys, selectedSystem);
+                    const inRange = distLy <= baseRangeLy + 0.01;
+                    return [{ ship, sys, distLy, etaHr: distLy / ship.speedLyPerHr, inRange }];
+                  });
+                const inRange = candidates.filter((c) => c.inRange);
+                const outOfRange = candidates.filter((c) => !c.inRange);
+
+                // Multi-select helpers
+                const selectedInRange = inRange.filter((c) => selectedShipIds.has(c.ship.id));
+                const allInRangeSelected = inRange.length > 0 && inRange.every((c) => selectedShipIds.has(c.ship.id));
+
+                return (
+                  <div className="py-2">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                      Ships
+                    </p>
+                    {shipDispatchError && (
+                      <p className="mb-2 text-xs text-red-400">{shipDispatchError}</p>
+                    )}
+
+                    {/* Ships already docked here */}
+                    {shipsHere.length > 0 && (
+                      <div className="mb-3">
+                        <p className="mb-1.5 text-xs text-zinc-700">
+                          {selectedSystem.isStationLocation ? "At station" : "In system"}
+                        </p>
+                        <div className="space-y-1">
+                          {shipsHere.map((ship) => {
+                            const pinnedSysName = ship.pinnedColonySystemId
+                              ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                              : null;
+                            return (
+                              <div
+                                key={ship.id}
+                                className="rounded border border-zinc-800/70 bg-zinc-900/40 px-2.5 py-1.5"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 opacity-70" />
+                                  <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
+                                  {ship.dispatchMode !== "manual" && (
+                                    <span className="shrink-0 rounded border border-teal-900/50 bg-teal-950/40 px-1 py-0.5 text-xs text-teal-600">
+                                      Auto
+                                    </span>
+                                  )}
+                                </div>
+                                {pinnedSysName && (
+                                  <p className="mt-0.5 pl-3.5 text-xs text-indigo-500/80">
+                                    Pinned → {pinnedSysName}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Eligible ships to dispatch here */}
+                    {inRange.length > 0 && (
+                      <div className="mb-3">
+                        {/* Section header with select-all toggle */}
+                        <div className="mb-1.5 flex items-center justify-between">
+                          <p className="text-xs text-zinc-700">
+                            Send here
+                            <span className="ml-1 text-zinc-800">({inRange.length})</span>
+                          </p>
+                          {inRange.length > 1 && (
+                            <button
+                              onClick={() =>
+                                allInRangeSelected
+                                  ? setSelectedShipIds(new Set())
+                                  : setSelectedShipIds(new Set(inRange.map((c) => c.ship.id)))
+                              }
+                              className="text-xs text-zinc-700 hover:text-zinc-400 transition-colors"
+                            >
+                              {allInRangeSelected ? "Deselect all" : "Select all"}
+                            </button>
+                          )}
+                        </div>
+
+                        {/* Ship rows with checkboxes */}
+                        <div className="space-y-1.5">
+                          {inRange.map(({ ship, sys, etaHr }) => {
+                            const isSelected = selectedShipIds.has(ship.id);
+                            const pinnedSysName = ship.pinnedColonySystemId
+                              ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                              : null;
+                            const isPinnedHere = ship.pinnedColonySystemId === selectedSystem.id;
+                            return (
+                              <div
+                                key={ship.id}
+                                className={`flex items-center gap-2 rounded border px-2 py-1.5 transition-colors ${
+                                  isSelected
+                                    ? "border-indigo-700/50 bg-indigo-950/30"
+                                    : "border-zinc-800 bg-zinc-900/50"
                                 }`}
                               >
-                                {shipDispatchLoading === ship.id
-                                  ? "…"
-                                  : inRange
-                                    ? "Dispatch"
-                                    : "Out of range"}
+                                <input
+                                  type="checkbox"
+                                  checked={isSelected}
+                                  onChange={() => toggleShipSelection(ship.id)}
+                                  className="shrink-0 cursor-pointer accent-indigo-500"
+                                />
+                                {/* Clicking the info area also toggles */}
+                                <div
+                                  className="min-w-0 flex-1 cursor-pointer"
+                                  onClick={() => toggleShipSelection(ship.id)}
+                                >
+                                  <p className="truncate text-xs font-medium text-zinc-200">
+                                    {ship.name}
+                                  </p>
+                                  <p className="text-xs text-zinc-600">
+                                    {sys.name} · {formatEta(etaHr)}
+                                    {ship.dispatchMode !== "manual" && (
+                                      <span className="ml-1 text-amber-600/80">· Auto</span>
+                                    )}
+                                    {isPinnedHere && (
+                                      <span className="ml-1 text-indigo-500">· Pinned here</span>
+                                    )}
+                                    {pinnedSysName && !isPinnedHere && (
+                                      <span className="ml-1 text-zinc-700">· Pinned: {pinnedSysName}</span>
+                                    )}
+                                  </p>
+                                </div>
+                                <button
+                                  onClick={() => handleDispatchShip(ship.id)}
+                                  disabled={shipDispatchLoading === ship.id || multiDispatchLoading}
+                                  className="shrink-0 rounded border border-indigo-700 bg-indigo-950/50 px-2.5 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 disabled:opacity-50 transition-colors"
+                                >
+                                  {shipDispatchLoading === ship.id ? "…" : "Send"}
+                                </button>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Batch action buttons */}
+                        {inRange.length > 1 && (
+                          <div className="mt-2">
+                            {selectedInRange.length > 0 ? (
+                              <button
+                                onClick={() => handleDispatchSelected(selectedInRange.map((c) => c.ship.id))}
+                                disabled={multiDispatchLoading}
+                                className="w-full rounded border border-indigo-600 bg-indigo-950/60 px-2 py-1.5 text-xs font-medium text-indigo-200 hover:bg-indigo-900/60 disabled:opacity-50 transition-colors"
+                              >
+                                {multiDispatchLoading
+                                  ? "Sending…"
+                                  : `Send selected (${selectedInRange.length})`}
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleDispatchSelected(inRange.map((c) => c.ship.id))}
+                                disabled={multiDispatchLoading}
+                                className="w-full rounded border border-zinc-700 bg-zinc-900/50 px-2 py-1.5 text-xs text-zinc-400 hover:border-zinc-600 hover:text-zinc-200 disabled:opacity-50 transition-colors"
+                              >
+                                {multiDispatchLoading ? "Sending…" : `Send all (${inRange.length})`}
                               </button>
                             )}
                           </div>
-                        </div>
-                      );
-                    })}
+                        )}
+                      </div>
+                    )}
+
+                    {/* Out-of-range ships (dimmed, no button) */}
+                    {outOfRange.length > 0 && (
+                      <div className="mb-3 space-y-1">
+                        <p className="text-xs text-zinc-800">Out of range</p>
+                        {outOfRange.map(({ ship, sys }) => (
+                          <div key={ship.id} className="flex items-center justify-between gap-2">
+                            <p className="truncate text-xs text-zinc-700">{ship.name}</p>
+                            <p className="text-xs text-zinc-800 shrink-0">{sys.name}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* In-transit ships */}
+                    {shipsInTransit.length > 0 && (
+                      <div className="space-y-1">
+                        <p className="text-xs text-zinc-700">In transit</p>
+                        {shipsInTransit.map((ship) => {
+                          const destName = ship.destinationSystemId
+                            ? (systemMap.get(ship.destinationSystemId)?.name ?? ship.destinationSystemId)
+                            : null;
+                          const msLeft = ship.arriveAt
+                            ? new Date(ship.arriveAt).getTime() - Date.now()
+                            : null;
+                          const pinnedSysName = ship.pinnedColonySystemId
+                            ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                            : null;
+                          return (
+                            <div key={ship.id} className="flex items-center justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="truncate text-xs text-zinc-600">{ship.name}</p>
+                                {pinnedSysName && (
+                                  <p className="text-xs text-indigo-600/70">
+                                    Pinned → {pinnedSysName}
+                                  </p>
+                                )}
+                              </div>
+                              <div className="text-right shrink-0">
+                                {destName && (
+                                  <p className="text-xs text-indigo-400/70">→ {destName}</p>
+                                )}
+                                {msLeft !== null && (
+                                  <p className="text-xs text-zinc-700">
+                                    {msLeft > 0 ? formatEta(Math.max(0, msLeft / 3600000)) : "Arriving"}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+
+                    {/* Empty state */}
+                    {inRange.length === 0 && shipsHere.length === 0 && shipsInTransit.length === 0 && outOfRange.length === 0 && (
+                      <p className="text-xs text-zinc-700">No ships available.</p>
+                    )}
+                    {inRange.length === 0 && shipsHere.length + shipsInTransit.length + outOfRange.length === ships.length && (
+                      <p className="text-xs text-zinc-800 text-center mt-1">No ships in range to dispatch here.</p>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
             </div>
 
             {/* Action buttons */}

@@ -55,6 +55,8 @@ export function rankColonyCandidates(
   colonies: { id: string; system_id: string }[],
   colonyInvTotals: Map<string, number>,
   mode: "auto_collect_nearest" | "auto_collect_highest",
+  /** If set, this colony is sorted to the top of the list (player assignment). */
+  pinnedColonyId?: string | null,
 ): AutoColonyCandidate[] {
   if (!ship.current_system_id) return [];
 
@@ -84,10 +86,21 @@ export function rankColonyCandidates(
     candidates.push({ colonyId: colony.id, systemId: colony.system_id, totalInventory: total, distanceLy });
   }
 
-  if (mode === "auto_collect_nearest") {
-    return candidates.sort((a, b) => a.distanceLy - b.distanceLy || b.totalInventory - a.totalInventory);
+  // Sort by mode, then promote pinned colony to top if it is a valid candidate
+  const sorted = mode === "auto_collect_nearest"
+    ? candidates.sort((a, b) => a.distanceLy - b.distanceLy || b.totalInventory - a.totalInventory)
+    : candidates.sort((a, b) => b.totalInventory - a.totalInventory || a.distanceLy - b.distanceLy);
+
+  if (pinnedColonyId) {
+    const pinnedIdx = sorted.findIndex((c) => c.colonyId === pinnedColonyId);
+    if (pinnedIdx > 0) {
+      // Move pinned colony to position 0 without mutating the rest of the order
+      const [pinned] = sorted.splice(pinnedIdx, 1);
+      sorted.unshift(pinned);
+    }
   }
-  return candidates.sort((a, b) => b.totalInventory - a.totalInventory || a.distanceLy - b.distanceLy);
+
+  return sorted;
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +126,21 @@ export function autoStateLabel(
     default:
       return "Idle";
   }
+}
+
+/**
+ * Formats a millisecond duration as a human-readable ETA string.
+ * Used by server-rendered pages to show time remaining for ships in transit.
+ *
+ * Examples: "< 1 min", "34 min", "2h 15m", "7h"
+ */
+export function formatEtaMs(remainingMs: number): string {
+  if (remainingMs <= 0) return "arriving";
+  const totalMin = Math.ceil(remainingMs / 60000);
+  if (totalMin < 60) return `${totalMin} min`;
+  const hours = Math.floor(totalMin / 60);
+  const mins = totalMin % 60;
+  return mins > 0 ? `${hours}h ${mins}m` : `${hours}h`;
 }
 
 /** Human-readable label for a ShipDispatchMode value. */
