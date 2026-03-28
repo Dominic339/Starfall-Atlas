@@ -116,14 +116,14 @@ export default async function GalaxyMapPage() {
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
       .from("ships")
-      .select("id, name, current_system_id, destination_system_id, dispatch_mode, auto_state, speed_ly_per_hr, cargo_cap")
+      .select("id, name, current_system_id, destination_system_id, dispatch_mode, auto_state, speed_ly_per_hr, cargo_cap, pinned_colony_id")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
 
-    // Active colonies — need system_id
+    // Active colonies — need id + system_id (id used to resolve pinned_colony_id → system)
     admin
       .from("colonies")
-      .select("system_id")
+      .select("id, system_id")
       .eq("owner_id", player.id)
       .eq("status", "active"),
 
@@ -195,8 +195,8 @@ export default async function GalaxyMapPage() {
   await resolveOverdueDisputes(admin);
 
   // ── Parse results ─────────────────────────────────────────────────────────
-  type ShipRow = { id: string; name: string; current_system_id: string | null; destination_system_id: string | null; dispatch_mode: string; auto_state: string | null; speed_ly_per_hr: number; cargo_cap: number };
-  type ColonyRow = { system_id: string };
+  type ShipRow = { id: string; name: string; current_system_id: string | null; destination_system_id: string | null; dispatch_mode: string; auto_state: string | null; speed_ly_per_hr: number; cargo_cap: number; pinned_colony_id: string | null };
+  type ColonyRow = { id: string; system_id: string };
   type DiscoveryRow = { system_id: string };
   type FleetRow = { id: string; name: string; current_system_id: string | null; status: string };
   type TravelRow = { id: string; ship_id: string; fleet_id: string | null; from_system_id: string; to_system_id: string; arrive_at: string; depart_at: string };
@@ -283,6 +283,8 @@ export default async function GalaxyMapPage() {
   // ── Build lookup sets ─────────────────────────────────────────────────────
   const discoveredSystemIds = new Set(discoveries.map((d) => d.system_id));
   const colonySystemIds     = new Map<string, number>(); // systemId → count
+  // colonyById: colonyId → systemId (for resolving pinned_colony_id → system)
+  const colonyById          = new Map<string, string>(colonies.map((c) => [c.id, c.system_id]));
   for (const c of colonies) {
     colonySystemIds.set(c.system_id, (colonySystemIds.get(c.system_id) ?? 0) + 1);
   }
@@ -363,6 +365,7 @@ export default async function GalaxyMapPage() {
       autoState: s.auto_state,
       speedLyPerHr: Number(s.speed_ly_per_hr),
       cargoCap: s.cargo_cap,
+      pinnedColonySystemId: s.pinned_colony_id ? (colonyById.get(s.pinned_colony_id) ?? null) : null,
     };
   });
 

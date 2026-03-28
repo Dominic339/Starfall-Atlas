@@ -72,6 +72,11 @@ export interface GalaxyShip {
   autoState: string | null;
   speedLyPerHr: number;
   cargoCap: number;
+  /**
+   * System ID of the player's pinned colony for this ship (derived server-side
+   * from pinned_colony_id → colonies.system_id). Null when unassigned.
+   */
+  pinnedColonySystemId: string | null;
 }
 
 export interface GalaxyFleet {
@@ -1881,9 +1886,32 @@ export function GalaxyMapClient({
 
               {/* Colonies */}
               {selectedSystem.colonyCount > 0 && (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Your colonies</span>
-                  <span className="text-xs text-emerald-300">{selectedSystem.colonyCount}</span>
+                <div className="py-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs text-zinc-600">Your colonies</span>
+                    <span className="text-xs text-emerald-300">{selectedSystem.colonyCount}</span>
+                  </div>
+                  {/* Ships whose pinned colony is in this system */}
+                  {(() => {
+                    const assignedHere = ships.filter(
+                      (s) => s.pinnedColonySystemId === selectedSystem.id,
+                    );
+                    if (assignedHere.length === 0) return null;
+                    return (
+                      <div className="mt-1.5 flex flex-wrap gap-1">
+                        {assignedHere.map((s) => (
+                          <span
+                            key={s.id}
+                            className="rounded border border-indigo-900/50 bg-indigo-950/40 px-1.5 py-0.5 text-xs text-indigo-400"
+                            title={`${s.name} is pinned to a colony here`}
+                          >
+                            {s.name}
+                          </span>
+                        ))}
+                        <span className="text-xs text-indigo-700 self-center">assigned</span>
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 
@@ -2032,20 +2060,32 @@ export function GalaxyMapClient({
                           {selectedSystem.isStationLocation ? "At station" : "In system"}
                         </p>
                         <div className="space-y-1">
-                          {shipsHere.map((ship) => (
-                            <div
-                              key={ship.id}
-                              className="flex items-center gap-2 rounded border border-zinc-800/70 bg-zinc-900/40 px-2.5 py-1.5"
-                            >
-                              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 opacity-70" />
-                              <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
-                              {ship.dispatchMode !== "manual" && (
-                                <span className="shrink-0 rounded border border-teal-900/50 bg-teal-950/40 px-1 py-0.5 text-xs text-teal-600">
-                                  Auto
-                                </span>
-                              )}
-                            </div>
-                          ))}
+                          {shipsHere.map((ship) => {
+                            const pinnedSysName = ship.pinnedColonySystemId
+                              ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                              : null;
+                            return (
+                              <div
+                                key={ship.id}
+                                className="rounded border border-zinc-800/70 bg-zinc-900/40 px-2.5 py-1.5"
+                              >
+                                <div className="flex items-center gap-2">
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500 opacity-70" />
+                                  <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
+                                  {ship.dispatchMode !== "manual" && (
+                                    <span className="shrink-0 rounded border border-teal-900/50 bg-teal-950/40 px-1 py-0.5 text-xs text-teal-600">
+                                      Auto
+                                    </span>
+                                  )}
+                                </div>
+                                {pinnedSysName && (
+                                  <p className="mt-0.5 pl-3.5 text-xs text-indigo-500/80">
+                                    Pinned → {pinnedSysName}
+                                  </p>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2077,6 +2117,10 @@ export function GalaxyMapClient({
                         <div className="space-y-1.5">
                           {inRange.map(({ ship, sys, etaHr }) => {
                             const isSelected = selectedShipIds.has(ship.id);
+                            const pinnedSysName = ship.pinnedColonySystemId
+                              ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                              : null;
+                            const isPinnedHere = ship.pinnedColonySystemId === selectedSystem.id;
                             return (
                               <div
                                 key={ship.id}
@@ -2104,6 +2148,12 @@ export function GalaxyMapClient({
                                     {sys.name} · {formatEta(etaHr)}
                                     {ship.dispatchMode !== "manual" && (
                                       <span className="ml-1 text-amber-600/80">· Auto</span>
+                                    )}
+                                    {isPinnedHere && (
+                                      <span className="ml-1 text-indigo-500">· Pinned here</span>
+                                    )}
+                                    {pinnedSysName && !isPinnedHere && (
+                                      <span className="ml-1 text-zinc-700">· Pinned: {pinnedSysName}</span>
                                     )}
                                   </p>
                                 </div>
@@ -2170,9 +2220,19 @@ export function GalaxyMapClient({
                           const msLeft = ship.arriveAt
                             ? new Date(ship.arriveAt).getTime() - Date.now()
                             : null;
+                          const pinnedSysName = ship.pinnedColonySystemId
+                            ? (systemMap.get(ship.pinnedColonySystemId)?.name ?? ship.pinnedColonySystemId)
+                            : null;
                           return (
                             <div key={ship.id} className="flex items-center justify-between gap-2">
-                              <p className="truncate text-xs text-zinc-600">{ship.name}</p>
+                              <div className="min-w-0">
+                                <p className="truncate text-xs text-zinc-600">{ship.name}</p>
+                                {pinnedSysName && (
+                                  <p className="text-xs text-indigo-600/70">
+                                    Pinned → {pinnedSysName}
+                                  </p>
+                                )}
+                              </div>
                               <div className="text-right shrink-0">
                                 {destName && (
                                   <p className="text-xs text-indigo-400/70">→ {destName}</p>
