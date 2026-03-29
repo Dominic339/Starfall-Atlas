@@ -53,14 +53,14 @@ export function ShipAssignColonyControl({
   }
 
   return (
-    <div className="space-y-1">
+    <div className="space-y-1.5">
       <select
         value={currentPinnedColonyId ?? ""}
         disabled={loading || colonies.length === 0}
         onChange={(e) => handleChange(e.target.value || null)}
-        className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none disabled:opacity-50"
+        className="w-full rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 focus:border-indigo-600 focus:outline-none disabled:opacity-50 transition-colors"
       >
-        <option value="">— No assignment</option>
+        <option value="">— No assignment (auto-select)</option>
         {colonies.map((c) => (
           <option key={c.id} value={c.id}>
             {c.label}

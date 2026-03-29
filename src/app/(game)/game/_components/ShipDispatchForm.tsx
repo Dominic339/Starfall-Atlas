@@ -64,7 +64,7 @@ export function ShipDispatchForm({ shipId, targetSystems }: ShipDispatchFormProp
   }
 
   return (
-    <div className="mt-2 space-y-1.5">
+    <div className="mt-1.5 space-y-1.5">
       <div className="flex items-center gap-2">
         <select
           value={destId}
@@ -72,9 +72,9 @@ export function ShipDispatchForm({ shipId, targetSystems }: ShipDispatchFormProp
             setDestId(e.target.value);
             setError(null);
           }}
-          className="flex-1 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
+          className="flex-1 rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-sm text-zinc-300 focus:border-indigo-600 focus:outline-none transition-colors"
         >
-          <option value="">Dispatch to…</option>
+          <option value="">Select destination…</option>
           {targetSystems.map((s) => (
             <option key={s.id} value={s.id}>
               {s.name}
@@ -84,7 +84,7 @@ export function ShipDispatchForm({ shipId, targetSystems }: ShipDispatchFormProp
         <button
           onClick={handleDispatch}
           disabled={!destId || loading}
-          className="rounded border border-indigo-700 bg-indigo-950/60 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-40 transition-colors"
+          className="shrink-0 rounded-lg border border-indigo-700 bg-indigo-950/70 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-900/70 hover:border-indigo-600 disabled:opacity-40 transition-colors"
         >
           {loading ? "…" : "Send"}
         </button>
