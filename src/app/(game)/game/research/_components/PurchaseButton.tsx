@@ -6,14 +6,24 @@ import { useRouter } from "next/navigation";
 interface PurchaseButtonProps {
   researchId: string;
   costLabel: string;
+  /** When true, button renders in a disabled/locked visual state. */
+  disabled?: boolean;
+  /** Shown as button text and title tooltip when disabled. */
+  disabledReason?: string;
 }
 
-export function PurchaseButton({ researchId, costLabel }: PurchaseButtonProps) {
+export function PurchaseButton({
+  researchId,
+  costLabel,
+  disabled = false,
+  disabledReason,
+}: PurchaseButtonProps) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "loading" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   async function handlePurchase() {
+    if (disabled) return;
     setState("loading");
     setErrorMsg(null);
     try {
@@ -36,6 +46,15 @@ export function PurchaseButton({ researchId, costLabel }: PurchaseButtonProps) {
     }
   }
 
+  const isDisabled = disabled || state === "loading";
+
+  const label =
+    state === "loading"
+      ? "Researching…"
+      : disabled
+      ? (disabledReason ?? `Need ${costLabel}`)
+      : `Research  →`;
+
   return (
     <div className="mt-1.5">
       {errorMsg && (
@@ -43,12 +62,17 @@ export function PurchaseButton({ researchId, costLabel }: PurchaseButtonProps) {
       )}
       <button
         onClick={handlePurchase}
-        disabled={state === "loading"}
-        className="rounded bg-indigo-700 px-2.5 py-1 text-xs font-semibold text-white
-                   hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed
-                   transition-colors"
+        disabled={isDisabled}
+        title={disabled ? (disabledReason ?? `Need ${costLabel}`) : undefined}
+        className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+          disabled
+            ? "bg-zinc-700/60 text-zinc-500 cursor-not-allowed"
+            : state === "loading"
+            ? "bg-indigo-800 text-indigo-300 cursor-wait opacity-75"
+            : "bg-indigo-600 hover:bg-indigo-500 active:bg-indigo-700 text-white"
+        }`}
       >
-        {state === "loading" ? "Researching…" : `Research · ${costLabel}`}
+        {label}
       </button>
     </div>
   );
