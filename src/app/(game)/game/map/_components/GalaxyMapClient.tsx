@@ -180,6 +180,12 @@ interface GalaxyMapClientProps {
   viewboxH: number;
   /** Station 3D coordinates for distance-from-station computation. */
   stationCoords: { x: number; y: number; z: number } | null;
+  /** Player's alliance ID, null if not in an alliance. */
+  playerAllianceId: string | null;
+  /** True if the player has officer/founder role (can place beacons). */
+  canPlaceBeacon: boolean;
+  /** System IDs where the player's alliance already has an active beacon. */
+  playerAllianceBeaconSystemIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +298,9 @@ export function GalaxyMapClient({
   viewboxW,
   viewboxH,
   stationCoords,
+  playerAllianceId,
+  canPlaceBeacon,
+  playerAllianceBeaconSystemIds: _playerAllianceBeaconSystemIds,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -367,6 +376,10 @@ export function GalaxyMapClient({
   stationDragRef.current = stationDrag;
   const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
   const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
+  // ── Beacon placement state ─────────────────────────────────────────────────
+  const [beaconLoading, setBeaconLoading] = useState(false);
+  const [beaconError, setBeaconError] = useState<string | null>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
@@ -677,6 +690,13 @@ export function GalaxyMapClient({
     return () => clearTimeout(t);
   }, [stationRelocateError]);
 
+  // Auto-clear beacon error after 4 s
+  useEffect(() => {
+    if (!beaconError) return;
+    const t = setTimeout(() => setBeaconError(null), 4000);
+    return () => clearTimeout(t);
+  }, [beaconError]);
+
   // Clear ship multi-selection when the selected system changes
   useEffect(() => {
     setSelectedShipIds(new Set());
@@ -754,6 +774,50 @@ export function GalaxyMapClient({
     const info: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: null };
     setStationDrag(info);
     stationDragRef.current = info;
+  }
+
+  async function handlePlaceBeacon(systemId: string) {
+    setBeaconLoading(true);
+    setBeaconError(null);
+    try {
+      const res = await fetch("/api/game/alliance/beacon/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ systemId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setBeaconError(json.error?.message ?? "Failed to place beacon.");
+      }
+    } catch {
+      setBeaconError("Network error.");
+    } finally {
+      setBeaconLoading(false);
+    }
+  }
+
+  async function handleRemoveBeacon(beaconId: string) {
+    setBeaconLoading(true);
+    setBeaconError(null);
+    try {
+      const res = await fetch("/api/game/alliance/beacon/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beaconId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setBeaconError(json.error?.message ?? "Failed to remove beacon.");
+      }
+    } catch {
+      setBeaconError("Network error.");
+    } finally {
+      setBeaconLoading(false);
+    }
   }
 
   function handleStarClick(e: React.MouseEvent, systemId: string) {
@@ -2049,25 +2113,58 @@ export function GalaxyMapClient({
               )}
 
               {/* Alliance beacons */}
-              {beaconsInSelected.length > 0 && (
+              {(beaconsInSelected.length > 0 || canPlaceBeacon) && (
                 <div className="py-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-600">Beacons</span>
-                    <span className="text-xs text-indigo-400">
-                      {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {beaconsInSelected.map((b) => (
-                      <span
-                        key={b.id}
-                        title={b.allianceName}
-                        className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
-                      >
-                        [{b.allianceTag}]
+                    {beaconsInSelected.length > 0 && (
+                      <span className="text-xs text-indigo-400">
+                        {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
                       </span>
-                    ))}
+                    )}
                   </div>
+                  {beaconsInSelected.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {beaconsInSelected.map((b) => (
+                        <span
+                          key={b.id}
+                          title={b.allianceName}
+                          className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
+                        >
+                          [{b.allianceTag}]
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* Place / Remove beacon actions */}
+                  {canPlaceBeacon && selectedSystem && (() => {
+                    const myBeacon = playerAllianceId
+                      ? beaconsInSelected.find((b) => b.allianceId === playerAllianceId)
+                      : undefined;
+                    if (myBeacon) {
+                      return (
+                        <button
+                          onClick={() => handleRemoveBeacon(myBeacon.id)}
+                          disabled={beaconLoading}
+                          className="mt-2 w-full text-xs rounded border border-red-800/60 bg-red-950/40 px-2 py-1.5 text-red-400 hover:bg-red-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                        >
+                          {beaconLoading ? "Removing…" : "Remove Beacon"}
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        onClick={() => handlePlaceBeacon(selectedSystem.id)}
+                        disabled={beaconLoading}
+                        className="mt-2 w-full text-xs rounded border border-indigo-700/60 bg-indigo-950/40 px-2 py-1.5 text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                      >
+                        {beaconLoading ? "Placing…" : "Place Beacon (50 iron)"}
+                      </button>
+                    );
+                  })()}
+                  {beaconError && (
+                    <p className="mt-1 text-xs text-red-400">{beaconError}</p>
+                  )}
                 </div>
               )}
 

@@ -18,7 +18,7 @@ import { z } from "zod";
 import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult, listResult } from "@/lib/supabase/utils"; // maybeSingleResult used for colony + station + existing structure fetches
 import { structureBuildCost } from "@/lib/game/colonyStructures";
 import { BALANCE } from "@/lib/config/balance";
 import type { Colony, Structure, ResourceInventoryRow, PlayerStation } from "@/lib/types/game";
@@ -184,30 +184,35 @@ export async function POST(request: NextRequest) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await (admin as any)
       .from("structures")
-      .update({ tier: targetTier, is_active: true, built_at: now, updated_at: now })
+      .update({ tier: targetTier, is_active: true, built_at: now })
       .eq("id", existing.id);
     structureId = existing.id;
   } else {
     // New build: insert row
-    const { data: inserted } = maybeSingleResult<{ id: string }>(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any)
-        .from("structures")
-        .insert({
-          colony_id: colonyId,
-          owner_id: player.id,
-          type: structureType as BuildableType,
-          tier: targetTier,
-          is_active: true,
-          built_at: now,
-        })
-        .select("id")
-        .maybeSingle(),
-    );
-    if (!inserted) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const insertRes = await (admin as any)
+      .from("structures")
+      .insert({
+        colony_id: colonyId,
+        owner_id: player.id,
+        type: structureType as BuildableType,
+        tier: targetTier,
+        is_active: true,
+        built_at: now,
+      })
+      .select("id")
+      .maybeSingle();
+
+    if (insertRes.error) {
+      const msg = (insertRes.error as { message?: string })?.message;
+      return toErrorResponse(
+        fail("internal_error", msg ? `Failed to create structure: ${msg}` : "Failed to create structure.").error,
+      );
+    }
+    if (!insertRes.data) {
       return toErrorResponse(fail("internal_error", "Failed to create structure.").error);
     }
-    structureId = inserted.id;
+    structureId = (insertRes.data as { id: string }).id;
   }
 
   return Response.json({

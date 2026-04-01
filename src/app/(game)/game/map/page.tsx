@@ -112,6 +112,7 @@ export default async function GalaxyMapPage() {
     firstDiscoveriesRes,
     beaconsRes,
     disputesRes,
+    allianceMemberRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -189,6 +190,13 @@ export default async function GalaxyMapPage() {
       .from("disputes")
       .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, resolves_at")
       .eq("status", "open"),
+
+    // Player's alliance membership (for beacon placement button on map)
+    admin
+      .from("alliance_members")
+      .select("alliance_id, role")
+      .eq("player_id", player.id)
+      .maybeSingle(),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -235,6 +243,16 @@ export default async function GalaxyMapPage() {
   const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];
   const rawDisputeRows     = listResult<RawDisputeRow>(disputesRes).data ?? [];
   const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
+
+  // Alliance beacon-placement permissions
+  type MemberRow = { alliance_id: string; role: string };
+  const membership = (allianceMemberRes as { data: MemberRow | null }).data;
+  const playerAllianceId  = membership?.alliance_id ?? null;
+  const canPlaceBeacon    = membership?.role === "founder" || membership?.role === "officer";
+  // Systems where the player's alliance already has a beacon (block duplicate placement)
+  const playerAllianceBeaconSystemIds = playerAllianceId
+    ? rawBeaconRows.filter((b) => b.alliance_id === playerAllianceId).map((b) => b.system_id)
+    : [];
 
   // Fetch discoverer handles for first-discovery systems (so panel can show names)
   const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
@@ -579,6 +597,9 @@ export default async function GalaxyMapPage() {
         viewboxW={VIEWBOX_W}
         viewboxH={VIEWBOX_H}
         stationCoords={stationCoords}
+        playerAllianceId={playerAllianceId}
+        canPlaceBeacon={canPlaceBeacon}
+        playerAllianceBeaconSystemIds={playerAllianceBeaconSystemIds}
       />
     </div>
   );
