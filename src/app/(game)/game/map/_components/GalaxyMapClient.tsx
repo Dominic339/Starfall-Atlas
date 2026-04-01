@@ -323,15 +323,24 @@ export function GalaxyMapClient({
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
   const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
 
-  // ── Animation tick — re-renders every second while ships are in transit ────
-  // The SVG travel-line code computes interpolated ship position from Date.now()
-  // on each render; without this tick the position freezes at initial render.
+  // ── Animation tick — re-renders at ~30 fps while ships are in transit ────
+  // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
+  // smoothly instead of jumping once per second.
   const [, setAnimTick] = useState(0);
   const hasTravelLines = travelLines.length > 0;
+  const animRafRef = useRef<number>(0);
   useEffect(() => {
     if (!hasTravelLines) return;
-    const id = setInterval(() => setAnimTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
+    let lastTime = 0;
+    const tick = (time: number) => {
+      if (time - lastTime >= 33) { // ~30 fps cap
+        lastTime = time;
+        setAnimTick((n) => n + 1);
+      }
+      animRafRef.current = requestAnimationFrame(tick);
+    };
+    animRafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animRafRef.current);
   }, [hasTravelLines]);
 
   // ── Drag-to-dispatch state ─────────────────────────────────────────────────
@@ -1017,17 +1026,24 @@ export function GalaxyMapClient({
               // Interpolated ship position along the route
               let shipX: number | null = null;
               let shipY: number | null = null;
+              let currentT = 0;
               if (tl.departAt && tl.arriveAt) {
                 const now = Date.now();
                 const depart = new Date(tl.departAt).getTime();
                 const arrive = new Date(tl.arriveAt).getTime();
                 const total = arrive - depart;
                 if (total > 0) {
-                  const t = Math.max(0, Math.min(1, (now - depart) / total));
-                  shipX = tl.x1 + (tl.x2 - tl.x1) * t;
-                  shipY = tl.y1 + (tl.y2 - tl.y1) * t;
+                  currentT = Math.max(0, Math.min(1, (now - depart) / total));
+                  shipX = tl.x1 + (tl.x2 - tl.x1) * currentT;
+                  shipY = tl.y1 + (tl.y2 - tl.y1) * currentT;
                 }
               }
+
+              // Trail: fixed 7-unit offset behind the ship along the route
+              const lineLen = Math.sqrt((tl.x2 - tl.x1) ** 2 + (tl.y2 - tl.y1) ** 2);
+              const trailFrac = lineLen > 0 ? 7 / lineLen : 0;
+              const trail1T = Math.max(0, currentT - trailFrac * 0.5);
+              const trail2T = Math.max(0, currentT - trailFrac);
 
               // ETA string for midpoint label
               const etaStr = tl.arriveAt
@@ -1059,6 +1075,15 @@ export function GalaxyMapClient({
                     strokeDasharray={`${8 / scale} ${5 / scale}`}
                     opacity={0.80}
                   />
+                  {/* Animated flow overlay — faint moving pulses from origin → destination */}
+                  <line
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={2 / scale}
+                    strokeDasharray="5 19"
+                    opacity={0.40}
+                    className="galaxy-travel-flow"
+                  />
                   {/* Origin dot — marks departure point */}
                   <circle
                     cx={tl.x1} cy={tl.y1}
@@ -1081,15 +1106,58 @@ export function GalaxyMapClient({
                     fill={lineColor}
                     opacity={0.95}
                   />
-                  {/* Ship marker — actual interpolated position along route */}
+                  {/* Ship trail + marker — trail circles behind, main dot in front */}
                   {shipX !== null && shipY !== null && (
+                    <>
+                      {/* Trailing glow — furthest back, most transparent */}
+                      <circle
+                        cx={tl.x1 + (tl.x2 - tl.x1) * trail2T}
+                        cy={tl.y1 + (tl.y2 - tl.y1) * trail2T}
+                        r={2.5 / scale}
+                        fill={labelColor}
+                        opacity={0.18}
+                        pointerEvents="none"
+                      />
+                      {/* Trailing glow — mid trail */}
+                      <circle
+                        cx={tl.x1 + (tl.x2 - tl.x1) * trail1T}
+                        cy={tl.y1 + (tl.y2 - tl.y1) * trail1T}
+                        r={3.5 / scale}
+                        fill={labelColor}
+                        opacity={0.35}
+                        pointerEvents="none"
+                      />
+                      {/* Main ship marker */}
+                      <circle
+                        cx={shipX} cy={shipY}
+                        r={4.5 / scale}
+                        fill={labelColor}
+                        stroke="#06060a"
+                        strokeWidth={1.5 / scale}
+                        filter="url(#glow)"
+                      />
+                      {/* Outer motion-glow ring */}
+                      <circle
+                        cx={shipX} cy={shipY}
+                        r={7.5 / scale}
+                        fill="none"
+                        stroke={labelColor}
+                        strokeWidth={0.8 / scale}
+                        opacity={0.22}
+                        pointerEvents="none"
+                      />
+                    </>
+                  )}
+                  {/* Arrival proximity pulse — activates when ship is >92% of the way */}
+                  {currentT > 0.92 && (
                     <circle
-                      cx={shipX} cy={shipY}
-                      r={4.5 / scale}
-                      fill={labelColor}
-                      stroke="#06060a"
+                      cx={tl.x2} cy={tl.y2}
+                      r={11 / scale}
+                      fill="none"
+                      stroke={lineColor}
                       strokeWidth={1.5 / scale}
-                      filter="url(#glow)"
+                      className="galaxy-arrival-ring"
+                      pointerEvents="none"
                     />
                   )}
                   {/* Label: ship name + ETA — visible at moderate zoom */}
@@ -1179,6 +1247,44 @@ export function GalaxyMapClient({
                     />
                   )}
 
+                  {/* Station aura — breathing fill glow marks the player hub */}
+                  {sys.isStationLocation && (
+                    <>
+                      <circle
+                        cx={sys.svgX}
+                        cy={sys.svgY}
+                        r={r * 3.5}
+                        fill={color}
+                        className="galaxy-station-aura"
+                        pointerEvents="none"
+                      />
+                      <circle
+                        cx={sys.svgX}
+                        cy={sys.svgY}
+                        r={r + 9}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth={1 / scale}
+                        opacity={0.30}
+                        pointerEvents="none"
+                      />
+                    </>
+                  )}
+
+                  {/* Colony breathing ring — subtle pulse to show active colony */}
+                  {sys.colonyCount > 0 && !isCurrent && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 5}
+                      fill="none"
+                      stroke="#34d399"
+                      strokeWidth={0.8 / scale}
+                      className="galaxy-colony-pulse"
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Star glow (discovered/important only) */}
                   {(sys.isDiscovered || sys.colonyCount > 0) && (
                     <circle
@@ -1186,7 +1292,7 @@ export function GalaxyMapClient({
                       cy={sys.svgY}
                       r={r * 2}
                       fill={color}
-                      opacity={0.08}
+                      opacity={sys.isStationLocation ? 0.14 : 0.08}
                       pointerEvents="none"
                     />
                   )}
@@ -1199,11 +1305,9 @@ export function GalaxyMapClient({
                     fill={isDim ? "#374151" : isCurrent ? "#34d399" : color}
                     opacity={opacity}
                     filter={
-                      isCurrent || isSelected
+                      isCurrent || isSelected || sys.isStationLocation
                         ? "url(#glow)"
-                        : sys.isDiscovered
-                          ? undefined
-                          : undefined
+                        : undefined
                     }
                   />
 
