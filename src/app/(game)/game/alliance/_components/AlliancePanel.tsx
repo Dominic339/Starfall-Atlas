@@ -67,6 +67,8 @@ export interface AlliancePanelProps {
   playerId: string;
   /** Recent disputes involving this alliance (up to 20, newest first). */
   disputes: DisputePanelEntry[];
+  /** Player's active non-disbanded fleets for reinforcement selector. */
+  playerFleets: { id: string; name: string; currentSystemId: string | null; currentSystemName: string | null }[];
 }
 
 // ---------------------------------------------------------------------------
@@ -135,6 +137,7 @@ export function AlliancePanel({
   playerId,
   territory,
   disputes,
+  playerFleets,
 }: AlliancePanelProps) {
   const router = useRouter();
 
@@ -712,23 +715,37 @@ export function AlliancePanel({
                   )}
 
                   {isOpen && (
-                    <div className="mt-3 flex gap-2">
-                      <input
-                        type="text"
-                        placeholder="Fleet ID to commit…"
-                        value={selectedFleet}
-                        onChange={(e) =>
-                          setDisputeFleetId((prev) => ({ ...prev, [d.id]: e.target.value }))
-                        }
-                        className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-xs text-zinc-300 placeholder-zinc-600 focus:border-zinc-500 focus:outline-none"
-                      />
-                      <button
-                        onClick={() => handleReinforce(d.id)}
-                        disabled={loading || !selectedFleet}
-                        className="shrink-0 rounded-lg border border-orange-700 bg-orange-950/60 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
-                      >
-                        {loading ? "…" : "Reinforce"}
-                      </button>
+                    <div className="mt-3">
+                      {playerFleets.length > 0 ? (
+                        <div className="flex gap-2">
+                          <select
+                            value={selectedFleet}
+                            onChange={(e) =>
+                              setDisputeFleetId((prev) => ({ ...prev, [d.id]: e.target.value }))
+                            }
+                            className="flex-1 rounded-lg border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                          >
+                            <option value="">Select fleet…</option>
+                            {playerFleets.map((f) => (
+                              <option key={f.id} value={f.id}>
+                                {f.name}
+                                {f.currentSystemName
+                                  ? ` · ${f.currentSystemName}`
+                                  : " · in transit"}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            onClick={() => handleReinforce(d.id)}
+                            disabled={loading || !selectedFleet}
+                            className="shrink-0 rounded-lg border border-orange-700 bg-orange-950/60 px-3 py-1.5 text-xs font-semibold text-orange-300 hover:bg-orange-900/60 disabled:opacity-50 transition-colors"
+                          >
+                            {loading ? "…" : "Reinforce"}
+                          </button>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-zinc-600">No active fleets available to commit.</p>
+                      )}
                     </div>
                   )}
                 </div>

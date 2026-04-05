@@ -24,3 +24,47 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* ── Galaxy Map animations ─────────────────────────────────────────────── */
+
+/* Colony system: subtle breathing ring to show active life */
+@keyframes galaxy-colony-pulse {
+  0%, 100% { opacity: 0.20; }
+  50%       { opacity: 0.55; }
+}
+
+/* Station system: slightly stronger glow breathing to mark the hub */
+@keyframes galaxy-station-aura {
+  0%, 100% { opacity: 0.10; }
+  50%       { opacity: 0.28; }
+}
+
+/* Travel line: faint moving gradient of dashes from origin → destination */
+@keyframes galaxy-travel-flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -48; }
+}
+
+/* Arrival pulse: expanding ring that fades as ship reaches destination */
+@keyframes galaxy-arrival-ring {
+  0%   { transform: scale(1);   opacity: 0.75; }
+  100% { transform: scale(2.4); opacity: 0;    }
+}
+
+.galaxy-colony-pulse {
+  animation: galaxy-colony-pulse 3s ease-in-out infinite;
+}
+
+.galaxy-station-aura {
+  animation: galaxy-station-aura 2.5s ease-in-out infinite;
+}
+
+.galaxy-travel-flow {
+  animation: galaxy-travel-flow 2.5s linear infinite;
+}
+
+.galaxy-arrival-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-arrival-ring 1.3s ease-out infinite;
+}

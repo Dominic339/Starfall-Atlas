@@ -39,6 +39,7 @@ import {
   researchLevel,
   upkeepReductionFraction,
   extractionBonusMultiplier,
+  effectiveStorageCap,
 } from "@/lib/game/colonyStructures";
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
 import type { BodyType } from "@/lib/types/enums";
@@ -139,7 +140,8 @@ export async function runEngineTick(
     ((researchRows ?? []) as { research_id: string }[]).map((r) => r.research_id),
   );
   const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
-  const extractionResearchLvl = researchLevel(unlockedResearchIds, "extraction");
+  const extractionResearchLvl    = researchLevel(unlockedResearchIds, "extraction");
+  const storageResearchLvl       = researchLevel(unlockedResearchIds, "storage");
 
   // ── 5.5. Batch-fetch survey results for all colony body ids ────────────────
   const bodyIds = colonies.map((c) => c.body_id);
@@ -306,23 +308,41 @@ export async function runEngineTick(
       .update({ last_extract_at: requestTime.toISOString() })
       .eq("id", colony.id);
 
-    // Fetch current colony inventory for the extracted resource types.
-    const resourceTypes = amounts.map((a) => a.resource_type);
+    // Fetch full current colony inventory (all resource types).
+    // Used both for the storage-cap check and for the upsert quantity computation.
     const { data: existingRows } = await admin
       .from("resource_inventory")
       .select("resource_type, quantity")
       .eq("location_type", "colony")
-      .eq("location_id", colony.id)
-      .in("resource_type", resourceTypes);
+      .eq("location_id", colony.id);
 
-    const existing = new Map(
-      ((existingRows ?? []) as { resource_type: string; quantity: number }[]).map((r) => [r.resource_type, r.quantity]),
-    );
+    const allExisting = ((existingRows ?? []) as { resource_type: string; quantity: number }[]);
+    const existing = new Map(allExisting.map((r) => [r.resource_type, r.quantity]));
+
+    // Enforce effective storage cap (base + warehouse + storage research).
+    const warehouseTier   = getStructureTier(colonyStructures, "warehouse");
+    const storageCap      = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
+    const currentTotal    = allExisting.reduce((sum, r) => sum + r.quantity, 0);
+    const headroom        = Math.max(0, storageCap - currentTotal);
+
+    if (headroom <= 0) continue; // Colony inventory full — nothing materialised this tick.
+
+    // Cap extraction to available headroom (distributed in resource order).
+    let headroomLeft = headroom;
+    const finalAmounts = amounts
+      .map((item) => {
+        const qty = Math.min(item.quantity, headroomLeft);
+        headroomLeft = Math.max(0, headroomLeft - qty);
+        return { ...item, quantity: qty };
+      })
+      .filter((item) => item.quantity > 0);
+
+    if (finalAmounts.length === 0) continue;
 
     await admin
       .from("resource_inventory")
       .upsert(
-        amounts.map((item) => ({
+        finalAmounts.map((item) => ({
           location_type: "colony",
           location_id: colony.id,
           resource_type: item.resource_type,

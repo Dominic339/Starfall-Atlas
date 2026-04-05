@@ -180,6 +180,12 @@ interface GalaxyMapClientProps {
   viewboxH: number;
   /** Station 3D coordinates for distance-from-station computation. */
   stationCoords: { x: number; y: number; z: number } | null;
+  /** Player's alliance ID, null if not in an alliance. */
+  playerAllianceId: string | null;
+  /** True if the player has officer/founder role (can place beacons). */
+  canPlaceBeacon: boolean;
+  /** System IDs where the player's alliance already has an active beacon. */
+  playerAllianceBeaconSystemIds: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -292,6 +298,9 @@ export function GalaxyMapClient({
   viewboxW,
   viewboxH,
   stationCoords,
+  playerAllianceId,
+  canPlaceBeacon,
+  playerAllianceBeaconSystemIds: _playerAllianceBeaconSystemIds,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -323,15 +332,24 @@ export function GalaxyMapClient({
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
   const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
 
-  // ── Animation tick — re-renders every second while ships are in transit ────
-  // The SVG travel-line code computes interpolated ship position from Date.now()
-  // on each render; without this tick the position freezes at initial render.
+  // ── Animation tick — re-renders at ~30 fps while ships are in transit ────
+  // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
+  // smoothly instead of jumping once per second.
   const [, setAnimTick] = useState(0);
   const hasTravelLines = travelLines.length > 0;
+  const animRafRef = useRef<number>(0);
   useEffect(() => {
     if (!hasTravelLines) return;
-    const id = setInterval(() => setAnimTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
+    let lastTime = 0;
+    const tick = (time: number) => {
+      if (time - lastTime >= 33) { // ~30 fps cap
+        lastTime = time;
+        setAnimTick((n) => n + 1);
+      }
+      animRafRef.current = requestAnimationFrame(tick);
+    };
+    animRafRef.current = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animRafRef.current);
   }, [hasTravelLines]);
 
   // ── Drag-to-dispatch state ─────────────────────────────────────────────────
@@ -358,6 +376,14 @@ export function GalaxyMapClient({
   stationDragRef.current = stationDrag;
   const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
   const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
+  // ── Beacon placement state ─────────────────────────────────────────────────
+  const [beaconLoading, setBeaconLoading] = useState(false);
+  const [beaconError, setBeaconError] = useState<string | null>(null);
+
+  // ── Dispute state ──────────────────────────────────────────────────────────
+  const [disputeLoading, setDisputeLoading] = useState<string | null>(null); // beaconId
+  const [disputeError, setDisputeError] = useState<string | null>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
@@ -668,6 +694,20 @@ export function GalaxyMapClient({
     return () => clearTimeout(t);
   }, [stationRelocateError]);
 
+  // Auto-clear beacon error after 4 s
+  useEffect(() => {
+    if (!beaconError) return;
+    const t = setTimeout(() => setBeaconError(null), 4000);
+    return () => clearTimeout(t);
+  }, [beaconError]);
+
+  // Auto-clear dispute error after 4 s
+  useEffect(() => {
+    if (!disputeError) return;
+    const t = setTimeout(() => setDisputeError(null), 4000);
+    return () => clearTimeout(t);
+  }, [disputeError]);
+
   // Clear ship multi-selection when the selected system changes
   useEffect(() => {
     setSelectedShipIds(new Set());
@@ -745,6 +785,72 @@ export function GalaxyMapClient({
     const info: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: null };
     setStationDrag(info);
     stationDragRef.current = info;
+  }
+
+  async function handlePlaceBeacon(systemId: string) {
+    setBeaconLoading(true);
+    setBeaconError(null);
+    try {
+      const res = await fetch("/api/game/alliance/beacon/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ systemId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setBeaconError(json.error?.message ?? "Failed to place beacon.");
+      }
+    } catch {
+      setBeaconError("Network error.");
+    } finally {
+      setBeaconLoading(false);
+    }
+  }
+
+  async function handleRemoveBeacon(beaconId: string) {
+    setBeaconLoading(true);
+    setBeaconError(null);
+    try {
+      const res = await fetch("/api/game/alliance/beacon/remove", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beaconId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setBeaconError(json.error?.message ?? "Failed to remove beacon.");
+      }
+    } catch {
+      setBeaconError("Network error.");
+    } finally {
+      setBeaconLoading(false);
+    }
+  }
+
+  async function handleStartDispute(beaconId: string) {
+    setDisputeLoading(beaconId);
+    setDisputeError(null);
+    try {
+      const res = await fetch("/api/game/dispute/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beaconId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setDisputeError(json.error?.message ?? "Failed to start dispute.");
+      }
+    } catch {
+      setDisputeError("Network error.");
+    } finally {
+      setDisputeLoading(null);
+    }
   }
 
   function handleStarClick(e: React.MouseEvent, systemId: string) {
@@ -1017,17 +1123,24 @@ export function GalaxyMapClient({
               // Interpolated ship position along the route
               let shipX: number | null = null;
               let shipY: number | null = null;
+              let currentT = 0;
               if (tl.departAt && tl.arriveAt) {
                 const now = Date.now();
                 const depart = new Date(tl.departAt).getTime();
                 const arrive = new Date(tl.arriveAt).getTime();
                 const total = arrive - depart;
                 if (total > 0) {
-                  const t = Math.max(0, Math.min(1, (now - depart) / total));
-                  shipX = tl.x1 + (tl.x2 - tl.x1) * t;
-                  shipY = tl.y1 + (tl.y2 - tl.y1) * t;
+                  currentT = Math.max(0, Math.min(1, (now - depart) / total));
+                  shipX = tl.x1 + (tl.x2 - tl.x1) * currentT;
+                  shipY = tl.y1 + (tl.y2 - tl.y1) * currentT;
                 }
               }
+
+              // Trail: fixed 7-unit offset behind the ship along the route
+              const lineLen = Math.sqrt((tl.x2 - tl.x1) ** 2 + (tl.y2 - tl.y1) ** 2);
+              const trailFrac = lineLen > 0 ? 7 / lineLen : 0;
+              const trail1T = Math.max(0, currentT - trailFrac * 0.5);
+              const trail2T = Math.max(0, currentT - trailFrac);
 
               // ETA string for midpoint label
               const etaStr = tl.arriveAt
@@ -1059,6 +1172,15 @@ export function GalaxyMapClient({
                     strokeDasharray={`${8 / scale} ${5 / scale}`}
                     opacity={0.80}
                   />
+                  {/* Animated flow overlay — faint moving pulses from origin → destination */}
+                  <line
+                    x1={tl.x1} y1={tl.y1} x2={tl.x2} y2={tl.y2}
+                    stroke={lineColor}
+                    strokeWidth={2 / scale}
+                    strokeDasharray="5 19"
+                    opacity={0.40}
+                    className="galaxy-travel-flow"
+                  />
                   {/* Origin dot — marks departure point */}
                   <circle
                     cx={tl.x1} cy={tl.y1}
@@ -1081,15 +1203,58 @@ export function GalaxyMapClient({
                     fill={lineColor}
                     opacity={0.95}
                   />
-                  {/* Ship marker — actual interpolated position along route */}
+                  {/* Ship trail + marker — trail circles behind, main dot in front */}
                   {shipX !== null && shipY !== null && (
+                    <>
+                      {/* Trailing glow — furthest back, most transparent */}
+                      <circle
+                        cx={tl.x1 + (tl.x2 - tl.x1) * trail2T}
+                        cy={tl.y1 + (tl.y2 - tl.y1) * trail2T}
+                        r={2.5 / scale}
+                        fill={labelColor}
+                        opacity={0.18}
+                        pointerEvents="none"
+                      />
+                      {/* Trailing glow — mid trail */}
+                      <circle
+                        cx={tl.x1 + (tl.x2 - tl.x1) * trail1T}
+                        cy={tl.y1 + (tl.y2 - tl.y1) * trail1T}
+                        r={3.5 / scale}
+                        fill={labelColor}
+                        opacity={0.35}
+                        pointerEvents="none"
+                      />
+                      {/* Main ship marker */}
+                      <circle
+                        cx={shipX} cy={shipY}
+                        r={4.5 / scale}
+                        fill={labelColor}
+                        stroke="#06060a"
+                        strokeWidth={1.5 / scale}
+                        filter="url(#glow)"
+                      />
+                      {/* Outer motion-glow ring */}
+                      <circle
+                        cx={shipX} cy={shipY}
+                        r={7.5 / scale}
+                        fill="none"
+                        stroke={labelColor}
+                        strokeWidth={0.8 / scale}
+                        opacity={0.22}
+                        pointerEvents="none"
+                      />
+                    </>
+                  )}
+                  {/* Arrival proximity pulse — activates when ship is >92% of the way */}
+                  {currentT > 0.92 && (
                     <circle
-                      cx={shipX} cy={shipY}
-                      r={4.5 / scale}
-                      fill={labelColor}
-                      stroke="#06060a"
+                      cx={tl.x2} cy={tl.y2}
+                      r={11 / scale}
+                      fill="none"
+                      stroke={lineColor}
                       strokeWidth={1.5 / scale}
-                      filter="url(#glow)"
+                      className="galaxy-arrival-ring"
+                      pointerEvents="none"
                     />
                   )}
                   {/* Label: ship name + ETA — visible at moderate zoom */}
@@ -1179,6 +1344,44 @@ export function GalaxyMapClient({
                     />
                   )}
 
+                  {/* Station aura — breathing fill glow marks the player hub */}
+                  {sys.isStationLocation && (
+                    <>
+                      <circle
+                        cx={sys.svgX}
+                        cy={sys.svgY}
+                        r={r * 3.5}
+                        fill={color}
+                        className="galaxy-station-aura"
+                        pointerEvents="none"
+                      />
+                      <circle
+                        cx={sys.svgX}
+                        cy={sys.svgY}
+                        r={r + 9}
+                        fill="none"
+                        stroke="#f59e0b"
+                        strokeWidth={1 / scale}
+                        opacity={0.30}
+                        pointerEvents="none"
+                      />
+                    </>
+                  )}
+
+                  {/* Colony breathing ring — subtle pulse to show active colony */}
+                  {sys.colonyCount > 0 && !isCurrent && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 5}
+                      fill="none"
+                      stroke="#34d399"
+                      strokeWidth={0.8 / scale}
+                      className="galaxy-colony-pulse"
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Star glow (discovered/important only) */}
                   {(sys.isDiscovered || sys.colonyCount > 0) && (
                     <circle
@@ -1186,7 +1389,7 @@ export function GalaxyMapClient({
                       cy={sys.svgY}
                       r={r * 2}
                       fill={color}
-                      opacity={0.08}
+                      opacity={sys.isStationLocation ? 0.14 : 0.08}
                       pointerEvents="none"
                     />
                   )}
@@ -1199,11 +1402,9 @@ export function GalaxyMapClient({
                     fill={isDim ? "#374151" : isCurrent ? "#34d399" : color}
                     opacity={opacity}
                     filter={
-                      isCurrent || isSelected
+                      isCurrent || isSelected || sys.isStationLocation
                         ? "url(#glow)"
-                        : sys.isDiscovered
-                          ? undefined
-                          : undefined
+                        : undefined
                     }
                   />
 
@@ -1945,25 +2146,85 @@ export function GalaxyMapClient({
               )}
 
               {/* Alliance beacons */}
-              {beaconsInSelected.length > 0 && (
+              {(beaconsInSelected.length > 0 || canPlaceBeacon) && (
                 <div className="py-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs text-zinc-600">Beacons</span>
-                    <span className="text-xs text-indigo-400">
-                      {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap gap-1">
-                    {beaconsInSelected.map((b) => (
-                      <span
-                        key={b.id}
-                        title={b.allianceName}
-                        className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
-                      >
-                        [{b.allianceTag}]
+                    {beaconsInSelected.length > 0 && (
+                      <span className="text-xs text-indigo-400">
+                        {beaconsInSelected.length} alliance{beaconsInSelected.length > 1 ? "s" : ""}
                       </span>
-                    ))}
+                    )}
                   </div>
+                  {beaconsInSelected.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {beaconsInSelected.map((b) => (
+                        <span
+                          key={b.id}
+                          title={b.allianceName}
+                          className="font-mono text-xs text-indigo-300 bg-indigo-950/60 border border-indigo-800/50 px-1.5 py-0.5 rounded"
+                        >
+                          [{b.allianceTag}]
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {/* Place / Remove beacon actions */}
+                  {canPlaceBeacon && selectedSystem && (() => {
+                    const myBeacon = playerAllianceId
+                      ? beaconsInSelected.find((b) => b.allianceId === playerAllianceId)
+                      : undefined;
+                    if (myBeacon) {
+                      return (
+                        <button
+                          onClick={() => handleRemoveBeacon(myBeacon.id)}
+                          disabled={beaconLoading}
+                          className="mt-2 w-full text-xs rounded border border-red-800/60 bg-red-950/40 px-2 py-1.5 text-red-400 hover:bg-red-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                        >
+                          {beaconLoading ? "Removing…" : "Remove Beacon"}
+                        </button>
+                      );
+                    }
+                    return (
+                      <button
+                        onClick={() => handlePlaceBeacon(selectedSystem.id)}
+                        disabled={beaconLoading}
+                        className="mt-2 w-full text-xs rounded border border-indigo-700/60 bg-indigo-950/40 px-2 py-1.5 text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                      >
+                        {beaconLoading ? "Placing…" : "Place Beacon (50 iron)"}
+                      </button>
+                    );
+                  })()}
+                  {beaconError && (
+                    <p className="mt-1 text-xs text-red-400">{beaconError}</p>
+                  )}
+                  {/* Challenge (Start Dispute) buttons for foreign beacons */}
+                  {canPlaceBeacon && playerAllianceId && (() => {
+                    const disputedBeaconIds = new Set(disputes.map((d) => d.beaconId));
+                    const foreignBeacons = beaconsInSelected.filter(
+                      (b) => b.allianceId !== playerAllianceId && !disputedBeaconIds.has(b.id),
+                    );
+                    if (foreignBeacons.length === 0) return null;
+                    return (
+                      <div className="mt-2 space-y-1">
+                        {foreignBeacons.map((b) => (
+                          <button
+                            key={b.id}
+                            onClick={() => handleStartDispute(b.id)}
+                            disabled={disputeLoading === b.id}
+                            className="w-full text-xs rounded border border-orange-800/60 bg-orange-950/30 px-2 py-1.5 text-orange-400 hover:bg-orange-900/40 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                          >
+                            {disputeLoading === b.id
+                              ? "Challenging…"
+                              : `Challenge [{${b.allianceTag}}] Beacon`}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {disputeError && (
+                    <p className="mt-1 text-xs text-red-400">{disputeError}</p>
+                  )}
                 </div>
               )}
 
