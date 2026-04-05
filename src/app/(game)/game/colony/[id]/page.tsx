@@ -152,8 +152,7 @@ export default async function ColonyPage({
   const habitatTier = getStructureTier(structures, "habitat_module");
   const extractorTier = getStructureTier(structures, "extractor");
   const upkeepRedFrac = upkeepReductionFraction(habitatTier, sustainabilityResearchLvl);
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const _storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
+  const storageCap = effectiveStorageCap(colony.storage_cap, warehouseTier, storageResearchLvl);
 
   // Extraction estimate
   const extBonusMult = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
@@ -386,6 +385,9 @@ export default async function ColonyPage({
                   <p className="mt-0.5 text-xs text-zinc-600">
                     {basicNodeCount} node{basicNodeCount !== 1 ? "s" : ""}
                     {extractorTier > 0 && ` · Extractor T${extractorTier}`}
+                    {extractionResearchLvl > 0 && (
+                      <span className="ml-1 text-teal-600">· Research +{extractionResearchLvl * 10}%</span>
+                    )}
                     {healthMult < 1 && (
                       <span className="ml-1 text-amber-600">· yield reduced</span>
                     )}
@@ -514,8 +516,9 @@ export default async function ColonyPage({
                 type === "extractor" ? "Extractor" :
                 "Habitat Module";
               const description =
-                type === "warehouse" ? "Increases colony storage capacity" :
-                type === "extractor" ? "Boosts resource extraction rate" :
+                type === "warehouse"
+                  ? `Increases colony storage capacity${warehouseTier > 0 || storageResearchLvl > 0 ? ` (cap: ${storageCap}u)` : ""}`
+                  : type === "extractor" ? "Boosts resource extraction rate" :
                 "Reduces upkeep consumption";
               return (
                 <div key={type} className="flex items-start justify-between gap-4">

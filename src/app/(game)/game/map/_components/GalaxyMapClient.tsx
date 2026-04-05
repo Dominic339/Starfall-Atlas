@@ -574,16 +574,23 @@ export function GalaxyMapClient({
   );
 
   function handleMouseLeave() {
+    // Only cancel panning — active ship/station drags continue globally
+    // so the user can drag to a system near the SVG edge without losing the drag.
     isPanning.current = false;
-    if (dragInfoRef.current) {
-      setDragInfo(null);
-      dragInfoRef.current = null;
-    }
-    if (stationDragRef.current) {
-      setStationDrag(null);
-      stationDragRef.current = null;
-    }
   }
+
+  // ── Global mouseup: complete any active drag even outside SVG boundary ────
+  // Without this, releasing the mouse outside the SVG would leave the ghost
+  // stuck and the drag never fires.
+  useEffect(() => {
+    if (!dragInfo && !stationDrag) return;
+    const handleGlobalMouseUp = () => {
+      void handleMouseUp();
+    };
+    window.addEventListener("mouseup", handleGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", handleGlobalMouseUp);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragInfo !== null, stationDrag !== null]);
 
   async function handleMouseUp() {
     // ── Drag completion ───────────────────────────────────────────────────

@@ -148,10 +148,11 @@ export async function runTravelResolution(
       if (pendingJob) {
         if (new Date(pendingJob.arrive_at) <= requestTime) {
           await admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id);
+          const arrivedAtStation = pendingJob.to_system_id === st.current_system_id;
           await admin.from("ships").update({
             current_system_id: pendingJob.to_system_id,
             current_body_id: null,
-            ship_state: "idle_at_station",
+            ship_state: arrivedAtStation ? "idle_at_station" : "idle_in_system",
             last_known_system_id: pendingJob.to_system_id,
             destination_system_id: null,
           }).eq("id", ship.id);
@@ -159,7 +160,7 @@ export async function runTravelResolution(
             ...ship,
             current_system_id: pendingJob.to_system_id as SystemId,
             current_body_id: null,
-            ship_state: "idle_at_station",
+            ship_state: arrivedAtStation ? "idle_at_station" : "idle_in_system",
             last_known_system_id: pendingJob.to_system_id as SystemId,
             destination_system_id: null,
           };
