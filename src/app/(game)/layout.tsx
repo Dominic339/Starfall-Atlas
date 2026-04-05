@@ -70,6 +70,12 @@ export default async function GameLayout({
               Research
             </Link>
             <Link
+              href="/game/alliance"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Alliance
+            </Link>
+            <Link
               href="/game/command"
               className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
             >

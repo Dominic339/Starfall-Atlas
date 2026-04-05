@@ -381,6 +381,10 @@ export function GalaxyMapClient({
   const [beaconLoading, setBeaconLoading] = useState(false);
   const [beaconError, setBeaconError] = useState<string | null>(null);
 
+  // ── Dispute state ──────────────────────────────────────────────────────────
+  const [disputeLoading, setDisputeLoading] = useState<string | null>(null); // beaconId
+  const [disputeError, setDisputeError] = useState<string | null>(null);
+
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
   const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
@@ -697,6 +701,13 @@ export function GalaxyMapClient({
     return () => clearTimeout(t);
   }, [beaconError]);
 
+  // Auto-clear dispute error after 4 s
+  useEffect(() => {
+    if (!disputeError) return;
+    const t = setTimeout(() => setDisputeError(null), 4000);
+    return () => clearTimeout(t);
+  }, [disputeError]);
+
   // Clear ship multi-selection when the selected system changes
   useEffect(() => {
     setSelectedShipIds(new Set());
@@ -817,6 +828,28 @@ export function GalaxyMapClient({
       setBeaconError("Network error.");
     } finally {
       setBeaconLoading(false);
+    }
+  }
+
+  async function handleStartDispute(beaconId: string) {
+    setDisputeLoading(beaconId);
+    setDisputeError(null);
+    try {
+      const res = await fetch("/api/game/dispute/start", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ beaconId }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setDisputeError(json.error?.message ?? "Failed to start dispute.");
+      }
+    } catch {
+      setDisputeError("Network error.");
+    } finally {
+      setDisputeLoading(null);
     }
   }
 
@@ -2164,6 +2197,33 @@ export function GalaxyMapClient({
                   })()}
                   {beaconError && (
                     <p className="mt-1 text-xs text-red-400">{beaconError}</p>
+                  )}
+                  {/* Challenge (Start Dispute) buttons for foreign beacons */}
+                  {canPlaceBeacon && playerAllianceId && (() => {
+                    const disputedBeaconIds = new Set(disputes.map((d) => d.beaconId));
+                    const foreignBeacons = beaconsInSelected.filter(
+                      (b) => b.allianceId !== playerAllianceId && !disputedBeaconIds.has(b.id),
+                    );
+                    if (foreignBeacons.length === 0) return null;
+                    return (
+                      <div className="mt-2 space-y-1">
+                        {foreignBeacons.map((b) => (
+                          <button
+                            key={b.id}
+                            onClick={() => handleStartDispute(b.id)}
+                            disabled={disputeLoading === b.id}
+                            className="w-full text-xs rounded border border-orange-800/60 bg-orange-950/30 px-2 py-1.5 text-orange-400 hover:bg-orange-900/40 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                          >
+                            {disputeLoading === b.id
+                              ? "Challenging…"
+                              : `Challenge [{${b.allianceTag}}] Beacon`}
+                          </button>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                  {disputeError && (
+                    <p className="mt-1 text-xs text-red-400">{disputeError}</p>
                   )}
                 </div>
               )}

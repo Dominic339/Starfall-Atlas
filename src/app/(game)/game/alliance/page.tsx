@@ -262,6 +262,26 @@ export default async function AlliancePage() {
     }
   }
 
+  // ── Fetch player's active fleets (for dispute reinforcement selector) ───────
+  type FleetRow = { id: string; name: string; current_system_id: string | null };
+  const { data: fleetRows } = listResult<FleetRow>(
+    await admin
+      .from("fleets")
+      .select("id, name, current_system_id")
+      .eq("player_id", player.id)
+      .neq("status", "disbanded")
+      .order("created_at", { ascending: true }),
+  );
+  const fleetSystemNameMap = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
+  const playerFleets = (fleetRows ?? []).map((f) => ({
+    id: f.id,
+    name: f.name,
+    currentSystemId: f.current_system_id,
+    currentSystemName: f.current_system_id
+      ? (fleetSystemNameMap.get(f.current_system_id) ?? f.current_system_id)
+      : null,
+  }));
+
   return (
     <div className="max-w-2xl space-y-6">
       {/* Breadcrumb */}
@@ -296,6 +316,7 @@ export default async function AlliancePage() {
           linkCount,
         }}
         disputes={allianceDisputes}
+        playerFleets={playerFleets}
       />
     </div>
   );
