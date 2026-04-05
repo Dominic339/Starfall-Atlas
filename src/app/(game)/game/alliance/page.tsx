@@ -263,13 +263,17 @@ export default async function AlliancePage() {
   }
 
   // ── Fetch player's active fleets (for dispute reinforcement selector) ───────
+  // Only show fleets that are active (not traveling, not disbanded) and not
+  // already committed to another dispute. These are the only ones the reinforce
+  // endpoint will accept.
   type FleetRow = { id: string; name: string; current_system_id: string | null };
   const { data: fleetRows } = listResult<FleetRow>(
     await admin
       .from("fleets")
       .select("id, name, current_system_id")
       .eq("player_id", player.id)
-      .neq("status", "disbanded")
+      .eq("status", "active")
+      .is("dispute_commit_id", null)
       .order("created_at", { ascending: true }),
   );
   const fleetSystemNameMap = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
