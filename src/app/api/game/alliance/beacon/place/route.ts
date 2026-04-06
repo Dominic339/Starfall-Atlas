@@ -159,22 +159,26 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Insert beacon ─────────────────────────────────────────────────────────
-  const { data: beacon } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliance_beacons")
-      .insert({
-        alliance_id,
-        system_id: systemId,
-        placed_by: player.id,
-        is_active: true,
-      })
-      .select("id")
-      .maybeSingle(),
-  );
+  const insertResult = await admin
+    .from("alliance_beacons")
+    .insert({
+      alliance_id,
+      system_id: systemId,
+      placed_by: player.id,
+      is_active: true,
+    })
+    .select("id")
+    .maybeSingle();
 
-  if (!beacon) {
+  const { data: beacon, error: insertError } = insertResult as {
+    data: { id: string } | null;
+    error: { message: string; code?: string } | null;
+  };
+
+  if (insertError || !beacon) {
+    const msg = insertError?.message ?? "Failed to place beacon.";
     return Response.json(
-      { ok: false, error: { code: "internal_error", message: "Failed to place beacon." } },
+      { ok: false, error: { code: "internal_error", message: msg } },
       { status: 500 },
     );
   }

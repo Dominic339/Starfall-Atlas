@@ -68,3 +68,45 @@ body {
   transform-origin: center;
   animation: galaxy-arrival-ring 1.3s ease-out infinite;
 }
+
+/* ── Solar system view animations ─────────────────────────────────────── */
+
+/* Ship marker subtle pulse at the star */
+@keyframes solar-ship-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%       { opacity: 1;    }
+}
+
+.solar-ship-marker {
+  animation: solar-ship-pulse 2.5s ease-in-out infinite;
+}
+
+/* Fleet marker subtle pulse */
+@keyframes solar-fleet-pulse {
+  0%, 100% { opacity: 0.80; }
+  50%       { opacity: 1;    }
+}
+
+.solar-fleet-marker {
+  animation: solar-fleet-pulse 3s ease-in-out infinite;
+}
+
+/* Colony ring gentle breathing */
+@keyframes solar-colony-ring {
+  0%, 100% { opacity: 0.65; }
+  50%       { opacity: 0.95; }
+}
+
+.solar-colony-ring {
+  animation: solar-colony-ring 3.5s ease-in-out infinite;
+}
+
+/* Station marker pulsing glow */
+@keyframes solar-station-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%       { opacity: 1;    }
+}
+
+.solar-station-marker {
+  animation: solar-station-pulse 2s ease-in-out infinite;
+}
