@@ -114,7 +114,7 @@ export default async function AlliancePage() {
     const playerIds = memberRows.map((m) => m.player_id);
 
     type HandleRow = { id: string; handle: string };
-    let handleMap = new Map<string, string>();
+    const handleMap = new Map<string, string>();
     if (playerIds.length > 0) {
       const { data: handleRows } = listResult<HandleRow>(
         await admin.from("players").select("id, handle").in("id", playerIds),
@@ -179,8 +179,10 @@ export default async function AlliancePage() {
     resolvedAt: string | null;
     winnerAllianceId: string | null;
     isDefender: boolean;
+    msLeft: number;
   };
 
+  const pageNow = new Date();
   let allianceDisputes: DisputePanelEntry[] = [];
 
   if (membership) {
@@ -222,6 +224,7 @@ export default async function AlliancePage() {
         resolvedAt:          d.resolved_at,
         winnerAllianceId:    d.winner_alliance_id,
         isDefender:          d.defending_alliance_id === membership.alliance_id,
+        msLeft:              Math.max(0, new Date(d.resolves_at).getTime() - pageNow.getTime()),
       };
     });
   }

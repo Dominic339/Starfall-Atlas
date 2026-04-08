@@ -18,7 +18,7 @@ import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { rankColonyCandidates } from "@/lib/game/shipAutomation";
 import { BALANCE } from "@/lib/config/balance";
-import type { Ship, TravelJob, Colony, PlayerStation, Player } from "@/lib/types/game";
+import type { Ship, TravelJob, Colony, PlayerStation } from "@/lib/types/game";
 import type { SystemId, ColonyId } from "@/lib/types/game";
 
 export interface TravelResolutionResult {

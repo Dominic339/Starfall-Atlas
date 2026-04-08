@@ -3,7 +3,7 @@
  * All requests are POST with JSON body. All responses are JSON.
  */
 
-import type { Colony, HyperspaceLane, MarketListing, Auction } from "./game";
+import type { Colony, HyperspaceLane, MarketListing } from "./game";
 
 // ---------------------------------------------------------------------------
 // Standard result wrapper — used by all action functions and API responses

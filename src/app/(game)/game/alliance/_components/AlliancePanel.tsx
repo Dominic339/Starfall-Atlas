@@ -29,6 +29,8 @@ export interface DisputePanelEntry {
   winnerAllianceId: string | null;
   /** True if this alliance is the defender (owns the beacon). */
   isDefender: boolean;
+  /** Milliseconds remaining until dispute resolves — precomputed server-side. */
+  msLeft: number;
 }
 
 export interface AlliancePanelProps {
@@ -164,6 +166,7 @@ export function AlliancePanel({
   const [disputeFleetId, setDisputeFleetId] = useState<Record<string, string>>({});
   const [disputeLoading, setDisputeLoading] = useState<Record<string, boolean>>({});
   const [disputeError, setDisputeError]     = useState<string | null>(null);
+
 
   // ── Helpers ───────────────────────────────────────────────────────────────
   async function callApi(url: string, body: object): Promise<string | null> {
@@ -656,8 +659,7 @@ export function AlliancePanel({
           <div className="space-y-3">
             {disputes.map((d) => {
               const isOpen        = d.status === "open";
-              const msLeft        = new Date(d.resolvesAt).getTime() - Date.now();
-              const hLeft         = Math.max(0, msLeft / (1000 * 60 * 60));
+              const hLeft         = Math.max(0, d.msLeft / (1000 * 60 * 60));
               const timeStr       = hLeft < 1
                 ? `${Math.ceil(hLeft * 60)} min`
                 : `${hLeft.toFixed(1)} hr`;

@@ -300,7 +300,6 @@ export function GalaxyMapClient({
   stationCoords,
   playerAllianceId,
   canPlaceBeacon,
-  playerAllianceBeaconSystemIds: _playerAllianceBeaconSystemIds,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -572,7 +571,6 @@ export function GalaxyMapClient({
       }
       // ── Station drag: relocate station ────────────────────────────────────
       if (stationDragRef.current !== null) {
-        const current = stationDragRef.current;
         const svg = svgRef.current;
         if (!svg) return;
         const rect = svg.getBoundingClientRect();
@@ -591,8 +589,9 @@ export function GalaxyMapClient({
             nearest = sys.id;
           }
         }
-        // Don't target the current station system
-        if (stationSystem && nearest === stationSystem.id) nearest = null;
+        // Don't target the current station system (read from ref to avoid stale closure)
+        const stationSys = systemsRef.current.find((s) => s.isStationLocation) ?? null;
+        if (stationSys && nearest === stationSys.id) nearest = null;
         const updated: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: nearest };
         setStationDrag(updated);
         stationDragRef.current = updated;

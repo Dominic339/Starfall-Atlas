@@ -17,7 +17,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import type { Player } from "@/lib/types/game";

@@ -101,15 +101,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Determine fleet name ──────────────────────────────────────────────────
-  const { data: fleetCountRow } = maybeSingleResult<{ count: string }>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("fleets")
-      .select("id", { count: "exact", head: true })
-      .eq("player_id", player.id),
-  );
-  // count comes from the PostgREST count header; use a simple DB count approach
-  const { count: fleetCount } = await (admin as any)
+  const { count: fleetCount } = await admin
     .from("fleets")
     .select("id", { count: "exact", head: true })
     .eq("player_id", player.id);

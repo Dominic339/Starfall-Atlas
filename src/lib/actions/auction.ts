@@ -8,8 +8,7 @@
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuth, parseInput } from "./helpers";
-import { ok, fail, type ActionResult } from "./types";
-import { BALANCE } from "@/lib/config/balance";
+import { fail, type ActionResult } from "./types";
 import type { PlaceBidResult } from "@/lib/types/api";
 
 // ---------------------------------------------------------------------------
@@ -106,13 +105,10 @@ export async function placeBid(rawInput: unknown): Promise<ActionResult<PlaceBid
     return fail("insufficient_credits", `Insufficient credits to place bid of ${amount}.`);
   }
 
-  // Anti-snipe window check
-  const windowMs = BALANCE.auctions.antiSnipeWindowMinutes * 60 * 1000;
-  const endsAt = new Date(auction.ends_at);
-  const willExtend = endsAt.getTime() - Date.now() <= windowMs;
-  const newEndsAt = willExtend
-    ? new Date(endsAt.getTime() + BALANCE.auctions.antiSnipeExtensionMinutes * 60 * 1000)
-    : endsAt;
+  // TODO(phase-9): Anti-snipe check before executing bid escrow:
+  //   windowMs = BALANCE.auctions.antiSnipeWindowMinutes * 60 * 1000
+  //   endsAt = new Date(auction.ends_at)
+  //   if endsAt.getTime() - Date.now() <= windowMs → extend by antiSnipeExtensionMinutes
 
   // TODO(phase-9): Execute bid + escrow + anti-snipe extension in transaction.
   return fail("not_implemented", "Bid placement not yet implemented. Coming in Phase 9.");
