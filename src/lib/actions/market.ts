@@ -6,9 +6,8 @@
  */
 
 import { z } from "zod";
-import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuth, parseInput } from "./helpers";
-import { ok, fail, type ActionResult } from "./types";
+import { fail, type ActionResult } from "./types";
 import { BALANCE } from "@/lib/config/balance";
 import type { PostListingResult } from "@/lib/types/api";
 

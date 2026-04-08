@@ -64,7 +64,7 @@ export async function resolveAsteroidHarvests(
   const now = new Date();
 
   // ── Fetch asteroid ────────────────────────────────────────────────────────
-  const { data: asteroid } = await (admin as any)
+  const { data: asteroid } = await admin
     .from("asteroid_nodes")
     .select("id, resource_type, remaining_amount, status, last_resolved_at")
     .eq("id", asteroidId)
@@ -75,7 +75,7 @@ export async function resolveAsteroidHarvests(
   }
 
   // ── Fetch active harvests ─────────────────────────────────────────────────
-  const { data: harvests } = await (admin as any)
+  const { data: harvests } = await admin
     .from("asteroid_harvests")
     .select("id, player_id, harvest_power_per_hr, last_resolved_at")
     .eq("asteroid_id", asteroidId)
@@ -134,7 +134,7 @@ export async function resolveAsteroidHarvests(
 
   // ── Fetch station IDs for each player ────────────────────────────────────
   const playerIds = Array.from(playerCredits.keys());
-  const { data: stations } = await (admin as any)
+  const { data: stations } = await admin
     .from("stations")
     .select("id, player_id")
     .in("player_id", playerIds);
@@ -150,7 +150,7 @@ export async function resolveAsteroidHarvests(
     if (!stationId) continue;
 
     // Upsert into resource_inventory
-    const { data: existing } = await (admin as any)
+    const { data: existing } = await admin
       .from("resource_inventory")
       .select("id, quantity")
       .eq("location_id", stationId)
@@ -159,12 +159,12 @@ export async function resolveAsteroidHarvests(
       .maybeSingle();
 
     if (existing) {
-      await (admin as any)
+      await admin
         .from("resource_inventory")
         .update({ quantity: existing.quantity + units })
         .eq("id", existing.id);
     } else {
-      await (admin as any)
+      await admin
         .from("resource_inventory")
         .insert({
           location_id: stationId,
@@ -177,7 +177,7 @@ export async function resolveAsteroidHarvests(
 
   // ── Update harvest last_resolved_at ───────────────────────────────────────
   const harvestIds = entries.map((e) => e.id);
-  await (admin as any)
+  await admin
     .from("asteroid_harvests")
     .update({ last_resolved_at: now.toISOString() })
     .in("id", harvestIds);
@@ -186,7 +186,7 @@ export async function resolveAsteroidHarvests(
   const newRemaining = available - actualTotal;
   const nowDepleted = newRemaining <= 0;
 
-  await (admin as any)
+  await admin
     .from("asteroid_nodes")
     .update({
       remaining_amount: newRemaining,
@@ -197,7 +197,7 @@ export async function resolveAsteroidHarvests(
 
   // ── Mark harvests completed if depleted ───────────────────────────────────
   if (nowDepleted) {
-    await (admin as any)
+    await admin
       .from("asteroid_harvests")
       .update({ status: "completed" })
       .in("id", harvestIds)

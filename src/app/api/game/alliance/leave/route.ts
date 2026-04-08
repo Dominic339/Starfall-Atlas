@@ -14,13 +14,12 @@
  * Returns: { ok: true }
  */
 
-import { type NextRequest } from "next/server";
 import { requireAuth, toErrorResponse } from "@/lib/actions/helpers";
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult } from "@/lib/supabase/utils";
 
-export async function POST(_request: NextRequest) {
+export async function POST() {
   // ── Auth ─────────────────────────────────────────────────────────────────
   const auth = await requireAuth();
   if (!auth.ok) return toErrorResponse(auth.error);

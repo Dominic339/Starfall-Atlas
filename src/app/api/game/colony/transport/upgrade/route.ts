@@ -17,7 +17,6 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { BALANCE } from "@/lib/config/balance";
 import { colonyTransportCapacity, transportUpgradeCost } from "@/lib/game/transportCapacity";
 import type { Colony, ColonyTransport, PlayerStation } from "@/lib/types/game";
 

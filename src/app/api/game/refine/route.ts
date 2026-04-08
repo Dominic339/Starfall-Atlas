@@ -21,7 +21,6 @@ import { BALANCE } from "@/lib/config/balance";
 import type { PlayerStation, ResourceInventoryRow } from "@/lib/types/game";
 
 const REFINABLE = ["steel", "glass", "food"] as const;
-type RefinableType = (typeof REFINABLE)[number];
 
 const RefineSchema = z.object({
   resourceType: z.enum(REFINABLE),

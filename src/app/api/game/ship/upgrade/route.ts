@@ -32,7 +32,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { SHIP_STAT_KEYS, upgradeIronCost, effectiveCargoCap, effectiveSpeed } from "@/lib/game/shipUpgrades";
+import { upgradeIronCost, effectiveCargoCap, effectiveSpeed } from "@/lib/game/shipUpgrades";
 import { maxTotalShipUpgrades, maxStatLevel } from "@/lib/game/researchHelpers";
 import { shipTotalUpgrades } from "@/lib/game/shipUpgrades";
 import type { Ship, PlayerResearch, PlayerStation, ResourceInventoryRow } from "@/lib/types/game";

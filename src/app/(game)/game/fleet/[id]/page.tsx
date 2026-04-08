@@ -13,7 +13,7 @@ import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
-import { systemDisplayName, getCatalogEntry } from "@/lib/catalog";
+import { systemDisplayName } from "@/lib/catalog";
 import { getNearbySystems } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player, Fleet, Ship, TravelJob } from "@/lib/types/game";

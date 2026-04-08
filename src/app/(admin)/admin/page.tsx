@@ -8,7 +8,6 @@
  */
 
 import { requireAdmin } from "@/lib/admin/guard";
-import { toErrorResponse } from "@/lib/actions/helpers";
 
 export default async function AdminPage() {
   const authCheck = await requireAdmin();

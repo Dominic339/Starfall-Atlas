@@ -17,7 +17,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import type { Player } from "@/lib/types/game";
@@ -243,12 +243,15 @@ export default async function SolarSystemPage({
     return orbitMin + (orbitMax - orbitMin) * (i / (bodyCount - 1 || 1));
   });
 
-  // Fixed angle per body: distribute around a quarter arc (top-right) so they
-  // don't overlap with controls. Using a top-down spread.
+  // Fixed angle per body: distribute around the full circle.
   const bodyAngles = system.bodies.map((_, i) => {
     const step = bodyCount > 1 ? (2 * Math.PI) / bodyCount : 0;
     return -Math.PI / 2 + step * i; // start from top, go clockwise
   });
+
+  // Orbit period per body (seconds): inner planets faster, outer slower (Keplerian-ish).
+  const minOrbitR = orbits[0] ?? 1;
+  const bodyPeriods = orbits.map((r) => Math.round(12 * Math.pow(r / minOrbitR, 1.5)));
 
   return (
     <div className="flex h-full flex-col overflow-hidden bg-[#06060a]">
@@ -365,34 +368,23 @@ export default async function SolarSystemPage({
               fill={starColor}
               filter="url(#glow)"
             />
-            {/* Station indicator on star */}
+            {/* Station indicator — top-right of star */}
             {stationHere && (
               <>
-                <circle
-                  cx={CX + starR + 14}
-                  cy={CY - starR - 14}
-                  r={8}
-                  fill="none"
-                  stroke="#f59e0b"
-                  strokeWidth={1.5}
-                  opacity={0.85}
-                />
-                <circle
-                  cx={CX + starR + 14}
-                  cy={CY - starR - 14}
-                  r={4}
-                  fill="#f59e0b"
-                  opacity={0.85}
-                />
-                <text
-                  x={CX + starR + 14}
-                  y={CY - starR - 14 + 3.5}
-                  textAnchor="middle"
-                  fontSize="5"
-                  fill="#1c0a00"
-                  fontWeight="bold"
-                  className="select-none"
-                >S</text>
+                {/* Outer amber ring */}
+                <circle cx={CX + starR + 18} cy={CY - starR - 18} r={12}
+                  fill="#1c0900" stroke="#f59e0b" strokeWidth={1.5} opacity={0.95} />
+                {/* Inner dot */}
+                <circle cx={CX + starR + 18} cy={CY - starR - 18} r={6}
+                  fill="#f59e0b" opacity={0.95} filter="url(#glow)" />
+                {/* "S" label */}
+                <text x={CX + starR + 18} y={CY - starR - 18 + 4}
+                  textAnchor="middle" fontSize="7" fill="#1c0a00"
+                  fontWeight="bold" className="select-none">S</text>
+                {/* Station label */}
+                <text x={CX + starR + 18} y={CY - starR - 34}
+                  textAnchor="middle" fontSize="9" fill="#f59e0b"
+                  opacity={0.8} className="select-none">Station</text>
               </>
             )}
 
@@ -400,39 +392,45 @@ export default async function SolarSystemPage({
             {system.bodies.map((body, i) => {
               const orbitR = orbits[i];
               const angle = bodyAngles[i];
+              const angleDeg = (angle * 180) / Math.PI;
+              // Fixed display position (initial angle, for labels and colony rings)
               const bx = CX + orbitR * Math.cos(angle);
               const by = CY + orbitR * Math.sin(angle);
               const bColor = bodyColor(body.type);
               const bR = bodyRadius(body.size, body.type);
               const colony = colonyByBodyIdx.get(i);
+              const period = bodyPeriods[i];
 
               if (body.type === "asteroid_belt") {
-                // Asteroid belt: small dots scattered along the orbital ring
+                // Asteroid belt: small dots rotating slowly around the ring
                 return (
                   <g key={`body-${i}`}>
-                    {Array.from({ length: 12 }, (_, j) => {
-                      const a = (j / 12) * Math.PI * 2;
-                      const scatter = (Math.sin(j * 7.3) * 0.07 + 1) * orbitR;
-                      return (
-                        <circle
-                          key={j}
-                          cx={CX + scatter * Math.cos(a)}
-                          cy={CY + scatter * Math.sin(a)}
-                          r={1.5}
-                          fill="#9ca3af"
-                          opacity={0.5}
-                        />
-                      );
-                    })}
-                    <text
-                      x={bx}
-                      y={by + 14}
-                      textAnchor="middle"
-                      fontSize="9"
-                      fill="#6b7280"
-                      opacity={0.7}
-                      className="select-none"
-                    >
+                    <g>
+                      <animateTransform
+                        attributeName="transform"
+                        type="rotate"
+                        from={`0 ${CX} ${CY}`}
+                        to={`360 ${CX} ${CY}`}
+                        dur={`${period * 2}s`}
+                        repeatCount="indefinite"
+                      />
+                      {Array.from({ length: 16 }, (_, j) => {
+                        const a = (j / 16) * Math.PI * 2;
+                        const scatter = (Math.sin(j * 7.3) * 0.07 + 1) * orbitR;
+                        return (
+                          <circle
+                            key={j}
+                            cx={CX + scatter * Math.cos(a)}
+                            cy={CY + scatter * Math.sin(a)}
+                            r={1.5}
+                            fill="#9ca3af"
+                            opacity={0.5}
+                          />
+                        );
+                      })}
+                    </g>
+                    <text x={bx} y={by + 14} textAnchor="middle" fontSize="9"
+                      fill="#6b7280" opacity={0.7} className="select-none">
                       Belt
                     </text>
                   </g>
@@ -441,38 +439,70 @@ export default async function SolarSystemPage({
 
               return (
                 <g key={`body-${i}`}>
-                  {/* Colony ring around body */}
-                  {colony && (
-                    <circle
-                      cx={bx} cy={by}
-                      r={bR + 6}
-                      fill="none"
-                      stroke="#34d399"
-                      strokeWidth={1.5}
-                      opacity={0.8}
-                      strokeDasharray="4 3"
+                  {/* Animated planet group — orbits around the star */}
+                  <g>
+                    <animateTransform
+                      attributeName="transform"
+                      type="rotate"
+                      from={`${angleDeg} ${CX} ${CY}`}
+                      to={`${angleDeg + 360} ${CX} ${CY}`}
+                      dur={`${period}s`}
+                      repeatCount="indefinite"
                     />
-                  )}
 
-                  {/* Planet body */}
-                  <circle
-                    cx={bx} cy={by}
-                    r={bR}
-                    fill={bColor}
-                    stroke="#06060a"
-                    strokeWidth={1}
-                    opacity={0.9}
-                    filter="url(#glow)"
-                  />
+                    {/* Colony ring marker */}
+                    {colony && (
+                      <circle
+                        cx={CX + orbitR} cy={CY}
+                        r={bR + 6}
+                        fill="none"
+                        stroke="#34d399"
+                        strokeWidth={1.5}
+                        opacity={0.85}
+                        strokeDasharray="4 3"
+                      />
+                    )}
 
-                  {/* Body index label */}
+                    {/* Station indicator on planet */}
+                    {stationHere && colony && (
+                      <>
+                        <circle cx={CX + orbitR + bR + 8} cy={CY} r={5}
+                          fill="none" stroke="#f59e0b" strokeWidth={1.2} opacity={0.85} />
+                        <circle cx={CX + orbitR + bR + 8} cy={CY} r={2.5}
+                          fill="#f59e0b" opacity={0.85} />
+                      </>
+                    )}
+
+                    {/* Planet body */}
+                    <circle
+                      cx={CX + orbitR} cy={CY}
+                      r={bR}
+                      fill={bColor}
+                      stroke="#06060a"
+                      strokeWidth={1}
+                      opacity={0.92}
+                      filter="url(#glow)"
+                    />
+
+                    {/* Colony dot on planet surface */}
+                    {colony && (
+                      <circle
+                        cx={CX + orbitR + bR * 0.6} cy={CY - bR * 0.6}
+                        r={2.5}
+                        fill="#34d399"
+                        opacity={0.95}
+                      />
+                    )}
+                  </g>
+
+                  {/* Static label at fixed initial position */}
                   <text
                     x={bx}
-                    y={by + bR + 12}
+                    y={by + bR + 14}
                     textAnchor="middle"
                     fontSize="9"
-                    fill={colony ? "#34d399" : "#6b7280"}
-                    opacity={0.8}
+                    fill={colony ? "#34d399" : "#4b5563"}
+                    opacity={0.75}
                     className="select-none"
                   >
                     {i + 1}. {bodyLabel(body.type)}
@@ -482,54 +512,57 @@ export default async function SolarSystemPage({
               );
             })}
 
-            {/* ── Ship markers (bottom arc around the star) ──────────────────── */}
+            {/* ── Ship markers (docked at star — bottom arc) ─────────────────── */}
             {ships.map((ship, i) => {
-              const angle = Math.PI + (i - (ships.length - 1) / 2) * 0.25;
-              const sx = CX + (starR + 30) * Math.cos(angle);
-              const sy = CY + (starR + 30) * Math.sin(angle);
+              const angle = Math.PI + (i - (ships.length - 1) / 2) * 0.30;
+              const sx = CX + (starR + 36) * Math.cos(angle);
+              const sy = CY + (starR + 36) * Math.sin(angle);
               return (
                 <g key={`ship-${ship.id}`}>
-                  <circle cx={sx} cy={sy} r={7} fill="none" stroke="#6366f1" strokeWidth={1.5} opacity={0.8} />
-                  <circle cx={sx} cy={sy} r={4} fill="#818cf8" filter="url(#glow)" />
-                  <text
-                    x={sx}
-                    y={sy + 16}
-                    textAnchor="middle"
-                    fontSize="8"
-                    fill="#818cf8"
-                    opacity={0.85}
-                    className="select-none"
-                  >
+                  {/* Outer ring with fill */}
+                  <circle cx={sx} cy={sy} r={10} fill="#1e1b4b" stroke="#6366f1" strokeWidth={1.5} opacity={0.95} />
+                  {/* Inner ship dot */}
+                  <circle cx={sx} cy={sy} r={5.5} fill="#a5b4fc" filter="url(#glow)" />
+                  {/* Ship icon */}
+                  <text x={sx} y={sy + 2} textAnchor="middle" fontSize="6"
+                    fill="#06060a" fontWeight="bold" className="select-none">•</text>
+                  {/* Name label */}
+                  <text x={sx} y={sy + 20} textAnchor="middle" fontSize="9"
+                    fill="#a5b4fc" opacity={0.9} className="select-none">
                     {ship.name}
                   </text>
+                  {ship.dispatch_mode !== "manual" && (
+                    <text x={sx} y={sy + 30} textAnchor="middle" fontSize="8"
+                      fill="#5eead4" opacity={0.7} className="select-none">Auto</text>
+                  )}
                 </g>
               );
             })}
 
-            {/* ── Fleet markers (right arc around the star) ─────────────────── */}
+            {/* ── Fleet markers (docked at star — right arc) ───────────────────── */}
             {fleets.map((fleet, i) => {
-              const angle = (i - (fleets.length - 1) / 2) * 0.25;
-              const fx = CX + (starR + 30) * Math.cos(angle);
-              const fy = CY + (starR + 30) * Math.sin(angle);
+              const angle = (i - (fleets.length - 1) / 2) * 0.30;
+              const fx = CX + (starR + 36) * Math.cos(angle);
+              const fy = CY + (starR + 36) * Math.sin(angle);
               return (
                 <g key={`fleet-${fleet.id}`}>
-                  <circle cx={fx} cy={fy} r={8} fill="none" stroke="#a78bfa" strokeWidth={1.5} opacity={0.8} />
+                  {/* Background */}
+                  <circle cx={fx} cy={fy} r={10} fill="#1a0a3d" stroke="#a78bfa" strokeWidth={1.5} opacity={0.95} />
+                  {/* Fleet triangle */}
                   <polygon
-                    points={`${fx},${fy - 4.5} ${fx + 4},${fy + 3} ${fx - 4},${fy + 3}`}
-                    fill="#a78bfa"
+                    points={`${fx},${fy - 5.5} ${fx + 5},${fy + 3.5} ${fx - 5},${fy + 3.5}`}
+                    fill="#c4b5fd"
                     filter="url(#glow)"
                   />
-                  <text
-                    x={fx}
-                    y={fy + 18}
-                    textAnchor="middle"
-                    fontSize="8"
-                    fill="#a78bfa"
-                    opacity={0.85}
-                    className="select-none"
-                  >
+                  {/* Name label */}
+                  <text x={fx} y={fy + 20} textAnchor="middle" fontSize="9"
+                    fill="#c4b5fd" opacity={0.9} className="select-none">
                     {fleet.name}
                   </text>
+                  {fleet.status === "harvesting" && (
+                    <text x={fx} y={fy + 30} textAnchor="middle" fontSize="8"
+                      fill="#fcd34d" opacity={0.7} className="select-none">Harvesting</text>
+                  )}
                 </g>
               );
             })}

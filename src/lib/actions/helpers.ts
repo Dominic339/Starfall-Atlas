@@ -2,7 +2,7 @@
  * Shared helpers for server-side game action handlers.
  */
 
-import { z, ZodSchema } from "zod";
+import { ZodSchema } from "zod";
 import { createClient as createServerClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult } from "@/lib/supabase/utils";

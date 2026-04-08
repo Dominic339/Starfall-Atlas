@@ -24,7 +24,7 @@ import { systemDisplayName } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
-import type { Player, Ship, Colony, PlayerStation, ResourceInventoryRow, TravelJob } from "@/lib/types/game";
+import type { Player, Ship, Colony, PlayerStation, TravelJob } from "@/lib/types/game";
 import { DevControls } from "./_components/DevControls";
 
 export const dynamic = "force-dynamic";

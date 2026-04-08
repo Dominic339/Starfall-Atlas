@@ -300,7 +300,6 @@ export function GalaxyMapClient({
   stationCoords,
   playerAllianceId,
   canPlaceBeacon,
-  playerAllianceBeaconSystemIds: _playerAllianceBeaconSystemIds,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -572,7 +571,6 @@ export function GalaxyMapClient({
       }
       // ── Station drag: relocate station ────────────────────────────────────
       if (stationDragRef.current !== null) {
-        const current = stationDragRef.current;
         const svg = svgRef.current;
         if (!svg) return;
         const rect = svg.getBoundingClientRect();
@@ -591,8 +589,9 @@ export function GalaxyMapClient({
             nearest = sys.id;
           }
         }
-        // Don't target the current station system
-        if (stationSystem && nearest === stationSystem.id) nearest = null;
+        // Don't target the current station system (read from ref to avoid stale closure)
+        const stationSys = systemsRef.current.find((s) => s.isStationLocation) ?? null;
+        if (stationSys && nearest === stationSys.id) nearest = null;
         const updated: StationDragInfo = { clientX: e.clientX, clientY: e.clientY, targetId: nearest };
         setStationDrag(updated);
         stationDragRef.current = updated;
@@ -1720,6 +1719,57 @@ export function GalaxyMapClient({
               );
             })}
 
+            {/* ── Drag path lines (rendered before markers so they appear under them) ─ */}
+            {dragInfo && (() => {
+              const sourceSys = dragInfo.ship.systemId ? systemMap.get(dragInfo.ship.systemId) : null;
+              if (!sourceSys) return null;
+              const svg = svgRef.current;
+              if (!svg) return null;
+              const rect = svg.getBoundingClientRect();
+              const vx = ((dragInfo.clientX - rect.left) / rect.width) * viewboxW;
+              const vy = ((dragInfo.clientY - rect.top) / rect.height) * viewboxH;
+              const cursorBx = (vx - tx) / scale;
+              const cursorBy = (vy - ty) / scale;
+              return (
+                <g pointerEvents="none">
+                  {/* Glow underlay */}
+                  <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
+                    stroke="#818cf8" strokeWidth={8 / scale} opacity={0.06} />
+                  {/* Dashed path line */}
+                  <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
+                    stroke="#a5b4fc" strokeWidth={2 / scale}
+                    strokeDasharray={`${7 / scale} ${4 / scale}`} opacity={0.75} />
+                  {/* Cursor dot */}
+                  <circle cx={cursorBx} cy={cursorBy} r={5 / scale}
+                    fill="#a5b4fc" stroke="#06060a" strokeWidth={1 / scale} opacity={0.9} filter="url(#glow)" />
+                </g>
+              );
+            })()}
+
+            {fleetDragInfo && (() => {
+              const fleet = fleetDragInfo.fleet;
+              const sourceSys = fleet.systemId ? systemMap.get(fleet.systemId) : null;
+              if (!sourceSys) return null;
+              const svg = svgRef.current;
+              if (!svg) return null;
+              const rect = svg.getBoundingClientRect();
+              const vx = ((fleetDragInfo.clientX - rect.left) / rect.width) * viewboxW;
+              const vy = ((fleetDragInfo.clientY - rect.top) / rect.height) * viewboxH;
+              const cursorBx = (vx - tx) / scale;
+              const cursorBy = (vy - ty) / scale;
+              return (
+                <g pointerEvents="none">
+                  <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
+                    stroke="#a78bfa" strokeWidth={8 / scale} opacity={0.06} />
+                  <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
+                    stroke="#c4b5fd" strokeWidth={2 / scale}
+                    strokeDasharray={`${7 / scale} ${4 / scale}`} opacity={0.75} />
+                  <circle cx={cursorBx} cy={cursorBy} r={5 / scale}
+                    fill="#c4b5fd" stroke="#06060a" strokeWidth={1 / scale} opacity={0.9} filter="url(#glow)" />
+                </g>
+              );
+            })()}
+
             {/* ── Docked ship markers (draggable) ─────────────────────────── */}
             {ships.filter((s) => s.systemId !== null).map((ship) => {
               const sys = systemMap.get(ship.systemId!);
@@ -1728,35 +1778,67 @@ export function GalaxyMapClient({
               const idx = shipsAtSys.indexOf(ship);
               const count = shipsAtSys.length;
               const starR = nodeRadius(sys);
-              // Spread horizontally above the star
-              const mx = sys.svgX + (idx - (count - 1) / 2) * 11;
-              const my = sys.svgY - starR - 14;
+              // Spread horizontally above the star; more spacing for clarity
+              const mx = sys.svgX + (idx - (count - 1) / 2) * 18;
+              const my = sys.svgY - starR - 20;
               const isDraggingThis = dragInfo?.ship.id === ship.id;
               return (
                 <g
                   key={`shipmarker-${ship.id}`}
-                  style={{ cursor: "grab" }}
+                  style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}
                   onMouseDown={(e) => handleShipMarkerMouseDown(e, ship)}
                 >
-                  {/* Outer ring */}
+                  {/* Hit area (invisible, large for easy clicking) */}
+                  <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
+                  {/* Background fill */}
                   <circle
                     cx={mx} cy={my}
-                    r={6 / scale}
-                    fill="none"
+                    r={9 / scale}
+                    fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
                     stroke="#6366f1"
                     strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.25 : 0.65}
+                    opacity={isDraggingThis ? 0.5 : 0.95}
                   />
-                  {/* Inner dot */}
+                  {/* Inner ship dot */}
                   <circle
                     cx={mx} cy={my}
-                    r={3.5 / scale}
-                    fill={isDraggingThis ? "#a5b4fc" : "#818cf8"}
+                    r={4.5 / scale}
+                    fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
                     stroke="#06060a"
                     strokeWidth={0.8 / scale}
                     filter="url(#glow)"
-                    opacity={isDraggingThis ? 0.4 : 1}
+                    opacity={isDraggingThis ? 0.5 : 1}
                   />
+                  {/* Ship icon dot */}
+                  <text
+                    x={mx} y={my + 1.5 / scale}
+                    textAnchor="middle"
+                    fontSize={5 / scale < 4 ? 4 : 5 / scale > 7 ? 7 : 5 / scale}
+                    fill="#06060a"
+                    fontWeight="bold"
+                    className="select-none pointer-events-none"
+                  >•</text>
+                  {/* Ship name label */}
+                  {scale >= 1.2 && (
+                    <text
+                      x={mx} y={my - 13 / scale}
+                      textAnchor="middle"
+                      fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
+                      fill="#a5b4fc"
+                      opacity={0.9}
+                      className="select-none pointer-events-none"
+                    >
+                      {ship.name}
+                    </text>
+                  )}
+                  {/* Loading spinner */}
+                  {shipDispatchLoading === ship.id && (
+                    <circle cx={mx} cy={my} r={12 / scale} fill="none"
+                      stroke="#818cf8" strokeWidth={1.5 / scale}
+                      strokeDasharray={`${5 / scale} ${3 / scale}`} opacity={0.60}
+                      className="galaxy-travel-flow"
+                    />
+                  )}
                 </g>
               );
             })}
@@ -1828,38 +1910,54 @@ export function GalaxyMapClient({
                 const starR = nodeRadius(sys);
                 return sysFl.map((fleet, idx) => {
                   const count = sysFl.length;
-                  const mx = sys.svgX + (idx - (count - 1) / 2) * 11;
-                  const my = sys.svgY + starR + 14;
+                  // Spread below the star with more spacing
+                  const mx = sys.svgX + (idx - (count - 1) / 2) * 18;
+                  const my = sys.svgY + starR + 20;
                   const isDraggingThis = fleetDragInfo?.fleet.id === fleet.id;
                   return (
                     <g
                       key={`fleetmarker-${fleet.id}`}
-                      style={{ cursor: fleetDispatchLoading === fleet.id ? "wait" : "grab" }}
+                      style={{ cursor: fleetDispatchLoading === fleet.id ? "wait" : isDraggingThis ? "grabbing" : "grab" }}
                       onMouseDown={(e) => handleFleetMarkerMouseDown(e, fleet)}
                     >
-                      {/* Outer violet ring */}
+                      {/* Hit area */}
+                      <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
+                      {/* Background fill */}
                       <circle
                         cx={mx} cy={my}
-                        r={6 / scale}
-                        fill="none"
+                        r={9 / scale}
+                        fill={isDraggingThis ? "#2e1065" : "#1a0a3d"}
                         stroke="#a78bfa"
                         strokeWidth={1.5 / scale}
-                        opacity={isDraggingThis ? 0.25 : 0.70}
+                        opacity={isDraggingThis ? 0.5 : 0.95}
                       />
-                      {/* Inner triangle (fleet symbol) */}
+                      {/* Fleet triangle symbol */}
                       <polygon
-                        points={`${mx},${my - 3.5 / scale} ${mx + 3 / scale},${my + 2 / scale} ${mx - 3 / scale},${my + 2 / scale}`}
-                        fill={isDraggingThis ? "#c4b5fd" : "#a78bfa"}
+                        points={`${mx},${my - 5 / scale} ${mx + 4.5 / scale},${my + 3 / scale} ${mx - 4.5 / scale},${my + 3 / scale}`}
+                        fill={isDraggingThis ? "#ddd6fe" : "#c4b5fd"}
                         stroke="#06060a"
-                        strokeWidth={0.6 / scale}
+                        strokeWidth={0.8 / scale}
                         filter={isDraggingThis ? undefined : "url(#glow)"}
-                        opacity={isDraggingThis ? 0.35 : 1}
+                        opacity={isDraggingThis ? 0.5 : 1}
                       />
+                      {/* Fleet name label */}
+                      {scale >= 1.2 && (
+                        <text
+                          x={mx} y={my + 15 / scale}
+                          textAnchor="middle"
+                          fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
+                          fill="#c4b5fd"
+                          opacity={0.9}
+                          className="select-none pointer-events-none"
+                        >
+                          {fleet.name}
+                        </text>
+                      )}
                       {/* Loading indicator */}
                       {fleetDispatchLoading === fleet.id && (
                         <circle
                           cx={mx} cy={my}
-                          r={9 / scale}
+                          r={12 / scale}
                           fill="none"
                           stroke="#a78bfa"
                           strokeWidth={1.5 / scale}
