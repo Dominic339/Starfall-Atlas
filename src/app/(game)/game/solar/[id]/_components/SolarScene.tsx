@@ -1,3 +1,5 @@
+"use client";
+
 /**
  * SolarScene — client-side 3D solar system view.
  *
@@ -18,8 +20,6 @@
  *
  * @module SolarScene
  */
-
-"use client";
 
 import { useRef, useMemo } from "react";
 import { Canvas, useFrame } from "@react-three/fiber";
