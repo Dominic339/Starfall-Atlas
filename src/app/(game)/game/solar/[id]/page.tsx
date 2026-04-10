@@ -18,12 +18,17 @@ import { maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import type { Player } from "@/lib/types/game";
-import {
-  SolarScene,
-  type SolarSceneSystemData,
-  type SolarSceneShipData,
-  type SolarSceneFleetData,
+import dynamic from "next/dynamic";
+import type {
+  SolarSceneSystemData,
+  SolarSceneShipData,
+  SolarSceneFleetData,
 } from "./_components/SolarScene";
+
+const SolarScene = dynamic(
+  () => import("./_components/SolarScene").then((m) => ({ default: m.SolarScene })),
+  { ssr: false },
+);
 
 export const dynamic = "force-dynamic";
 
