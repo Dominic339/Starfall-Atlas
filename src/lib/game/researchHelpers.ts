@@ -46,7 +46,10 @@ export function isResearchUnlocked(
 
 /**
  * True when the research exists, is not already unlocked, its prerequisites
- * are met, and its milestone conditions are satisfied.
+ * are met, its milestone conditions are satisfied, AND it is not scaffold-only.
+ *
+ * Scaffold-only entries are defined and costed but have no active gameplay
+ * effect. They must not be purchasable until that effect is implemented.
  */
 export function isResearchPurchasable(
   def: ResearchDefinition,
@@ -54,6 +57,7 @@ export function isResearchPurchasable(
   milestones: MilestoneData,
 ): boolean {
   if (unlockedIds.has(def.id)) return false;
+  if (def.scaffoldOnly) return false;
   if (!arePrerequisitesMet(def, unlockedIds)) return false;
   if (!areMilestonesMet(def.milestones ?? [], milestones)) return false;
   return true;
