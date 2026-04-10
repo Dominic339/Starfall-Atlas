@@ -63,6 +63,16 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
+  // ── Scaffold-only entries are not yet purchasable ───────────────────────
+  if (def.scaffoldOnly) {
+    return toErrorResponse(
+      fail(
+        "invalid_target",
+        "This research has no active gameplay effect yet and cannot be purchased.",
+      ).error,
+    );
+  }
+
   // ── Already unlocked? ────────────────────────────────────────────────────
   const { data: existingRows } = listResult<Pick<PlayerResearch, "research_id">>(
     await admin
