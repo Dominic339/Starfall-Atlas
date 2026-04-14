@@ -38,8 +38,8 @@ const MODEL_PATH: Partial<Record<string, string>> = {
   ice_giant:  "/assets/planets/Ice%20Gas%20Giant%20Planet.glb",
 };
 
-// Preload all unique model paths
-const uniquePaths = [...new Set(Object.values(MODEL_PATH))];
+// Preload all unique model paths (filter out undefined from Partial values)
+const uniquePaths = [...new Set(Object.values(MODEL_PATH).filter((p): p is string => p !== undefined))];
 uniquePaths.forEach((p) => useGLTF.preload(p));
 
 // ---------------------------------------------------------------------------
