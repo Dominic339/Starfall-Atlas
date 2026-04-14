@@ -591,7 +591,9 @@ function SceneInner({
 
   return (
     <>
-      <ambientLight intensity={0.12} />
+      <hemisphereLight args={["#c8d8ff", "#1a1a2e", 0.7]} />
+      <directionalLight position={[10, 12, 8]} intensity={1.6} castShadow={false} />
+      <directionalLight position={[-8, -4, -6]} intensity={0.3} />
       <Stars radius={90} depth={60} count={3500} factor={3.5} saturation={0} fade />
       <Star spectralClass={system.spectralClass} />
 

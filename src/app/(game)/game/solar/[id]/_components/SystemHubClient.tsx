@@ -163,7 +163,6 @@ function PlanetPanel({
   const survey = useApiAction();
   const found  = useApiAction();
   const collect = useApiAction();
-  const extract = useApiAction();
 
   const dotColor = BODY_COLORS[body.type] ?? "#9ca3af";
   const label    = bodyLabel(body.type);
@@ -278,24 +277,6 @@ function PlanetPanel({
               {collect.error   && <p className="text-xs text-red-400">{collect.error}</p>}
               {collect.success && <p className="text-xs text-amber-400">{collect.success}</p>}
 
-              {/* Extract resources */}
-              {canActOnBodies && (
-                <>
-                  <button
-                    onClick={() => extract.run(
-                      "/api/game/colony/extract",
-                      { colonyId: body.colonyId },
-                      "Resources extracted!",
-                    )}
-                    disabled={extract.loading}
-                    className="w-full rounded bg-indigo-800/50 border border-indigo-700/40 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-700/50 transition-colors disabled:opacity-50"
-                  >
-                    {extract.loading ? "Extracting…" : "Extract Resources"}
-                  </button>
-                  {extract.error   && <p className="text-xs text-red-400">{extract.error}</p>}
-                  {extract.success && <p className="text-xs text-indigo-400">{extract.success}</p>}
-                </>
-              )}
             </div>
 
             {/* Supply drag hint */}
