@@ -490,7 +490,7 @@ function SceneInner({
       const ndcX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
       const ndcY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
       const raycaster = new THREE.Raycaster();
-      raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera as THREE.PerspectiveCamera);
+      raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera as THREE.PerspectiveCamera);
       const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
       const hit = new THREE.Vector3();
       if (raycaster.ray.intersectPlane(plane, hit)) {
