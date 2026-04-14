@@ -18,17 +18,12 @@ import { maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry, systemDisplayName } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import type { Player } from "@/lib/types/game";
-import dynamic from "next/dynamic";
 import type {
   SolarSceneSystemData,
   SolarSceneShipData,
   SolarSceneFleetData,
 } from "./_components/SolarScene";
-
-const SolarScene = dynamic(
-  () => import("./_components/SolarScene").then((m) => ({ default: m.SolarScene })),
-  { ssr: false },
-);
+import { SolarSceneWrapper } from "./_components/SolarSceneWrapper";
 
 export const dynamic = "force-dynamic";
 
@@ -225,7 +220,7 @@ export default async function SolarSystemPage({
 
         {/* 3D canvas */}
         <div className="relative flex-1 overflow-hidden">
-          <SolarScene
+          <SolarSceneWrapper
             system={sceneSystem}
             ships={sceneShips}
             fleets={sceneFleets}
