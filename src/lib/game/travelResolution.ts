@@ -299,18 +299,26 @@ async function doLoad(
   if (remaining <= 0 || colonyInv.length === 0) return 0;
 
   const toLoad: { resource_type: string; quantity: number }[] = [];
-  const leftoverInv: { resource_type: string; quantity: number }[] = [];
 
-  for (const item of colonyInv) {
-    const load = Math.min(item.quantity, remaining);
-    if (load > 0) {
-      toLoad.push({ resource_type: item.resource_type, quantity: load });
-      if (item.quantity > load) leftoverInv.push({ resource_type: item.resource_type, quantity: item.quantity - load });
-      remaining -= load;
-    } else {
-      leftoverInv.push(item);
-    }
+  // Fair-share: sort ascending by quantity so smallest resources get their
+  // full share first, then divide remaining capacity equally among the rest.
+  const sortedInv = [...colonyInv].sort((a, b) => a.quantity - b.quantity);
+  let n = sortedInv.length;
+  for (const item of sortedInv) {
+    if (remaining <= 0 || n === 0) break;
+    const share = Math.floor(remaining / n);
+    const take = Math.min(item.quantity, share);
+    if (take > 0) toLoad.push({ resource_type: item.resource_type, quantity: take });
+    remaining -= take;
+    n--;
   }
+
+  // Compute leftovers after fair-share loading
+  const takenMap = new Map(toLoad.map((r) => [r.resource_type, r.quantity]));
+  const leftoverInv = colonyInv.map((item) => ({
+    resource_type: item.resource_type,
+    quantity: item.quantity - (takenMap.get(item.resource_type) ?? 0),
+  })).filter((item) => item.quantity > 0);
 
   if (toLoad.length === 0) return 0;
 
