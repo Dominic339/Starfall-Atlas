@@ -4,8 +4,7 @@
  * SolarScene — interactive 3D solar system view.
  *
  * Features:
- *   - Blender GLB planet models per planet type (auto-scaled, auto-centered)
- *   - Procedural sphere fallback when a model isn't available
+ *   - Stylized procedural planet meshes per planet type (sphere + atmosphere + rings)
  *   - Click on a planet  → fires onPlanetClick(index)
  *   - Pointer-drag from one planet to another → fires onSupplyDrop(toIndex)
  *   - Clickable station marker → fires onStationClick()
@@ -14,33 +13,10 @@
  *   - OrbitControls (constrained zoom, no pan)
  */
 
-import { useRef, useMemo, useState, useEffect, Suspense } from "react";
+import { useRef, useMemo, useState, useEffect } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, Stars, OrbitControls, Line, useGLTF, Environment } from "@react-three/drei";
+import { Html, Stars, OrbitControls, Line } from "@react-three/drei";
 import * as THREE from "three";
-
-// ---------------------------------------------------------------------------
-// Model paths (public/assets/planets/)
-// ---------------------------------------------------------------------------
-
-const MODEL_PATH: Partial<Record<string, string>> = {
-  lush:       "/assets/planets/Lush%20Planet.glb",
-  habitable:  "/assets/planets/Lush%20Planet.glb",
-  ocean:      "/assets/planets/Ocean%20Planet.glb",
-  desert:     "/assets/planets/Desert%20Planet.glb",
-  ice_planet: "/assets/planets/Ice%20Planet.glb",
-  frozen:     "/assets/planets/Ice%20Planet.glb",
-  volcanic:   "/assets/planets/Lava%20Planet.glb",
-  toxic:      "/assets/planets/Toxic%20Planet.glb",
-  barren:     "/assets/planets/Barren%20Planet.glb",
-  rocky:      "/assets/planets/Barren%20Planet.glb",
-  gas_giant:  "/assets/planets/Gas%20Planet.glb",
-  ice_giant:  "/assets/planets/Ice%20Gas%20Giant%20Planet.glb",
-};
-
-// Preload all unique model paths (filter out undefined from Partial values)
-const uniquePaths = [...new Set(Object.values(MODEL_PATH).filter((p): p is string => p !== undefined))];
-uniquePaths.forEach((p) => useGLTF.preload(p));
 
 // ---------------------------------------------------------------------------
 // Colour / sizing tables
@@ -58,16 +34,52 @@ const STAR_RADIUS: Record<string, number> = {
   O: 1.40, B: 1.20, A: 1.00, F: 0.90, G: 0.80, K: 0.70, M: 0.55,
 };
 
-const PLANET_COLOR: Record<string, string> = {
-  lush: "#4ade80", habitable: "#86efac", ocean: "#38bdf8",
-  rocky: "#a8a29e", barren: "#78716c", desert: "#fbbf24",
-  frozen: "#bae6fd", ice_planet: "#7dd3fc", ice_giant: "#67e8f9",
-  gas_giant: "#fb923c", volcanic: "#f87171", toxic: "#a3e635",
-  asteroid_belt: "#6b7280",
+// Per-type stylized material definitions
+const PLANET_MAT: Record<string, {
+  color: string; roughness: number; metalness: number;
+  emissive?: string; emissiveIntensity?: number;
+}> = {
+  lush:         { color: "#2a6b35", roughness: 0.82, metalness: 0.04 },
+  habitable:    { color: "#46955a", roughness: 0.76, metalness: 0.03 },
+  ocean:        { color: "#1a4f9a", roughness: 0.12, metalness: 0.10 },
+  desert:       { color: "#b8712a", roughness: 0.92, metalness: 0.01 },
+  rocky:        { color: "#706560", roughness: 0.90, metalness: 0.06 },
+  barren:       { color: "#4a4440", roughness: 0.96, metalness: 0.02 },
+  frozen:       { color: "#a8d8f0", roughness: 0.38, metalness: 0.08 },
+  ice_planet:   { color: "#88c4e8", roughness: 0.32, metalness: 0.10 },
+  ice_giant:    { color: "#38b8cc", roughness: 0.18, metalness: 0.20 },
+  gas_giant:    { color: "#c87830", roughness: 0.10, metalness: 0.05 },
+  volcanic:     { color: "#280808", roughness: 0.62, metalness: 0.18, emissive: "#ff3300", emissiveIntensity: 0.55 },
+  toxic:        { color: "#5e9818", roughness: 0.68, metalness: 0.06, emissive: "#90c800", emissiveIntensity: 0.20 },
+  asteroid_belt:{ color: "#504a45", roughness: 0.97, metalness: 0.01 },
 };
-const PLANET_ROUGHNESS: Record<string, number> = {
-  gas_giant: 0.15, ice_giant: 0.15, volcanic: 0.45,
-  ocean: 0.30, lush: 0.65, frozen: 0.50,
+
+// Atmosphere glow per type (undefined = no atmosphere)
+const PLANET_ATMO: Record<string, { color: string; opacity: number }> = {
+  lush:       { color: "#60b880", opacity: 0.20 },
+  habitable:  { color: "#80c890", opacity: 0.16 },
+  ocean:      { color: "#2060c0", opacity: 0.24 },
+  frozen:     { color: "#c8e8ff", opacity: 0.13 },
+  ice_planet: { color: "#a8d8f8", opacity: 0.15 },
+  ice_giant:  { color: "#30b8cc", opacity: 0.18 },
+  gas_giant:  { color: "#d88040", opacity: 0.14 },
+  volcanic:   { color: "#ff2000", opacity: 0.30 },
+  toxic:      { color: "#a0d800", opacity: 0.26 },
+};
+
+// Ring config for gas/ice giants
+const PLANET_RINGS: Record<string, { color: string; opacity: number; inner: number; outer: number; tilt: number }> = {
+  gas_giant: { color: "#c0844a", opacity: 0.42, inner: 1.45, outer: 2.30, tilt: Math.PI / 6 },
+  ice_giant: { color: "#70c8d8", opacity: 0.36, inner: 1.40, outer: 2.10, tilt: Math.PI / 5 },
+};
+
+// Sidebar colour (for SystemHubClient to consume — keep in sync with PLANET_MAT)
+const PLANET_COLOR: Record<string, string> = {
+  lush: "#2a6b35", habitable: "#46955a", ocean: "#1a4f9a",
+  rocky: "#706560", barren: "#4a4440", desert: "#b8712a",
+  frozen: "#a8d8f0", ice_planet: "#88c4e8", ice_giant: "#38b8cc",
+  gas_giant: "#c87830", volcanic: "#ff3300", toxic: "#90c800",
+  asteroid_belt: "#504a45",
 };
 
 function planetRadius(size: string, type: string): number {
@@ -87,58 +99,44 @@ function bodyDisplayLabel(type: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// GLB planet model component
-// ---------------------------------------------------------------------------
-
-function PlanetModel({ path, radius }: { path: string; radius: number }) {
-  const { scene } = useGLTF(path);
-
-  // Clone scene so each planet instance is independent; also clone materials
-  const cloned = useMemo(() => {
-    const c = scene.clone(true);
-    c.traverse((node) => {
-      const mesh = node as THREE.Mesh;
-      if (mesh.isMesh && mesh.material) {
-        if (Array.isArray(mesh.material)) {
-          mesh.material = mesh.material.map((m) => (m as THREE.Material).clone());
-        } else {
-          mesh.material = (mesh.material as THREE.Material).clone();
-        }
-      }
-    });
-    return c;
-  }, [scene]);
-
-  // Auto-scale so bounding sphere matches target radius
-  const scale = useMemo(() => {
-    const box = new THREE.Box3().setFromObject(cloned);
-    const size = new THREE.Vector3();
-    box.getSize(size);
-    const maxDim = Math.max(size.x, size.y, size.z);
-    // Re-center to origin in case the model is off-centre
-    const center = new THREE.Vector3();
-    box.getCenter(center);
-    cloned.position.sub(center);
-    return maxDim > 0 ? (radius * 2) / maxDim : 1;
-  }, [cloned, radius]);
-
-  return <primitive object={cloned} scale={scale} />;
-}
-
-// ---------------------------------------------------------------------------
-// Procedural planet body (fallback)
+// Stylized procedural planet — sphere + optional atmosphere + optional rings
 // ---------------------------------------------------------------------------
 
 function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: number }) {
+  const mat   = PLANET_MAT[bodyType]   ?? PLANET_MAT.rocky;
+  const atmo  = PLANET_ATMO[bodyType];
+  const rings = PLANET_RINGS[bodyType];
+
   return (
-    <mesh>
-      <sphereGeometry args={[radius, 36, 24]} />
-      <meshStandardMaterial
-        color={PLANET_COLOR[bodyType] ?? "#9ca3af"}
-        roughness={PLANET_ROUGHNESS[bodyType] ?? 0.78}
-        metalness={bodyType === "volcanic" ? 0.25 : 0.02}
-      />
-    </mesh>
+    <group>
+      {/* Core sphere */}
+      <mesh>
+        <sphereGeometry args={[radius, 48, 32]} />
+        <meshStandardMaterial
+          color={mat.color}
+          roughness={mat.roughness}
+          metalness={mat.metalness}
+          emissive={mat.emissive ?? "#000000"}
+          emissiveIntensity={mat.emissiveIntensity ?? 0}
+        />
+      </mesh>
+
+      {/* Atmosphere glow — large backside shell */}
+      {atmo && (
+        <mesh>
+          <sphereGeometry args={[radius * 1.12, 32, 16]} />
+          <meshBasicMaterial color={atmo.color} transparent opacity={atmo.opacity} side={THREE.BackSide} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Rings (gas/ice giants) */}
+      {rings && (
+        <mesh rotation={[rings.tilt, 0, 0.18]}>
+          <ringGeometry args={[radius * rings.inner, radius * rings.outer, 80]} />
+          <meshBasicMaterial color={rings.color} transparent opacity={rings.opacity} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      )}
+    </group>
   );
 }
 
@@ -245,7 +243,6 @@ function Planet({
 }: PlanetProps) {
   const groupRef = useRef<THREE.Group>(null!);
   const r = planetRadius(bodySize, bodyType);
-  const modelPath = MODEL_PATH[bodyType];
 
   useFrame(({ clock }) => {
     const angle = initialAngle + (clock.elapsedTime / period) * Math.PI * 2;
@@ -312,14 +309,8 @@ function Planet({
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
 
-      {/* Visual body — GLB or procedural */}
-      {modelPath ? (
-        <Suspense fallback={<ProceduralPlanet bodyType={bodyType} radius={r} />}>
-          <PlanetModel path={modelPath} radius={r} />
-        </Suspense>
-      ) : (
-        <ProceduralPlanet bodyType={bodyType} radius={r} />
-      )}
+      {/* Visual body */}
+      <ProceduralPlanet bodyType={bodyType} radius={r} />
 
       {/* Colony surface dot */}
       {hasColony && (
@@ -591,10 +582,9 @@ function SceneInner({
 
   return (
     <>
-      <Environment preset="city" background={false} />
-      <hemisphereLight args={["#c8d8ff", "#1a1a2e", 0.4]} />
-      <directionalLight position={[10, 12, 8]} intensity={1.2} castShadow={false} />
-      <directionalLight position={[-8, -4, -6]} intensity={0.2} />
+      <ambientLight intensity={0.22} />
+      <directionalLight position={[8, 10, 6]} intensity={1.4} castShadow={false} />
+      <directionalLight position={[-6, -3, -5]} intensity={0.15} />
       <Stars radius={90} depth={60} count={3500} factor={3.5} saturation={0} fade />
       <Star spectralClass={system.spectralClass} />
 
@@ -724,7 +714,7 @@ export function SolarScene({
   return (
     <Canvas
       camera={{ position: [0, 7.5, 13], fov: 55, near: 0.1, far: 500 }}
-      gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
+      gl={{ antialias: true, alpha: false }}
       style={{ background: "#06060a", width: "100%", height: "100%" }}
     >
       <SceneInner
