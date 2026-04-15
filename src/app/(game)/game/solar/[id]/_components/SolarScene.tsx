@@ -16,7 +16,7 @@
 
 import { useRef, useMemo, useState, useEffect, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, Stars, OrbitControls, Line, useGLTF } from "@react-three/drei";
+import { Html, Stars, OrbitControls, Line, useGLTF, Environment } from "@react-three/drei";
 import * as THREE from "three";
 
 // ---------------------------------------------------------------------------
@@ -591,9 +591,10 @@ function SceneInner({
 
   return (
     <>
-      <hemisphereLight args={["#c8d8ff", "#1a1a2e", 0.7]} />
-      <directionalLight position={[10, 12, 8]} intensity={1.6} castShadow={false} />
-      <directionalLight position={[-8, -4, -6]} intensity={0.3} />
+      <Environment preset="city" background={false} />
+      <hemisphereLight args={["#c8d8ff", "#1a1a2e", 0.4]} />
+      <directionalLight position={[10, 12, 8]} intensity={1.2} castShadow={false} />
+      <directionalLight position={[-8, -4, -6]} intensity={0.2} />
       <Stars radius={90} depth={60} count={3500} factor={3.5} saturation={0} fade />
       <Star spectralClass={system.spectralClass} />
 
@@ -723,7 +724,7 @@ export function SolarScene({
   return (
     <Canvas
       camera={{ position: [0, 7.5, 13], fov: 55, near: 0.1, far: 500 }}
-      gl={{ antialias: true, alpha: false }}
+      gl={{ antialias: true, alpha: false, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 0.9 }}
       style={{ background: "#06060a", width: "100%", height: "100%" }}
     >
       <SceneInner

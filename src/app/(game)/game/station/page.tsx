@@ -438,7 +438,11 @@ export default async function StationPage() {
                         Cargo
                       </p>
                       <p className="text-xs text-zinc-300 mb-2.5">{cargoSummary}</p>
-                      <UnloadButton shipId={ship.id} summary={cargoSummary} />
+                      {/* Auto ships unload automatically — no manual button needed */}
+                      {!isAuto && <UnloadButton shipId={ship.id} summary={cargoSummary} />}
+                      {isAuto && (
+                        <p className="text-xs text-zinc-600">Auto-unloading on arrival…</p>
+                      )}
                     </div>
                   )}
 
