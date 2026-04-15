@@ -280,6 +280,66 @@ function allianceColor(tag: string): string {
   return `hsl(${allianceHue(tag)}, 65%, 60%)`;
 }
 
+/** BFS: shortest route (fewest hops) between two systems within jump range.
+ *  Returns an array of system IDs including start and end, or null if unreachable. */
+function findRoute(
+  fromId: string,
+  toId: string,
+  systems: GalaxySystem[],
+  baseRangeLy: number,
+): string[] | null {
+  if (fromId === toId) return [fromId];
+  const sysById = new Map(systems.map((s) => [s.id, s]));
+  const visited = new Set([fromId]);
+  const queue: { id: string; path: string[] }[] = [{ id: fromId, path: [fromId] }];
+  while (queue.length > 0) {
+    const item = queue.shift()!;
+    const from = sysById.get(item.id);
+    if (!from) continue;
+    for (const sys of systems) {
+      if (visited.has(sys.id)) continue;
+      if (dist3D(from, sys) <= baseRangeLy + 0.01) {
+        const newPath = [...item.path, sys.id];
+        if (sys.id === toId) return newPath;
+        visited.add(sys.id);
+        queue.push({ id: sys.id, path: newPath });
+      }
+    }
+  }
+  return null;
+}
+
+/** Sum of per-hop distances along a route, in ly. */
+function routeTotalLy(hops: string[], sysById: Map<string, GalaxySystem>): number {
+  let total = 0;
+  for (let i = 0; i < hops.length - 1; i++) {
+    const a = sysById.get(hops[i]);
+    const b = sysById.get(hops[i + 1]);
+    if (a && b) total += dist3D(a, b);
+  }
+  return total;
+}
+
+/**
+ * SVG polygon points for a top-down ship chevron centered at (cx,cy).
+ * s = half-size in SVG units; angle = rotation in radians (0 = pointing toward -Y = "up").
+ */
+function shipPolygon(cx: number, cy: number, s: number, angle: number): string {
+  const pts: [number, number][] = [
+    [0, -s * 1.4],        // nose
+    [s * 0.85, s * 0.9],  // right wing tip
+    [0, s * 0.35],        // rear centre notch
+    [-s * 0.85, s * 0.9], // left wing tip
+  ];
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return pts.map(([px, py]) => {
+    const rx = px * cos - py * sin + cx;
+    const ry = px * sin + py * cos + cy;
+    return `${rx},${ry}`;
+  }).join(" ");
+}
+
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -400,6 +460,9 @@ export function GalaxyMapClient({
   // ── Dispute state ──────────────────────────────────────────────────────────
   const [disputeLoading, setDisputeLoading] = useState<string | null>(null); // beaconId
   const [disputeError, setDisputeError] = useState<string | null>(null);
+
+  // ── Multi-hop route (computed when a non-reachable system is selected) ────
+  const [routeHops, setRouteHops] = useState<string[] | null>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────────
   const systemMap = new Map(systems.map((s) => [s.id, s]));
@@ -797,6 +860,17 @@ export function GalaxyMapClient({
     const t = setTimeout(() => setBeaconError(null), 4000);
     return () => clearTimeout(t);
   }, [beaconError]);
+
+  // ── Route computation: recalculate whenever the selected system changes ────
+  useEffect(() => {
+    if (!selectedId || !currentSystem) { setRouteHops(null); return; }
+    if (selectedId === currentSystem.id) { setRouteHops(null); return; }
+    const selSys = systems.find((s) => s.id === selectedId);
+    if (!selSys) { setRouteHops(null); return; }
+    if (dist3D(currentSystem, selSys) <= baseRangeLy + 0.01) { setRouteHops(null); return; }
+    setRouteHops(findRoute(currentSystem.id, selectedId, systems, baseRangeLy));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, currentSystem?.id]);
 
   // Auto-clear dispute error after 4 s
   useEffect(() => {
@@ -1241,6 +1315,44 @@ export function GalaxyMapClient({
               }),
             )}
 
+            {/* ── Multi-hop route overlay ──────────────────────────────────── */}
+            {routeHops && routeHops.length > 1 && (() => {
+              const rSys = routeHops.map((id) => systemMap.get(id)).filter(Boolean) as GalaxySystem[];
+              if (rSys.length < 2) return null;
+              return (
+                <g pointerEvents="none">
+                  <polyline
+                    points={rSys.map((s) => `${s.svgX},${s.svgY}`).join(" ")}
+                    fill="none"
+                    stroke="#6366f1"
+                    strokeWidth={2.5 / scale}
+                    strokeDasharray={`${7 / scale} ${4 / scale}`}
+                    opacity={0.55}
+                  />
+                  {rSys.slice(1, -1).map((sys) => (
+                    <circle key={`rthop-${sys.id}`}
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={6 / scale}
+                      fill="#818cf8"
+                      stroke="#312e81"
+                      strokeWidth={1.2 / scale}
+                      opacity={0.80}
+                    />
+                  ))}
+                  <circle
+                    cx={rSys[rSys.length - 1].svgX}
+                    cy={rSys[rSys.length - 1].svgY}
+                    r={9 / scale}
+                    fill="none"
+                    stroke="#818cf8"
+                    strokeWidth={2 / scale}
+                    strokeDasharray={`${5 / scale} ${3 / scale}`}
+                    opacity={0.75}
+                  />
+                </g>
+              );
+            })()}
+
             {/* ── Travel range circle ─────────────────────────────────────── */}
             {currentSystem && (
               <circle
@@ -1366,25 +1478,31 @@ export function GalaxyMapClient({
                         opacity={0.35}
                         pointerEvents="none"
                       />
-                      {/* Main ship marker */}
-                      <circle
-                        cx={shipX} cy={shipY}
-                        r={4.5 / scale}
-                        fill={labelColor}
-                        stroke="#06060a"
-                        strokeWidth={1.5 / scale}
-                        filter="url(#glow)"
-                      />
-                      {/* Outer motion-glow ring */}
-                      <circle
-                        cx={shipX} cy={shipY}
-                        r={7.5 / scale}
-                        fill="none"
-                        stroke={labelColor}
-                        strokeWidth={0.8 / scale}
-                        opacity={0.22}
-                        pointerEvents="none"
-                      />
+                      {/* Main ship marker — chevron pointing toward destination */}
+                      {(() => {
+                        const angle = Math.atan2(tl.y2 - tl.y1, tl.x2 - tl.x1) + Math.PI / 2;
+                        const s = 6 / scale;
+                        return (
+                          <>
+                            <polygon
+                              points={shipPolygon(shipX!, shipY!, s, angle)}
+                              fill={labelColor}
+                              stroke="#06060a"
+                              strokeWidth={1.2 / scale}
+                              filter="url(#glow)"
+                            />
+                            <circle
+                              cx={shipX!} cy={shipY!}
+                              r={9 / scale}
+                              fill="none"
+                              stroke={labelColor}
+                              strokeWidth={0.7 / scale}
+                              opacity={0.20}
+                              pointerEvents="none"
+                            />
+                          </>
+                        );
+                      })()}
                     </>
                   )}
                   {/* Arrival proximity pulse — activates when ship is >92% of the way */}
@@ -1790,34 +1908,24 @@ export function GalaxyMapClient({
                 >
                   {/* Hit area (invisible, large for easy clicking) */}
                   <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
-                  {/* Background fill */}
+                  {/* Background disc */}
                   <circle
                     cx={mx} cy={my}
-                    r={9 / scale}
+                    r={10 / scale}
                     fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
                     stroke="#6366f1"
                     strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.5 : 0.95}
+                    opacity={isDraggingThis ? 0.5 : 0.92}
                   />
-                  {/* Inner ship dot */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={4.5 / scale}
+                  {/* Ship silhouette — top-down chevron, pointing up */}
+                  <polygon
+                    points={shipPolygon(mx, my, 5.5 / scale, 0)}
                     fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
                     stroke="#06060a"
                     strokeWidth={0.8 / scale}
-                    filter="url(#glow)"
+                    filter={isDraggingThis ? undefined : "url(#glow)"}
                     opacity={isDraggingThis ? 0.5 : 1}
                   />
-                  {/* Ship icon dot */}
-                  <text
-                    x={mx} y={my + 1.5 / scale}
-                    textAnchor="middle"
-                    fontSize={5 / scale < 4 ? 4 : 5 / scale > 7 ? 7 : 5 / scale}
-                    fill="#06060a"
-                    fontWeight="bold"
-                    className="select-none pointer-events-none"
-                  >•</text>
                   {/* Ship name label */}
                   {scale >= 1.2 && (
                     <text
@@ -1857,39 +1965,29 @@ export function GalaxyMapClient({
                   style={{ cursor: stationRelocateLoading ? "wait" : "grab" }}
                   onMouseDown={handleStationMarkerMouseDown}
                 >
-                  {/* Outer amber ring */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={7 / scale}
-                    fill="none"
-                    stroke="#f59e0b"
-                    strokeWidth={1.5 / scale}
-                    opacity={isDragging ? 0.25 : 0.80}
-                  />
-                  {/* Inner amber dot */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={4 / scale}
-                    fill={isDragging ? "#fcd34d" : "#f59e0b"}
-                    stroke="#06060a"
-                    strokeWidth={0.8 / scale}
-                    filter="url(#glow)"
-                    opacity={isDragging ? 0.35 : 1}
-                  />
-                  {/* "S" label at higher zoom */}
-                  {scale >= 1.5 && (
-                    <text
-                      x={mx}
-                      y={my + 3.5 / scale}
-                      textAnchor="middle"
-                      fontSize={5 / scale < 4 ? 4 : 5 / scale > 7 ? 7 : 5 / scale}
-                      fill="#06060a"
-                      fontWeight="bold"
-                      className="select-none pointer-events-none"
-                    >
-                      S
-                    </text>
-                  )}
+                  {/* Station cross icon — cross arms + end caps + centre hub */}
+                  {(() => {
+                    const s = 5.5 / scale;
+                    return (
+                      <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
+                        {/* Horizontal arm */}
+                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill="#fbbf24" />
+                        {/* Vertical arm */}
+                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill="#fbbf24" />
+                        {/* End caps */}
+                        {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
+                          <circle key={i}
+                            cx={mx + Math.cos(a) * s * 1.6}
+                            cy={my + Math.sin(a) * s * 1.6}
+                            r={s * 0.45}
+                            fill="#f59e0b"
+                          />
+                        ))}
+                        {/* Centre hub */}
+                        <circle cx={mx} cy={my} r={s * 0.6} fill="#f59e0b" />
+                      </g>
+                    );
+                  })()}
                 </g>
               );
             })()}
@@ -2975,11 +3073,61 @@ export function GalaxyMapClient({
                 </p>
               )}
 
-              {/* Out of range hint */}
+              {/* Out of range — show multi-hop route if one exists */}
               {!isReachable && !selectedSystem.isCurrentLocation && currentSystem && (
-                <p className="text-xs text-zinc-700 text-center">
-                  Out of range ({formatDist(distToSelected!)} &gt; {baseRangeLy} ly)
-                </p>
+                routeHops && routeHops.length >= 2 ? (
+                  <div className="space-y-2">
+                    <p className="text-xs text-zinc-500 text-center">
+                      {routeHops.length - 1}-hop route · {formatDist(routeTotalLy(routeHops, systemMap))}
+                      {dockedShip && ` · ${formatEta(routeTotalLy(routeHops, systemMap) / dockedShip.speedLyPerHr)}`}
+                    </p>
+                    <div className="flex flex-wrap gap-1 justify-center">
+                      {routeHops.map((id, i) => (
+                        <span key={id} className="flex items-center gap-0.5 text-xs">
+                          {i > 0 && <span className="text-zinc-800">›</span>}
+                          <span className={
+                            i === 0 ? "text-emerald-700" :
+                            i === routeHops.length - 1 ? "text-indigo-400" :
+                            "text-zinc-600"
+                          }>
+                            {systemMap.get(id)?.name ?? id}
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                    {dockedShip && (() => {
+                      const firstHopId = routeHops[1];
+                      const firstHopSys = systemMap.get(firstHopId);
+                      const hopDist = firstHopSys ? dist3D(currentSystem, firstHopSys) : 0;
+                      return (
+                        <button
+                          onClick={() => {
+                            setTravelLoading(true);
+                            void fetch("/api/game/travel", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ destinationSystemId: firstHopId }),
+                            }).then((r) => r.json()).then((j) => {
+                              setTravelLoading(false);
+                              if (j.ok) router.refresh();
+                              else setTravelError(j.error?.message ?? "Dispatch failed.");
+                            }).catch(() => { setTravelLoading(false); setTravelError("Network error."); });
+                          }}
+                          disabled={travelLoading}
+                          className="w-full rounded border border-indigo-700/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+                        >
+                          {travelLoading
+                            ? "Dispatching…"
+                            : `Hop 1: ${firstHopSys?.name ?? "…"} · ${formatEta(hopDist / (dockedShip.speedLyPerHr || 1))}`}
+                        </button>
+                      );
+                    })()}
+                  </div>
+                ) : (
+                  <p className="text-xs text-zinc-700 text-center">
+                    Out of range · {formatDist(distToSelected!)} · no route found
+                  </p>
+                )
               )}
 
               {/* Enter Solar System View — double-click shortcut */}
