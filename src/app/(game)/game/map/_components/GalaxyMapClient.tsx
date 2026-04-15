@@ -438,8 +438,6 @@ export function GalaxyMapClient({
   const [fleetDispatchLoading, setFleetDispatchLoading] = useState<string | null>(null); // fleetId
   const [fleetDispatchError, setFleetDispatchError] = useState<string | null>(null);
 
-  // Double-click timer ref — used to distinguish single from double clicks
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Station drag-to-relocate state ────────────────────────────────────────
   interface StationDragInfo {
@@ -1060,24 +1058,18 @@ export function GalaxyMapClient({
     if (didDragRef.current) { didDragRef.current = false; return; }
     e.stopPropagation();
 
-    // Double-click detection: if a click is already pending, it's a double-click
-    if (clickTimerRef.current !== null) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-      // Double-click → navigate to solar system view
+    // Shift+click → navigate to solar system view
+    if (e.shiftKey) {
       router.push(`/game/solar/${encodeURIComponent(systemId)}`);
       return;
     }
 
-    // Single click — defer action briefly to detect if a second click follows
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      setSelectedId((prev) => (prev === systemId ? null : systemId));
-      setSelectedAsteroidId(null);
-      setTravelError(null);
-      setDispatchError(null);
-      setShipDispatchError(null);
-    }, 220);
+    // Single click → select immediately
+    setSelectedId((prev) => (prev === systemId ? null : systemId));
+    setSelectedAsteroidId(null);
+    setTravelError(null);
+    setDispatchError(null);
+    setShipDispatchError(null);
   }
 
   function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
@@ -1848,6 +1840,11 @@ export function GalaxyMapClient({
               const vy = ((dragInfo.clientY - rect.top) / rect.height) * viewboxH;
               const cursorBx = (vx - tx) / scale;
               const cursorBy = (vy - ty) / scale;
+              // Angle the ghost ship toward any targeted system, else point up
+              const targetSys = dragInfo.targetId ? systemMap.get(dragInfo.targetId) : null;
+              const ghostAngle = targetSys
+                ? Math.atan2(targetSys.svgY - cursorBy, targetSys.svgX - cursorBx) + Math.PI / 2
+                : 0;
               return (
                 <g pointerEvents="none">
                   {/* Glow underlay */}
@@ -1857,9 +1854,15 @@ export function GalaxyMapClient({
                   <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
                     stroke="#a5b4fc" strokeWidth={2 / scale}
                     strokeDasharray={`${7 / scale} ${4 / scale}`} opacity={0.75} />
-                  {/* Cursor dot */}
-                  <circle cx={cursorBx} cy={cursorBy} r={5 / scale}
-                    fill="#a5b4fc" stroke="#06060a" strokeWidth={1 / scale} opacity={0.9} filter="url(#glow)" />
+                  {/* Ghost ship disc */}
+                  <circle cx={cursorBx} cy={cursorBy} r={10 / scale}
+                    fill="#1e1b4b" stroke="#6366f1" strokeWidth={1.5 / scale} opacity={0.90} />
+                  {/* Ghost ship chevron — rotates toward target system */}
+                  <polygon
+                    points={shipPolygon(cursorBx, cursorBy, 5.5 / scale, ghostAngle)}
+                    fill="#a5b4fc" stroke="#06060a" strokeWidth={0.8 / scale}
+                    filter="url(#glow)" opacity={0.95}
+                  />
                 </g>
               );
             })()}
@@ -1905,6 +1908,15 @@ export function GalaxyMapClient({
                   key={`shipmarker-${ship.id}`}
                   style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}
                   onMouseDown={(e) => handleShipMarkerMouseDown(e, ship)}
+                  onClick={(e) => {
+                    if (didDragRef.current) { didDragRef.current = false; return; }
+                    e.stopPropagation();
+                    if (e.shiftKey) { router.push("/game/station"); return; }
+                    setSelectedId(sys.id);
+                    setSelectedAsteroidId(null);
+                    setTravelError(null);
+                    setShipDispatchError(null);
+                  }}
                 >
                   {/* Hit area (invisible, large for easy clicking) */}
                   <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
@@ -1915,7 +1927,7 @@ export function GalaxyMapClient({
                     fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
                     stroke="#6366f1"
                     strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.5 : 0.92}
+                    opacity={isDraggingThis ? 0.35 : 0.92}
                   />
                   {/* Ship silhouette — top-down chevron, pointing up */}
                   <polygon
@@ -1924,7 +1936,7 @@ export function GalaxyMapClient({
                     stroke="#06060a"
                     strokeWidth={0.8 / scale}
                     filter={isDraggingThis ? undefined : "url(#glow)"}
-                    opacity={isDraggingThis ? 0.5 : 1}
+                    opacity={isDraggingThis ? 0.35 : 1}
                   />
                   {/* Ship name label */}
                   {scale >= 1.2 && (
@@ -1964,6 +1976,15 @@ export function GalaxyMapClient({
                   key="station-marker"
                   style={{ cursor: stationRelocateLoading ? "wait" : "grab" }}
                   onMouseDown={handleStationMarkerMouseDown}
+                  onClick={(e) => {
+                    if (didDragRef.current) { didDragRef.current = false; return; }
+                    e.stopPropagation();
+                    if (e.shiftKey) { router.push("/game/station"); return; }
+                    setSelectedId(sys.id);
+                    setSelectedAsteroidId(null);
+                    setTravelError(null);
+                    setShipDispatchError(null);
+                  }}
                 >
                   {/* Station cross icon — cross arms + end caps + centre hub */}
                   {(() => {
@@ -3130,7 +3151,7 @@ export function GalaxyMapClient({
                 )
               )}
 
-              {/* Enter Solar System View — double-click shortcut */}
+              {/* Enter Solar System View — shift+click shortcut */}
               <Link
                 href={`/game/solar/${encodeURIComponent(selectedSystem.id)}`}
                 className="block w-full rounded border border-indigo-800/60 bg-indigo-950/30 px-3 py-2 text-center text-xs font-medium text-indigo-300 hover:bg-indigo-900/40 hover:text-indigo-200 transition-colors"
@@ -3151,7 +3172,7 @@ export function GalaxyMapClient({
           /* Empty state */
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
             <p className="text-xs text-zinc-600">Click a star to see assets &amp; actions.</p>
-            <p className="mt-1 text-xs text-zinc-700">Double-click to enter system view.</p>
+            <p className="mt-1 text-xs text-zinc-700">Shift+click a star to enter system view.</p>
             {currentSystem && (
               <p className="mt-3 text-xs text-zinc-700">
                 Ship at{" "}
