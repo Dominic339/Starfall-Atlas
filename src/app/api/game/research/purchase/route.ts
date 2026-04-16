@@ -210,9 +210,69 @@ export async function POST(request: NextRequest) {
 
   // ── Persist unlock ────────────────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
+  const insertRes = await (admin as any)
     .from("player_research")
     .insert({ player_id: player.id, research_id: researchId });
+
+  if (insertRes.error) {
+    // If it's a unique-violation the player somehow already has this research
+    // (race condition). Treat as success so the UI re-syncs correctly.
+    const isConflict =
+      insertRes.error.code === "23505" ||
+      String(insertRes.error.message ?? "").toLowerCase().includes("unique");
+
+    if (isConflict) {
+      return Response.json({ ok: true, data: { researchId } });
+    }
+
+    // For any other insert failure: refund the resources we already deducted.
+    if (def.cost.length > 0) {
+      const { data: station } = maybeSingleResult<PlayerStation>(
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (admin as any)
+          .from("player_stations")
+          .select("id")
+          .eq("owner_id", player.id)
+          .maybeSingle(),
+      );
+      if (station) {
+        // Re-fetch current quantities so we can add back (not overwrite)
+        const refundTypes = def.cost.map((c) => c.resource_type);
+        const { data: currentRows } = listResult<Pick<ResourceInventoryRow, "resource_type" | "quantity">>(
+          await admin
+            .from("resource_inventory")
+            .select("resource_type, quantity")
+            .eq("location_type", "station")
+            .eq("location_id", station.id)
+            .in("resource_type", refundTypes),
+        );
+        const currentMap = new Map((currentRows ?? []).map((r) => [r.resource_type, r.quantity]));
+
+        for (const costItem of def.cost) {
+          const nowHave = currentMap.get(costItem.resource_type) ?? 0;
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          await (admin as any)
+            .from("resource_inventory")
+            .upsert(
+              {
+                location_type: "station",
+                location_id: station.id,
+                resource_type: costItem.resource_type,
+                quantity: nowHave + costItem.quantity,
+              },
+              { onConflict: "location_type,location_id,resource_type" },
+            );
+        }
+      }
+    }
+
+    return toErrorResponse(
+      fail(
+        "internal_error",
+        `Research unlock failed: ${String(insertRes.error.message ?? insertRes.error)}. Resources have been refunded.`,
+      ).error,
+    );
+  }
 
   return Response.json({ ok: true, data: { researchId } });
 }
