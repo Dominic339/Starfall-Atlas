@@ -289,21 +289,6 @@ export default async function GalaxyMapPage() {
     for (const h of stationHandleRows ?? []) otherStationHandles.set(h.id, h.handle);
   }
 
-  // Build GalaxyOtherStation list (only stations that are in a known system)
-  const galaxyOtherStations: GalaxyOtherStation[] = otherStationRows
-    .filter((s) => s.current_system_id !== null && systemSvgMap.has(s.current_system_id!))
-    .map((s) => {
-      const pos = systemSvgMap.get(s.current_system_id!)!;
-      return {
-        id:         s.id,
-        ownerId:    s.owner_id,
-        ownerHandle: otherStationHandles.get(s.owner_id) ?? "Unknown",
-        systemId:   s.current_system_id!,
-        svgX:       pos.svgX,
-        svgY:       pos.svgY,
-      };
-    });
-
   // Fetch discoverer handles for first-discovery systems (so panel can show names)
   const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
   type HandleRow = { id: string; handle: string };
@@ -389,6 +374,21 @@ export default async function GalaxyMapPage() {
   const systemSvgMap = new Map(
     catalogEntries.map((entry, i) => [entry.id, { svgX: projected[i].svgX, svgY: projected[i].svgY }]),
   );
+
+  // Build GalaxyOtherStation list — must be after systemSvgMap is defined
+  const galaxyOtherStations: GalaxyOtherStation[] = otherStationRows
+    .filter((s) => s.current_system_id !== null && systemSvgMap.has(s.current_system_id!))
+    .map((s) => {
+      const pos = systemSvgMap.get(s.current_system_id!)!;
+      return {
+        id:          s.id,
+        ownerId:     s.owner_id,
+        ownerHandle: otherStationHandles.get(s.owner_id) ?? "Unknown",
+        systemId:    s.current_system_id!,
+        svgX:        pos.svgX,
+        svgY:        pos.svgY,
+      };
+    });
 
   const systems: GalaxySystem[] = catalogEntries.map((entry, i) => {
     // Compute body count deterministically (fast, no DB)
