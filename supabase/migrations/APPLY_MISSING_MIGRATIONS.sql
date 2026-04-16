@@ -1784,16 +1784,12 @@ CREATE POLICY "body_stewardship_public_read"
 
 ALTER TABLE colony_permits ENABLE ROW LEVEL SECURITY;
 
--- Stewards can see permits they've issued; grantees can see permits they've received.
+-- Permit data is world-visible (admin-client access only in Phase 1).
+-- All reads go through the admin client which bypasses RLS entirely.
 DROP POLICY IF EXISTS "colony_permits_read_by_involved" ON colony_permits;
-CREATE POLICY "colony_permits_read_by_involved"
-  ON colony_permits
-  FOR SELECT
-  USING (
-    steward_id = (SELECT id FROM players WHERE auth_id = (SELECT auth.uid()) LIMIT 1)
-    OR
-    grantee_id = (SELECT id FROM players WHERE auth_id = (SELECT auth.uid()) LIMIT 1)
-  );
+DROP POLICY IF EXISTS "colony_permits_public_read" ON colony_permits;
+CREATE POLICY "colony_permits_public_read"
+  ON colony_permits FOR SELECT USING (true);
 
 -- All writes go through admin client (service role bypasses RLS).
 
