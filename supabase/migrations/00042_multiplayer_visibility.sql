@@ -95,9 +95,9 @@ CREATE POLICY "colony_permits_read_by_involved"
   ON colony_permits
   FOR SELECT
   USING (
-    steward_id = (SELECT id FROM players WHERE auth_id = auth.uid() LIMIT 1)
+    steward_id = (SELECT id FROM players WHERE auth_id = (SELECT auth.uid()) LIMIT 1)
     OR
-    grantee_id = (SELECT id FROM players WHERE auth_id = auth.uid() LIMIT 1)
+    grantee_id = (SELECT id FROM players WHERE auth_id = (SELECT auth.uid()) LIMIT 1)
   );
 
 -- All writes go through admin client (service role bypasses RLS).
