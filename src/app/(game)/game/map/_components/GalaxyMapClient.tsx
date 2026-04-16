@@ -16,9 +16,64 @@
  *   - Reset view button
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, Suspense, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { Canvas, useFrame, useThree } from "@react-three/fiber";
+import { useGLTF } from "@react-three/drei";
+import * as THREE from "three";
+
+// ---------------------------------------------------------------------------
+// GLB model icon renderer — captures a top-down orthographic snapshot as PNG
+// ---------------------------------------------------------------------------
+
+const SHIP_GLB    = "/assets/planets/tier 1 ship.glb";
+const STATION_GLB = "/assets/planets/Basic Station.glb";
+
+useGLTF.preload(SHIP_GLB);
+useGLTF.preload(STATION_GLB);
+
+function CaptureModelIcon({
+  path,
+  targetSize,
+  rotationX = 0,
+  rotationY = 0,
+  onCapture,
+}: {
+  path: string;
+  targetSize: number;
+  rotationX?: number;
+  rotationY?: number;
+  onCapture: (url: string) => void;
+}) {
+  const { scene } = useGLTF(path);
+  const { gl, camera, scene: threeScene } = useThree();
+  const frameRef = useRef(0);
+  const doneRef  = useRef(false);
+
+  const model = useMemo(() => {
+    const clone = scene.clone(true);
+    const box   = new THREE.Box3().setFromObject(clone);
+    const maxDim = Math.max(...box.getSize(new THREE.Vector3()).toArray());
+    if (maxDim > 0) clone.scale.setScalar(targetSize / maxDim);
+    const center = new THREE.Box3().setFromObject(clone).getCenter(new THREE.Vector3());
+    clone.position.sub(center);
+    clone.rotation.set(rotationX, rotationY, 0);
+    return clone;
+  }, [scene, targetSize, rotationX, rotationY]);
+
+  useFrame(() => {
+    if (doneRef.current) return;
+    frameRef.current++;
+    // Wait a few frames for the model to fully initialise before capturing
+    if (frameRef.current < 5) return;
+    doneRef.current = true;
+    gl.render(threeScene, camera);
+    onCapture(gl.domElement.toDataURL("image/png"));
+  });
+
+  return <primitive object={model} />;
+}
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -364,6 +419,10 @@ export function GalaxyMapClient({
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
 
+  // ── GLB icon data URLs (rendered by hidden off-screen canvases) ───────────
+  const [shipIconUrl,    setShipIconUrl]    = useState<string | null>(null);
+  const [stationIconUrl, setStationIconUrl] = useState<string | null>(null);
+
   // ── Pan/zoom state ────────────────────────────────────────────────────────
   const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
   const isPanning = useRef(false);
@@ -438,8 +497,6 @@ export function GalaxyMapClient({
   const [fleetDispatchLoading, setFleetDispatchLoading] = useState<string | null>(null); // fleetId
   const [fleetDispatchError, setFleetDispatchError] = useState<string | null>(null);
 
-  // Double-click timer ref — used to distinguish single from double clicks
-  const clickTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Station drag-to-relocate state ────────────────────────────────────────
   interface StationDragInfo {
@@ -1060,24 +1117,18 @@ export function GalaxyMapClient({
     if (didDragRef.current) { didDragRef.current = false; return; }
     e.stopPropagation();
 
-    // Double-click detection: if a click is already pending, it's a double-click
-    if (clickTimerRef.current !== null) {
-      clearTimeout(clickTimerRef.current);
-      clickTimerRef.current = null;
-      // Double-click → navigate to solar system view
+    // Shift+click → navigate to solar system view
+    if (e.shiftKey) {
       router.push(`/game/solar/${encodeURIComponent(systemId)}`);
       return;
     }
 
-    // Single click — defer action briefly to detect if a second click follows
-    clickTimerRef.current = setTimeout(() => {
-      clickTimerRef.current = null;
-      setSelectedId((prev) => (prev === systemId ? null : systemId));
-      setSelectedAsteroidId(null);
-      setTravelError(null);
-      setDispatchError(null);
-      setShipDispatchError(null);
-    }, 220);
+    // Single click → select immediately
+    setSelectedId((prev) => (prev === systemId ? null : systemId));
+    setSelectedAsteroidId(null);
+    setTravelError(null);
+    setDispatchError(null);
+    setShipDispatchError(null);
   }
 
   function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
@@ -1225,6 +1276,48 @@ export function GalaxyMapClient({
 
   return (
     <div className="flex flex-1 overflow-hidden">
+
+      {/* ── Hidden off-screen GLB icon renderers ─────────────────────────── */}
+      {/* Each tiny Canvas renders the model top-down and captures a PNG data URL */}
+      <div style={{ position: "fixed", left: -9999, top: -9999, width: 80, height: 80, pointerEvents: "none", opacity: 0 }}>
+        <Canvas
+          orthographic
+          camera={{ position: [0, 6, 0], up: [0, 0, -1], zoom: 55 }}
+          gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
+        >
+          <ambientLight intensity={3.5} />
+          <directionalLight position={[2, 6, 2]} intensity={2.5} />
+          <Suspense fallback={null}>
+            <CaptureModelIcon
+              path={SHIP_GLB}
+              targetSize={1.8}
+              rotationX={0}
+              rotationY={Math.PI}
+              onCapture={setShipIconUrl}
+            />
+          </Suspense>
+        </Canvas>
+      </div>
+      <div style={{ position: "fixed", left: -9999, top: -9979, width: 80, height: 80, pointerEvents: "none", opacity: 0 }}>
+        <Canvas
+          orthographic
+          camera={{ position: [0, 6, 0], up: [0, 0, -1], zoom: 55 }}
+          gl={{ alpha: true, antialias: true, preserveDrawingBuffer: true }}
+        >
+          <ambientLight intensity={3.5} />
+          <directionalLight position={[2, 6, 2]} intensity={2.5} />
+          <Suspense fallback={null}>
+            <CaptureModelIcon
+              path={STATION_GLB}
+              targetSize={1.8}
+              rotationX={0}
+              rotationY={0}
+              onCapture={setStationIconUrl}
+            />
+          </Suspense>
+        </Canvas>
+      </div>
+
       {/* ── SVG map area ─────────────────────────────────────────────────── */}
       <div className="relative flex-1 overflow-hidden bg-[#06060a]">
         <svg
@@ -1478,19 +1571,30 @@ export function GalaxyMapClient({
                         opacity={0.35}
                         pointerEvents="none"
                       />
-                      {/* Main ship marker — chevron pointing toward destination */}
+                      {/* Main ship marker — GLB icon or chevron fallback, rotated toward destination */}
                       {(() => {
-                        const angle = Math.atan2(tl.y2 - tl.y1, tl.x2 - tl.x1) + Math.PI / 2;
+                        const angleDeg = (Math.atan2(tl.y2 - tl.y1, tl.x2 - tl.x1) * 180 / Math.PI) + 90;
                         const s = 6 / scale;
+                        const iconSize = 18 / scale;
                         return (
                           <>
-                            <polygon
-                              points={shipPolygon(shipX!, shipY!, s, angle)}
-                              fill={labelColor}
-                              stroke="#06060a"
-                              strokeWidth={1.2 / scale}
-                              filter="url(#glow)"
-                            />
+                            {shipIconUrl ? (
+                              <image
+                                href={shipIconUrl}
+                                x={shipX! - iconSize / 2} y={shipY! - iconSize / 2}
+                                width={iconSize} height={iconSize}
+                                transform={`rotate(${angleDeg} ${shipX!} ${shipY!})`}
+                                filter="url(#glow)"
+                              />
+                            ) : (
+                              <polygon
+                                points={shipPolygon(shipX!, shipY!, s, (angleDeg - 90) * Math.PI / 180)}
+                                fill={labelColor}
+                                stroke="#06060a"
+                                strokeWidth={1.2 / scale}
+                                filter="url(#glow)"
+                              />
+                            )}
                             <circle
                               cx={shipX!} cy={shipY!}
                               r={9 / scale}
@@ -1848,6 +1952,11 @@ export function GalaxyMapClient({
               const vy = ((dragInfo.clientY - rect.top) / rect.height) * viewboxH;
               const cursorBx = (vx - tx) / scale;
               const cursorBy = (vy - ty) / scale;
+              // Angle the ghost ship toward any targeted system, else point up
+              const targetSys = dragInfo.targetId ? systemMap.get(dragInfo.targetId) : null;
+              const ghostAngle = targetSys
+                ? Math.atan2(targetSys.svgY - cursorBy, targetSys.svgX - cursorBx) + Math.PI / 2
+                : 0;
               return (
                 <g pointerEvents="none">
                   {/* Glow underlay */}
@@ -1857,9 +1966,25 @@ export function GalaxyMapClient({
                   <line x1={sourceSys.svgX} y1={sourceSys.svgY} x2={cursorBx} y2={cursorBy}
                     stroke="#a5b4fc" strokeWidth={2 / scale}
                     strokeDasharray={`${7 / scale} ${4 / scale}`} opacity={0.75} />
-                  {/* Cursor dot */}
-                  <circle cx={cursorBx} cy={cursorBy} r={5 / scale}
-                    fill="#a5b4fc" stroke="#06060a" strokeWidth={1 / scale} opacity={0.9} filter="url(#glow)" />
+                  {/* Ghost ship disc */}
+                  <circle cx={cursorBx} cy={cursorBy} r={10 / scale}
+                    fill="#1e1b4b" stroke="#6366f1" strokeWidth={1.5 / scale} opacity={0.90} />
+                  {/* Ghost ship icon — GLB or chevron fallback, rotated toward target */}
+                  {shipIconUrl ? (
+                    <image
+                      href={shipIconUrl}
+                      x={cursorBx - 9 / scale} y={cursorBy - 9 / scale}
+                      width={18 / scale} height={18 / scale}
+                      transform={`rotate(${(ghostAngle - Math.PI / 2) * 180 / Math.PI + 90} ${cursorBx} ${cursorBy})`}
+                      filter="url(#glow)" opacity={0.95}
+                    />
+                  ) : (
+                    <polygon
+                      points={shipPolygon(cursorBx, cursorBy, 5.5 / scale, ghostAngle)}
+                      fill="#a5b4fc" stroke="#06060a" strokeWidth={0.8 / scale}
+                      filter="url(#glow)" opacity={0.95}
+                    />
+                  )}
                 </g>
               );
             })()}
@@ -1905,6 +2030,15 @@ export function GalaxyMapClient({
                   key={`shipmarker-${ship.id}`}
                   style={{ cursor: isDraggingThis ? "grabbing" : "grab" }}
                   onMouseDown={(e) => handleShipMarkerMouseDown(e, ship)}
+                  onClick={(e) => {
+                    if (didDragRef.current) { didDragRef.current = false; return; }
+                    e.stopPropagation();
+                    if (e.shiftKey) { router.push("/game/station"); return; }
+                    setSelectedId(sys.id);
+                    setSelectedAsteroidId(null);
+                    setTravelError(null);
+                    setShipDispatchError(null);
+                  }}
                 >
                   {/* Hit area (invisible, large for easy clicking) */}
                   <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
@@ -1915,17 +2049,27 @@ export function GalaxyMapClient({
                     fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
                     stroke="#6366f1"
                     strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.5 : 0.92}
+                    opacity={isDraggingThis ? 0.35 : 0.90}
                   />
-                  {/* Ship silhouette — top-down chevron, pointing up */}
-                  <polygon
-                    points={shipPolygon(mx, my, 5.5 / scale, 0)}
-                    fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
-                    stroke="#06060a"
-                    strokeWidth={0.8 / scale}
-                    filter={isDraggingThis ? undefined : "url(#glow)"}
-                    opacity={isDraggingThis ? 0.5 : 1}
-                  />
+                  {/* Ship icon — GLB top-down render or chevron fallback */}
+                  {shipIconUrl ? (
+                    <image
+                      href={shipIconUrl}
+                      x={mx - 9 / scale} y={my - 9 / scale}
+                      width={18 / scale} height={18 / scale}
+                      opacity={isDraggingThis ? 0.35 : 1}
+                      filter={isDraggingThis ? undefined : "url(#glow)"}
+                    />
+                  ) : (
+                    <polygon
+                      points={shipPolygon(mx, my, 5.5 / scale, 0)}
+                      fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
+                      stroke="#06060a"
+                      strokeWidth={0.8 / scale}
+                      filter={isDraggingThis ? undefined : "url(#glow)"}
+                      opacity={isDraggingThis ? 0.35 : 1}
+                    />
+                  )}
                   {/* Ship name label */}
                   {scale >= 1.2 && (
                     <text
@@ -1964,26 +2108,34 @@ export function GalaxyMapClient({
                   key="station-marker"
                   style={{ cursor: stationRelocateLoading ? "wait" : "grab" }}
                   onMouseDown={handleStationMarkerMouseDown}
+                  onClick={(e) => {
+                    if (didDragRef.current) { didDragRef.current = false; return; }
+                    e.stopPropagation();
+                    if (e.shiftKey) { router.push("/game/station"); return; }
+                    setSelectedId(sys.id);
+                    setSelectedAsteroidId(null);
+                    setTravelError(null);
+                    setShipDispatchError(null);
+                  }}
                 >
-                  {/* Station cross icon — cross arms + end caps + centre hub */}
-                  {(() => {
+                  {/* Station icon — GLB top-down render or cross fallback */}
+                  {stationIconUrl ? (
+                    <image
+                      href={stationIconUrl}
+                      x={mx - 11 / scale} y={my - 11 / scale}
+                      width={22 / scale} height={22 / scale}
+                      opacity={isDragging ? 0.30 : 1}
+                      filter={isDragging ? undefined : "url(#glow)"}
+                    />
+                  ) : (() => {
                     const s = 5.5 / scale;
                     return (
                       <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
-                        {/* Horizontal arm */}
                         <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill="#fbbf24" />
-                        {/* Vertical arm */}
                         <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill="#fbbf24" />
-                        {/* End caps */}
                         {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
-                          <circle key={i}
-                            cx={mx + Math.cos(a) * s * 1.6}
-                            cy={my + Math.sin(a) * s * 1.6}
-                            r={s * 0.45}
-                            fill="#f59e0b"
-                          />
+                          <circle key={i} cx={mx + Math.cos(a) * s * 1.6} cy={my + Math.sin(a) * s * 1.6} r={s * 0.45} fill="#f59e0b" />
                         ))}
-                        {/* Centre hub */}
                         <circle cx={mx} cy={my} r={s * 0.6} fill="#f59e0b" />
                       </g>
                     );
@@ -3130,7 +3282,7 @@ export function GalaxyMapClient({
                 )
               )}
 
-              {/* Enter Solar System View — double-click shortcut */}
+              {/* Enter Solar System View — shift+click shortcut */}
               <Link
                 href={`/game/solar/${encodeURIComponent(selectedSystem.id)}`}
                 className="block w-full rounded border border-indigo-800/60 bg-indigo-950/30 px-3 py-2 text-center text-xs font-medium text-indigo-300 hover:bg-indigo-900/40 hover:text-indigo-200 transition-colors"
@@ -3151,7 +3303,7 @@ export function GalaxyMapClient({
           /* Empty state */
           <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
             <p className="text-xs text-zinc-600">Click a star to see assets &amp; actions.</p>
-            <p className="mt-1 text-xs text-zinc-700">Double-click to enter system view.</p>
+            <p className="mt-1 text-xs text-zinc-700">Shift+click a star to enter system view.</p>
             {currentSystem && (
               <p className="mt-3 text-xs text-zinc-700">
                 Ship at{" "}

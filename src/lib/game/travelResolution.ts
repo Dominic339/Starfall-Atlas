@@ -179,9 +179,15 @@ export async function runTravelResolution(
           const loaded = await doLoad(admin, ship, targetColony.id, cargoByShipId, colonyInvByColonyId, colonyInvTotals);
           if (loaded > 0 || (cargoByShipId.get(ship.id) ?? []).length > 0) {
             const departed = await startTravel(admin, ship, st.current_system_id, requestTime, playerId, travelJobByShipId);
-            const nextState = departed ? "traveling_to_station" : "idle";
-            await admin.from("ships").update({ auto_state: nextState, ship_state: departed ? "traveling" : "idle_at_station" }).eq("id", ship.id);
-            ship = { ...ship, auto_state: nextState, ship_state: departed ? "traveling" : "idle_at_station" };
+            if (departed) {
+              await admin.from("ships").update({ auto_state: "traveling_to_station", ship_state: "traveling" }).eq("id", ship.id);
+              ship = { ...ship, auto_state: "traveling_to_station", ship_state: "traveling" };
+            } else {
+              // Colony is in the same system as the station — unload immediately
+              await doUnload(admin, ship, st.id, cargoByShipId);
+              ship = { ...ship, auto_state: "idle", auto_target_colony_id: null, ship_state: "idle_at_station" };
+              ship = await dispatchToNextColony(admin, ship, colonies, colonyInvTotals, mode, st, requestTime, playerId, travelJobByShipId);
+            }
           } else {
             await admin.from("ships").update({ auto_state: "idle", auto_target_colony_id: null, ship_state: "idle_at_station" }).eq("id", ship.id);
             ship = { ...ship, auto_state: "idle", auto_target_colony_id: null, ship_state: "idle_at_station" };
@@ -196,7 +202,12 @@ export async function runTravelResolution(
           shipsAutoAdvanced++;
         }
       } else {
-        // idle or null
+        // idle or null — if the ship somehow still has cargo and is at station, unload first
+        const strandedCargo = cargoByShipId.get(ship.id) ?? [];
+        if (strandedCargo.length > 0 && ship.current_system_id === st.current_system_id) {
+          await doUnload(admin, ship, st.id, cargoByShipId);
+          ship = { ...ship, auto_state: "idle", auto_target_colony_id: null, ship_state: "idle_at_station" };
+        }
         ship = await dispatchToNextColony(admin, ship, colonies, colonyInvTotals, mode, st, requestTime, playerId, travelJobByShipId);
         shipsAutoAdvanced++;
       }
