@@ -417,6 +417,18 @@ export async function POST(request: NextRequest) {
       .eq("id", player.id);
   }
 
+  // ── Auto-create body stewardship (first-come, first-served) ───────────────
+  // The player who first colonises a body becomes its steward automatically.
+  // ignoreDuplicates: true means a re-founding of a collapsed body does NOT
+  // transfer stewardship — the original steward retains it.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  void (admin as any)
+    .from("body_stewardship")
+    .upsert(
+      { body_id: bodyId, steward_id: player.id, system_id: systemId },
+      { onConflict: "body_id", ignoreDuplicates: true },
+    );
+
   // ── Emit world event (fire-and-forget) ────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   void (admin as any).from("world_events").insert({

@@ -253,14 +253,15 @@ function AsteroidBelt({ orbitRadius, period, index }: { orbitRadius: number; per
 // ---------------------------------------------------------------------------
 
 interface PlanetProps {
-  bodyType:    string;
-  bodySize:    string;
-  index:       number;
-  orbitRadius: number;
-  period:      number;
-  initialAngle: number;
-  hasColony:   boolean;
-  isSelected:  boolean;
+  bodyType:       string;
+  bodySize:       string;
+  index:          number;
+  orbitRadius:    number;
+  period:         number;
+  initialAngle:   number;
+  hasColony:      boolean;
+  hasOtherColony: boolean;
+  isSelected:     boolean;
   isSupplySource: boolean;
   isSupplyTarget: boolean;
   /** Ref slot — SceneInner writes the planet's current world position here */
@@ -272,7 +273,7 @@ interface PlanetProps {
 
 function Planet({
   bodyType, bodySize, index, orbitRadius, period, initialAngle,
-  hasColony, isSelected, isSupplySource, isSupplyTarget,
+  hasColony, hasOtherColony, isSelected, isSupplySource, isSupplyTarget,
   worldPosSlot, onPointerDown, onPointerUp, onClick,
 }: PlanetProps) {
   const groupRef = useRef<THREE.Group>(null!);
@@ -292,11 +293,19 @@ function Planet({
 
   return (
     <group ref={groupRef}>
-      {/* Colony ring */}
+      {/* Player colony ring (green) */}
       {hasColony && (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
           <torusGeometry args={[r + 0.14, 0.022, 8, 72]} />
           <meshBasicMaterial color="#34d399" transparent opacity={0.85} />
+        </mesh>
+      )}
+
+      {/* Other player's colony ring (amber, slightly larger) */}
+      {hasOtherColony && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[r + 0.26, 0.018, 8, 72]} />
+          <meshBasicMaterial color="#f59e0b" transparent opacity={0.65} />
         </mesh>
       )}
 
@@ -357,7 +366,7 @@ function Planet({
       {/* Label */}
       <Html position={[0, r + 0.30, 0]} center distanceFactor={10} style={{ pointerEvents: "none", userSelect: "none" }}>
         <span style={{ fontSize: "11px", color: labelColor, whiteSpace: "nowrap", textShadow: "0 1px 4px #000, 0 0 8px #000" }}>
-          {label}{hasColony ? " ★" : ""}
+          {label}{hasColony ? " ★" : ""}{hasOtherColony ? " ●" : ""}
         </span>
       </Html>
     </group>
@@ -474,24 +483,25 @@ function FleetMarker({ name, index, total }: { name: string; index: number; tota
 // ---------------------------------------------------------------------------
 
 interface SceneInnerProps {
-  system:           SolarSceneSystemData;
-  ships:            SolarSceneShipData[];
-  fleets:           SolarSceneFleetData[];
-  colonyBodyIndices: Set<number>;
-  stationHere:      boolean;
-  selectedBodyIndex:  number | null;
-  supplySourceIdx:    number | null;
-  onPlanetClick:    (idx: number) => void;
-  onSupplyDragStart: (idx: number) => void;
-  onSupplyDrop:     (toIdx: number) => void;
-  onSupplyCancel:   () => void;
-  onStationClick:   () => void;
-  onShipClick:      (id: string) => void;
-  selectedShipId:   string | null;
+  system:                SolarSceneSystemData;
+  ships:                 SolarSceneShipData[];
+  fleets:                SolarSceneFleetData[];
+  colonyBodyIndices:     Set<number>;
+  otherColonyBodyIndices: Set<number>;
+  stationHere:           boolean;
+  selectedBodyIndex:     number | null;
+  supplySourceIdx:       number | null;
+  onPlanetClick:         (idx: number) => void;
+  onSupplyDragStart:     (idx: number) => void;
+  onSupplyDrop:          (toIdx: number) => void;
+  onSupplyCancel:        () => void;
+  onStationClick:        () => void;
+  onShipClick:           (id: string) => void;
+  selectedShipId:        string | null;
 }
 
 function SceneInner({
-  system, ships, fleets, colonyBodyIndices, stationHere,
+  system, ships, fleets, colonyBodyIndices, otherColonyBodyIndices, stationHere,
   selectedBodyIndex, supplySourceIdx,
   onPlanetClick, onSupplyDragStart, onSupplyDrop, onSupplyCancel,
   onStationClick, onShipClick, selectedShipId,
@@ -681,6 +691,7 @@ function SceneInner({
               period={periods[i]}
               initialAngle={initialAngles[i]}
               hasColony={colonyBodyIndices.has(i)}
+              hasOtherColony={otherColonyBodyIndices.has(i)}
               isSelected={selectedBodyIndex === i}
               isSupplySource={supplySourceIdx === i}
               isSupplyTarget={supplySourceIdx !== null && supplySourceIdx !== i}
@@ -736,6 +747,11 @@ export interface SolarSceneFleetData {
   status: string;
 }
 
+export interface SolarSceneOtherColony {
+  bodyIndex:   number;
+  ownerHandle: string;
+}
+
 export interface SolarSceneProps {
   system:              SolarSceneSystemData;
   ships:               SolarSceneShipData[];
@@ -751,6 +767,8 @@ export interface SolarSceneProps {
   onSupplyCancel:      () => void;
   onStationClick:      () => void;
   onShipClick:         (id: string) => void;
+  /** Other players' colonies in this system — shown with amber ring. */
+  otherColonies?:      SolarSceneOtherColony[];
 }
 
 // ---------------------------------------------------------------------------
@@ -761,9 +779,13 @@ export function SolarScene({
   system, ships, fleets, coloniesBodyIndices, stationHere,
   selectedBodyIndex, supplySourceIdx, selectedShipId,
   onPlanetClick, onSupplyDragStart, onSupplyDrop, onSupplyCancel,
-  onStationClick, onShipClick,
+  onStationClick, onShipClick, otherColonies = [],
 }: SolarSceneProps) {
   const colonySet = useMemo(() => new Set(coloniesBodyIndices), [coloniesBodyIndices]);
+  const otherColonySet = useMemo(
+    () => new Set(otherColonies.map(c => c.bodyIndex)),
+    [otherColonies],
+  );
 
   return (
     <Canvas
@@ -776,6 +798,7 @@ export function SolarScene({
         ships={ships}
         fleets={fleets}
         colonyBodyIndices={colonySet}
+        otherColonyBodyIndices={otherColonySet}
         stationHere={stationHere}
         selectedBodyIndex={selectedBodyIndex}
         supplySourceIdx={supplySourceIdx}
