@@ -40,8 +40,10 @@ export interface GalaxySystem {
   isPlayerSteward: boolean;
   /** Human-readable discoverer handle, if known. */
   discovererHandle: string | null;
-  /** Player's active colony count in this system */
+  /** Total active colony count in this system (all players) */
   colonyCount: number;
+  /** This player's own active colony count in this system */
+  myColonyCount: number;
   /** Number of planetary/stellar bodies in this system */
   bodyCount: number;
   /** Player ship is docked here */
@@ -139,6 +141,17 @@ export interface GalaxyTerritory {
   links: { x1: number; y1: number; x2: number; y2: number }[];
 }
 
+/** Another player's space station visible on the galaxy map. */
+export interface GalaxyOtherStation {
+  id: string;
+  ownerId: string;
+  ownerHandle: string;
+  systemId: string;
+  /** Pre-projected SVG coordinates (same as the system's position + slight offset). */
+  svgX: number;
+  svgY: number;
+}
+
 /**
  * A ship or fleet travel line: from one system to another.
  * SVG coordinates are computed server-side.
@@ -186,6 +199,8 @@ interface GalaxyMapClientProps {
   canPlaceBeacon: boolean;
   /** System IDs where the player's alliance already has an active beacon. */
   playerAllianceBeaconSystemIds: string[];
+  /** Other players' stations (for world-state visibility). */
+  otherStations: GalaxyOtherStation[];
 }
 
 // ---------------------------------------------------------------------------
@@ -360,6 +375,7 @@ export function GalaxyMapClient({
   stationCoords,
   playerAllianceId,
   canPlaceBeacon,
+  otherStations,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -1627,8 +1643,8 @@ export function GalaxyMapClient({
                     </>
                   )}
 
-                  {/* Colony breathing ring — subtle pulse to show active colony */}
-                  {sys.colonyCount > 0 && !isCurrent && (
+                  {/* Colony breathing ring — pulse for player's own colonies (green) */}
+                  {sys.myColonyCount > 0 && !isCurrent && (
                     <circle
                       cx={sys.svgX}
                       cy={sys.svgY}
@@ -1637,6 +1653,20 @@ export function GalaxyMapClient({
                       stroke="#34d399"
                       strokeWidth={0.8 / scale}
                       className="galaxy-colony-pulse"
+                      pointerEvents="none"
+                    />
+                  )}
+                  {/* Other players' colonies ring (amber, slightly larger) */}
+                  {(sys.colonyCount - sys.myColonyCount) > 0 && !isCurrent && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 8}
+                      fill="none"
+                      stroke="#f59e0b"
+                      strokeWidth={0.6 / scale}
+                      strokeDasharray={`${3 / scale} ${3 / scale}`}
+                      opacity={0.45}
                       pointerEvents="none"
                     />
                   )}
@@ -1667,14 +1697,23 @@ export function GalaxyMapClient({
                     }
                   />
 
-                  {/* Colony dot (top-right of star) */}
-                  {sys.colonyCount > 0 && (
+                  {/* Colony dot (top-right of star) — green = mine, amber = others' */}
+                  {sys.myColonyCount > 0 && (
                     <circle
                       cx={sys.svgX + r * 0.7}
                       cy={sys.svgY - r * 0.7}
                       r={3}
                       fill="#34d399"
                       opacity={0.9}
+                    />
+                  )}
+                  {(sys.colonyCount - sys.myColonyCount) > 0 && (
+                    <circle
+                      cx={sys.svgX + r * 0.7}
+                      cy={sys.svgY - r * 0.7 + (sys.myColonyCount > 0 ? 5 : 0)}
+                      r={2.5}
+                      fill="#f59e0b"
+                      opacity={0.75}
                     />
                   )}
 
@@ -2009,6 +2048,64 @@ export function GalaxyMapClient({
                 </g>
               );
             })()}
+
+            {/* ── Other players' station markers (silver cross, read-only) ── */}
+            {otherStations.map((os) => {
+              const sys = systemMap.get(os.systemId);
+              if (!sys) return null;
+              const starR = nodeRadius(sys);
+              // Position upper-left of the star (opposite quadrant from player's own station)
+              const mx = sys.svgX - starR - 10;
+              const my = sys.svgY - starR - 10;
+              const s = 4.5 / scale;
+              const isHov = hoveredId === `other-station-${os.id}`;
+              return (
+                <g
+                  key={`other-station-${os.id}`}
+                  className="cursor-default"
+                  onMouseEnter={() => setHoveredId(`other-station-${os.id}`)}
+                  onMouseLeave={() => setHoveredId(null)}
+                >
+                  <circle cx={mx} cy={my} r={10 / scale} fill="transparent" />
+                  <g opacity={isHov ? 1 : 0.7}>
+                    <rect x={mx - s * 1.5} y={my - s * 0.2} width={s * 3} height={s * 0.4} fill="#9ca3af" />
+                    <rect x={mx - s * 0.2} y={my - s * 1.5} width={s * 0.4} height={s * 3} fill="#9ca3af" />
+                    {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
+                      <circle key={i}
+                        cx={mx + Math.cos(a) * s * 1.5}
+                        cy={my + Math.sin(a) * s * 1.5}
+                        r={s * 0.4}
+                        fill="#6b7280"
+                      />
+                    ))}
+                    <circle cx={mx} cy={my} r={s * 0.55} fill="#6b7280" />
+                  </g>
+                  {/* Tooltip on hover */}
+                  {isHov && (
+                    <g pointerEvents="none">
+                      <rect
+                        x={mx + 8 / scale} y={my - 14 / scale}
+                        width={Math.max(os.ownerHandle.length * 6 + 16, 80) / scale}
+                        height={20 / scale}
+                        rx={3 / scale}
+                        fill="#1c1c24"
+                        stroke="#4b5563"
+                        strokeWidth={0.8 / scale}
+                        opacity={0.95}
+                      />
+                      <text
+                        x={mx + 16 / scale} y={my - 1 / scale}
+                        fontSize={9 / scale}
+                        fill="#d1d5db"
+                        className="select-none"
+                      >
+                        {os.ownerHandle}&apos;s Station
+                      </text>
+                    </g>
+                  )}
+                </g>
+              );
+            })}
 
             {/* ── Fleet markers (draggable to dispatch) ──────────────────── */}
             {(() => {

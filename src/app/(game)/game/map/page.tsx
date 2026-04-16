@@ -25,7 +25,7 @@ import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
@@ -113,6 +113,8 @@ export default async function GalaxyMapPage() {
     beaconsRes,
     disputesRes,
     allianceMemberRes,
+    otherStationsRes,
+    allColoniesRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -197,6 +199,18 @@ export default async function GalaxyMapPage() {
       .select("alliance_id, role")
       .eq("player_id", player.id)
       .maybeSingle(),
+
+    // All other players' stations (for multiplayer visibility — Phase 1)
+    admin
+      .from("player_stations")
+      .select("id, owner_id, current_system_id")
+      .neq("owner_id", player.id),
+
+    // Total active colony count per system across ALL players (for system panel)
+    admin
+      .from("colonies")
+      .select("system_id")
+      .eq("status", "active"),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -230,6 +244,8 @@ export default async function GalaxyMapPage() {
     attacking_alliance_id: string;
     resolves_at: string;
   };
+  type OtherStationRow = { id: string; owner_id: string; current_system_id: string | null };
+  type AllColonyRow = { system_id: string };
 
   const ships              = listResult<ShipRow>(shipsRes).data ?? [];
   const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
@@ -243,6 +259,8 @@ export default async function GalaxyMapPage() {
   const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];
   const rawDisputeRows     = listResult<RawDisputeRow>(disputesRes).data ?? [];
   const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
+  const otherStationRows   = listResult<OtherStationRow>(otherStationsRes).data ?? [];
+  const allColonyRows      = listResult<AllColonyRow>(allColoniesRes).data ?? [];
 
   // Alliance beacon-placement permissions
   type MemberRow = { alliance_id: string; role: string };
@@ -253,6 +271,38 @@ export default async function GalaxyMapPage() {
   const playerAllianceBeaconSystemIds = playerAllianceId
     ? rawBeaconRows.filter((b) => b.alliance_id === playerAllianceId).map((b) => b.system_id)
     : [];
+
+  // ── Total colony counts per system (all players) ──────────────────────────
+  const totalColonyBySystem = new Map<string, number>();
+  for (const c of allColonyRows) {
+    totalColonyBySystem.set(c.system_id, (totalColonyBySystem.get(c.system_id) ?? 0) + 1);
+  }
+
+  // ── Resolve handles for other players' station owners ─────────────────────
+  const otherStationOwnerIds = [...new Set(otherStationRows.map((s) => s.owner_id))];
+  const otherStationHandles  = new Map<string, string>();
+  if (otherStationOwnerIds.length > 0) {
+    type HandleRow2 = { id: string; handle: string };
+    const { data: stationHandleRows } = listResult<HandleRow2>(
+      await admin.from("players").select("id, handle").in("id", otherStationOwnerIds),
+    );
+    for (const h of stationHandleRows ?? []) otherStationHandles.set(h.id, h.handle);
+  }
+
+  // Build GalaxyOtherStation list (only stations that are in a known system)
+  const galaxyOtherStations: GalaxyOtherStation[] = otherStationRows
+    .filter((s) => s.current_system_id !== null && systemSvgMap.has(s.current_system_id!))
+    .map((s) => {
+      const pos = systemSvgMap.get(s.current_system_id!)!;
+      return {
+        id:         s.id,
+        ownerId:    s.owner_id,
+        ownerHandle: otherStationHandles.get(s.owner_id) ?? "Unknown",
+        systemId:   s.current_system_id!,
+        svgX:       pos.svgX,
+        svgY:       pos.svgY,
+      };
+    });
 
   // Fetch discoverer handles for first-discovery systems (so panel can show names)
   const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
@@ -356,7 +406,8 @@ export default async function GalaxyMapPage() {
       isDiscovered: discoveredSystemIds.has(entry.id),
       isPlayerSteward: stewardMap.get(entry.id) === player.id,
       discovererHandle: firstDiscovererBySystem.get(entry.id) ?? null,
-      colonyCount: colonySystemIds.get(entry.id) ?? 0,
+      colonyCount: totalColonyBySystem.get(entry.id) ?? 0,
+      myColonyCount: colonySystemIds.get(entry.id) ?? 0,
       bodyCount: generated.bodyCount,
       hasDockedShip: shipSystemIds.has(entry.id),
       hasDockedFleet: fleetSystemIds.has(entry.id),
@@ -600,6 +651,7 @@ export default async function GalaxyMapPage() {
         playerAllianceId={playerAllianceId}
         canPlaceBeacon={canPlaceBeacon}
         playerAllianceBeaconSystemIds={playerAllianceBeaconSystemIds}
+        otherStations={galaxyOtherStations}
       />
     </div>
   );

@@ -23,7 +23,7 @@ import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import type { SolarSceneSystemData } from "./_components/SolarScene";
-import type { BodyInfo, ShipInfo, FleetInfo } from "./_components/SystemHubClient";
+import type { BodyInfo, ShipInfo, FleetInfo, OtherColonyInfo } from "./_components/SystemHubClient";
 import { SystemHubClient } from "./_components/SystemHubClient";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
@@ -87,6 +87,7 @@ export default async function SolarSystemPage({
     shipsRes, fleetsRes, coloniesRes,
     stationRes, discoveryRes,
     surveyRes, playerColoniesRes, researchRes,
+    allSystemColoniesRes, stewardshipRes,
   ] = await Promise.all([
     // Ships in this system (full data)
     admin
@@ -144,6 +145,19 @@ export default async function SolarSystemPage({
       .from("player_research")
       .select("research_id")
       .eq("player_id", player.id),
+
+    // All active colonies in this system (any player) — for multiplayer visibility
+    admin
+      .from("colonies")
+      .select("id, body_id, owner_id, population_tier")
+      .eq("system_id", systemId)
+      .eq("status", "active"),
+
+    // Body stewardship records in this system
+    admin
+      .from("body_stewardship")
+      .select("body_id, steward_id")
+      .eq("system_id", systemId),
   ]);
 
   type ShipRow    = { id: string; name: string; dispatch_mode: string; cargo_cap: number; speed_ly_per_hr: number; ship_state: string };
@@ -151,6 +165,8 @@ export default async function SolarSystemPage({
   type ColonyRow  = { id: string; body_id: string; status: string; population_tier: number };
   type SurveyRow  = { body_id: string };
   type ResearchRow = { research_id: string };
+  type AllColonyRow = { id: string; body_id: string; owner_id: string; population_tier: number };
+  type StewardRow = { body_id: string; steward_id: string };
 
   const ships       = (shipsRes.data   ?? []) as ShipRow[];
   const fleets      = (fleetsRes.data  ?? []) as FleetRow[];
@@ -166,6 +182,41 @@ export default async function SolarSystemPage({
   const hasHarshResearch  = listResult<ResearchRow>(researchRes).data?.some(
     r => r.research_id === "harsh_colony_environment",
   ) ?? false;
+
+  // All colonies in this system (any player)
+  const allSystemColonies = listResult<AllColonyRow>(allSystemColoniesRes).data ?? [];
+  const stewardshipRows   = listResult<StewardRow>(stewardshipRes).data ?? [];
+
+  // Resolve handles for other colony owners
+  const otherOwnerIds = [...new Set(
+    allSystemColonies.filter(c => c.owner_id !== player.id).map(c => c.owner_id),
+  )];
+  const ownerHandles = new Map<string, string>([[player.id, player.handle]]);
+  if (otherOwnerIds.length > 0) {
+    type HandleRow = { id: string; handle: string };
+    const { data: handleRows } = listResult<HandleRow>(
+      await admin.from("players").select("id, handle").in("id", otherOwnerIds),
+    );
+    for (const h of handleRows ?? []) ownerHandles.set(h.id, h.handle);
+  }
+
+  // Map: bodyId → steward_id
+  const stewardByBodyId = new Map(stewardshipRows.map(s => [s.body_id, s.steward_id]));
+
+  // Build other players' colony info for the scene
+  const otherColonies: OtherColonyInfo[] = allSystemColonies
+    .filter(c => c.owner_id !== player.id)
+    .map(c => {
+      const parts = c.body_id.split(":");
+      const idx   = parseInt(parts[parts.length - 1], 10);
+      return {
+        bodyIndex:      idx,
+        bodyId:         c.body_id,
+        ownerHandle:    ownerHandles.get(c.owner_id) ?? "Unknown",
+        populationTier: c.population_tier,
+      };
+    })
+    .filter(c => !isNaN(c.bodyIndex));
 
   const isFirstColony = !player.first_colony_placed && activeColonyCount === 0;
   const atSlotCap     =
@@ -204,14 +255,17 @@ export default async function SolarSystemPage({
       canActOnBodies &&
       (body.canHostColony || (isHarsh && hasHarshResearch));
 
+    const stewardId = stewardByBodyId.get(bodyId) ?? null;
     return {
-      type:           body.type,
-      size:           body.size,
+      type:              body.type,
+      size:              body.size,
       bodyId,
-      colonyId:       colony?.id ?? null,
-      populationTier: colony?.population_tier ?? null,
-      isSurveyed:     surveyedBodyIds.has(bodyId),
+      colonyId:          colony?.id ?? null,
+      populationTier:    colony?.population_tier ?? null,
+      isSurveyed:        surveyedBodyIds.has(bodyId),
       isColonisable,
+      stewardHandle:     stewardId ? (ownerHandles.get(stewardId) ?? null) : null,
+      isPlayerSteward:   stewardId === player.id,
     };
   });
 
@@ -294,6 +348,7 @@ export default async function SolarSystemPage({
         isFirstColony={isFirstColony}
         spectralClass={system.spectralClass}
         bodyCount={system.bodyCount}
+        otherColonies={otherColonies}
       />
     </div>
   );

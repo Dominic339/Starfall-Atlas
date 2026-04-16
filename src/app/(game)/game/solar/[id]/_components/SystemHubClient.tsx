@@ -31,6 +31,17 @@ export interface BodyInfo {
   populationTier:  number | null;
   isSurveyed:      boolean;
   isColonisable:   boolean;  // server-computed
+  /** Handle of whoever claimed stewardship of this body (null = unclaimed). */
+  stewardHandle:   string | null;
+  /** True if this player is the steward of this body. */
+  isPlayerSteward: boolean;
+}
+
+export interface OtherColonyInfo {
+  bodyIndex:      number;
+  bodyId:         string;
+  ownerHandle:    string;
+  populationTier: number;
 }
 
 export interface ShipInfo {
@@ -62,6 +73,8 @@ export interface SystemHubClientProps {
   isFirstColony:      boolean;
   spectralClass:      string;
   bodyCount:          number;
+  /** Other players' colonies in this system (for world-state visibility). */
+  otherColonies:      OtherColonyInfo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -418,6 +431,7 @@ function SystemOverviewPanel({
   onSelectShip,
   draggingShipId,
   onShipDragStart,
+  otherColonies,
 }: {
   systemId:      string;
   system:        SolarSceneSystemData;
@@ -432,7 +446,10 @@ function SystemOverviewPanel({
   onSelectShip:  (id: string) => void;
   draggingShipId: string | null;
   onShipDragStart: (shipId: string) => void;
+  otherColonies: OtherColonyInfo[];
 }) {
+  // Map bodyIndex → other-colony info for quick lookup
+  const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
     <div className="flex flex-col overflow-y-auto h-full">
       {/* System header */}
@@ -535,6 +552,12 @@ function SystemOverviewPanel({
               </span>
               <span className="text-xs text-zinc-700">{body.size}</span>
               {body.colonyId && <span className="text-xs text-emerald-500">★</span>}
+              {otherColonyByIdx.has(i) && (
+                <span className="text-xs text-amber-500" title={`${otherColonyByIdx.get(i)!.ownerHandle}'s colony`}>●</span>
+              )}
+              {body.stewardHandle && (
+                <span className="text-xs text-yellow-600" title={`Steward: ${body.stewardHandle}`}>⬡</span>
+              )}
               {body.type !== "asteroid_belt" && !body.colonyId && (
                 <span className="text-xs text-zinc-800">›</span>
               )}
@@ -542,6 +565,32 @@ function SystemOverviewPanel({
           ))}
         </div>
       </div>
+
+      {/* Other players' settlements */}
+      {otherColonies.length > 0 && (
+        <div className="border-t border-zinc-800/50 px-4 py-2">
+          <p className="mb-1.5 text-xs text-zinc-600 uppercase tracking-wider">
+            Other Settlements ({otherColonies.length})
+          </p>
+          <div className="space-y-1">
+            {otherColonies.map((oc) => {
+              const body = bodies[oc.bodyIndex];
+              return (
+                <div key={oc.bodyId} className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full shrink-0 bg-amber-500 opacity-75" />
+                  <span className="text-xs text-zinc-500 truncate flex-1">
+                    {body ? `${oc.bodyIndex + 1}. ${bodyLabel(body.type)}` : oc.bodyId}
+                  </span>
+                  <span className="text-xs text-amber-700 truncate max-w-[70px]" title={oc.ownerHandle}>
+                    {oc.ownerHandle}
+                  </span>
+                  <span className="text-xs text-zinc-700">T{oc.populationTier}</span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Bottom links */}
       <div className="border-t border-zinc-800 p-3 space-y-1.5">
@@ -569,7 +618,7 @@ function SystemOverviewPanel({
 export function SystemHubClient({
   systemId, system, bodies, ships, fleets, coloniesBodyIndices,
   stationHere, stationId, isDiscovered, canActOnBodies, isFirstColony,
-  spectralClass, bodyCount,
+  spectralClass, bodyCount, otherColonies,
 }: SystemHubClientProps) {
   const router = useRouter();
 
@@ -745,6 +794,7 @@ export function SystemHubClient({
           onSupplyCancel={handleSupplyCancel}
           onStationClick={handleStationClick}
           onShipClick={handleShipClick}
+          otherColonies={otherColonies.map(c => ({ bodyIndex: c.bodyIndex, ownerHandle: c.ownerHandle }))}
         />
 
         {/* Supply mode banner */}
@@ -831,6 +881,7 @@ export function SystemHubClient({
             onSelectShip={setSelectedShipId}
             draggingShipId={draggingShipId}
             onShipDragStart={handleShipDragStart}
+            otherColonies={otherColonies}
           />
         )}
       </div>
