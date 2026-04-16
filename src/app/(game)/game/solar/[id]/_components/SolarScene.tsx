@@ -13,10 +13,44 @@
  *   - OrbitControls (constrained zoom, no pan)
  */
 
-import { useRef, useMemo, useState, useEffect } from "react";
+import { useRef, useMemo, useState, useEffect, Suspense } from "react";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
-import { Html, Stars, OrbitControls, Line } from "@react-three/drei";
+import { Html, Stars, OrbitControls, Line, useGLTF } from "@react-three/drei";
 import * as THREE from "three";
+
+// ---------------------------------------------------------------------------
+// GLB model paths
+// ---------------------------------------------------------------------------
+
+const SHIP_GLB    = "/assets/planets/tier 1 ship.glb";
+const STATION_GLB = "/assets/planets/Basic Station.glb";
+
+useGLTF.preload(SHIP_GLB);
+useGLTF.preload(STATION_GLB);
+
+// ---------------------------------------------------------------------------
+// Generic normalised GLB model — fits any loaded scene into a unit-size box
+// ---------------------------------------------------------------------------
+
+function NormalisedGlb({ path, targetSize, rotationY = 0, rotationX = 0 }: {
+  path: string;
+  targetSize: number;
+  rotationY?: number;
+  rotationX?: number;
+}) {
+  const { scene } = useGLTF(path);
+  const model = useMemo(() => {
+    const clone = scene.clone(true);
+    const box   = new THREE.Box3().setFromObject(clone);
+    const size  = box.getSize(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    if (maxDim > 0) clone.scale.setScalar(targetSize / maxDim);
+    const center = new THREE.Box3().setFromObject(clone).getCenter(new THREE.Vector3());
+    clone.position.sub(center);
+    return clone;
+  }, [scene, targetSize]);
+  return <primitive object={model} rotation={[rotationX, rotationY, 0]} />;
+}
 
 // ---------------------------------------------------------------------------
 // Colour / sizing tables
@@ -331,34 +365,35 @@ function Planet({
 }
 
 // ---------------------------------------------------------------------------
-// Station marker
+// Station marker — GLB model with slow spin
 // ---------------------------------------------------------------------------
 
-function StationMarker({ starR, onClick }: { starR: number; onClick: () => void }) {
+function StationGlb({ starR, onClick }: { starR: number; onClick: () => void }) {
   const spinRef = useRef<THREE.Group>(null!);
-  useFrame(({ clock }) => { spinRef.current.rotation.y = clock.elapsedTime * 0.35; });
+  useFrame(({ clock }) => { spinRef.current.rotation.y = clock.elapsedTime * 0.25; });
   return (
     <group position={[starR * 1.7, starR * 0.55, 0]}>
       <group ref={spinRef}>
-        <mesh>
-          <boxGeometry args={[0.22, 0.06, 0.22]} />
-          <meshStandardMaterial color="#f59e0b" emissive="#92400e" emissiveIntensity={1.3} />
-        </mesh>
-        <mesh>
-          <boxGeometry args={[0.40, 0.035, 0.035]} />
-          <meshStandardMaterial color="#fbbf24" emissive="#78350f" emissiveIntensity={0.8} />
-        </mesh>
-        <mesh rotation={[0, Math.PI / 2, 0]}>
-          <boxGeometry args={[0.40, 0.035, 0.035]} />
-          <meshStandardMaterial color="#fbbf24" emissive="#78350f" emissiveIntensity={0.8} />
-        </mesh>
+        <Suspense fallback={
+          <mesh>
+            <boxGeometry args={[0.22, 0.06, 0.22]} />
+            <meshStandardMaterial color="#f59e0b" emissive="#92400e" emissiveIntensity={1.3} />
+          </mesh>
+        }>
+          <NormalisedGlb path={STATION_GLB} targetSize={0.55} />
+        </Suspense>
       </group>
+      {/* Glow ring */}
+      <mesh rotation={[Math.PI / 2, 0, 0]}>
+        <torusGeometry args={[0.38, 0.018, 8, 64]} />
+        <meshBasicMaterial color="#f59e0b" transparent opacity={0.35} />
+      </mesh>
       {/* Clickable hit zone */}
       <mesh onClick={(e) => { e.stopPropagation(); onClick(); }}>
-        <sphereGeometry args={[0.35, 8, 8]} />
+        <sphereGeometry args={[0.42, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
-      <Html position={[0, 0.42, 0]} center style={{ pointerEvents: "none" }}>
+      <Html position={[0, 0.52, 0]} center style={{ pointerEvents: "none" }}>
         <span style={{ fontSize: "10px", color: "#f59e0b", whiteSpace: "nowrap", textShadow: "0 1px 4px #000", cursor: "pointer" }}>
           Station ⚓
         </span>
@@ -368,21 +403,40 @@ function StationMarker({ starR, onClick }: { starR: number; onClick: () => void 
 }
 
 // ---------------------------------------------------------------------------
-// Ship marker
+// Ship marker — GLB model
 // ---------------------------------------------------------------------------
 
 function ShipMarker({ id, name, index, total, isSelected, onClick }: { id: string; name: string; index: number; total: number; isSelected: boolean; onClick: (id: string) => void }) {
   const spread = (index - (total - 1) / 2) * 0.44;
   const color = isSelected ? "#c7d2fe" : "#a5b4fc";
+  // Subtle hover bob
+  const groupRef = useRef<THREE.Group>(null!);
+  useFrame(({ clock }) => {
+    if (!groupRef.current) return;
+    groupRef.current.position.y = Math.sin(clock.elapsedTime * 1.1 + index) * 0.04;
+  });
   return (
     <group position={[spread - 1.1, 0, 1.2]}>
-      <mesh onClick={(e) => { e.stopPropagation(); onClick(id); }}>
-        <coneGeometry args={[0.09, 0.28, 4]} />
-        <meshStandardMaterial color={color} emissive={isSelected ? "#4f46e5" : "#3730a3"} emissiveIntensity={isSelected ? 1.2 : 0.65} />
-      </mesh>
+      <group ref={groupRef}>
+        <Suspense fallback={
+          <mesh>
+            <coneGeometry args={[0.09, 0.28, 4]} />
+            <meshStandardMaterial color={color} emissive="#3730a3" emissiveIntensity={0.65} />
+          </mesh>
+        }>
+          <NormalisedGlb path={SHIP_GLB} targetSize={0.30} rotationY={Math.PI} />
+        </Suspense>
+      </group>
+      {/* Selection glow ring */}
+      {isSelected && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[0.22, 0.018, 8, 48]} />
+          <meshBasicMaterial color="#818cf8" transparent opacity={0.80} />
+        </mesh>
+      )}
       {/* Invisible click zone */}
       <mesh onClick={(e) => { e.stopPropagation(); onClick(id); }}>
-        <sphereGeometry args={[0.22, 8, 8]} />
+        <sphereGeometry args={[0.28, 8, 8]} />
         <meshBasicMaterial transparent opacity={0} depthWrite={false} />
       </mesh>
       <Html position={[0, 0.34, 0]} center style={{ pointerEvents: "none" }}>
@@ -582,13 +636,13 @@ function SceneInner({
 
   return (
     <>
-      <ambientLight intensity={0.22} />
-      <directionalLight position={[8, 10, 6]} intensity={1.4} castShadow={false} />
-      <directionalLight position={[-6, -3, -5]} intensity={0.15} />
+      <ambientLight intensity={0.55} />
+      <directionalLight position={[8, 10, 6]} intensity={1.8} castShadow={false} />
+      <directionalLight position={[-6, -3, -5]} intensity={0.30} />
       <Stars radius={90} depth={60} count={3500} factor={3.5} saturation={0} fade />
       <Star spectralClass={system.spectralClass} />
 
-      {stationHere && <StationMarker starR={starR} onClick={onStationClick} />}
+      {stationHere && <StationGlb starR={starR} onClick={onStationClick} />}
 
       {ships.map((s, i) => (
         <ShipMarker
