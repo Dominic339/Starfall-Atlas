@@ -285,7 +285,7 @@ export default async function ResearchPage() {
           <span className="text-xs text-zinc-500">
             Station iron:{" "}
             <span className="font-mono text-zinc-300">
-              {stationIron.toLocaleString()}
+              {stationIron.toLocaleString("en-US")}
             </span>
           </span>
         </div>
@@ -412,7 +412,7 @@ export default async function ResearchPage() {
                             milestoneData,
                           );
                           const costLabel = def.cost
-                            .map((c) => `${c.quantity.toLocaleString()} ${c.resource_type}`)
+                            .map((c) => `${c.quantity.toLocaleString("en-US")} ${c.resource_type}`)
                             .join(", ");
                           const canAfford =
                             station !== null &&
