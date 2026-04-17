@@ -570,10 +570,10 @@ CREATE TABLE IF NOT EXISTS beacon_cooldowns (
 CREATE INDEX IF NOT EXISTS idx_beacon_cooldowns_beacon
   ON beacon_cooldowns(beacon_id);
 
--- One active cooldown per beacon (latest wins; old ones expire naturally)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_beacon_cooldowns_beacon_active
-  ON beacon_cooldowns(beacon_id)
-  WHERE expires_at > NOW();
+-- Composite index for cooldown lookups by beacon + expiry
+-- (partial unique with NOW() not allowed — NOW() is STABLE, not IMMUTABLE)
+CREATE INDEX IF NOT EXISTS idx_beacon_cooldowns_beacon_active
+  ON beacon_cooldowns(beacon_id, expires_at);
 
 -- ── 4. Lock column on fleets ─────────────────────────────────────────────────
 
