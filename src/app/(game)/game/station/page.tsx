@@ -30,6 +30,7 @@ import { ShipAssignColonyControl } from "../_components/ShipAssignColonyControl"
 import { autoStateLabel, dispatchModeLabel, formatEtaMs } from "@/lib/game/shipAutomation";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { taxRateForTier } from "@/lib/game/taxes";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,12 @@ export default async function StationPage() {
 
   type ColonyRow = Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier">;
   const colonies = (listResult<ColonyRow>(coloniesRes).data ?? []);
+
+  // Total credit income rate across all active colonies (for station display)
+  const creditsPerHour = colonies.reduce(
+    (sum, c) => sum + taxRateForTier(c.population_tier),
+    0,
+  );
 
   // Resolve auto_target_colony_id → system display name for away ships
   const colonySystemNameById = new Map(
@@ -298,9 +305,14 @@ export default async function StationPage() {
         <div className="rounded-xl border border-amber-900/50 bg-zinc-900/80 px-4 py-4">
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Credits</p>
           <p className="mt-1.5 font-mono text-2xl font-bold text-amber-300 tabular-nums">
-            {player.credits.toLocaleString()}
+            {player.credits.toLocaleString("en-US")}
           </p>
-          <p className="mt-0.5 text-[10px] text-zinc-700">¢ balance</p>
+          <p className="mt-0.5 text-[10px] text-zinc-500">
+            {creditsPerHour > 0
+              ? <span className="text-amber-700">+{creditsPerHour.toLocaleString("en-US")} ¢/hr</span>
+              : <span className="text-zinc-700">¢ balance</span>
+            }
+          </p>
         </div>
         {/* Iron */}
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-4">
