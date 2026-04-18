@@ -142,6 +142,15 @@ export interface GalaxyTerritory {
 }
 
 /** Another player's space station visible on the galaxy map. */
+export interface GalaxyBodySteward {
+  bodyId: string;
+  systemId: string;
+  stewardId: string;
+  stewardHandle: string;
+  isPlayerSteward: boolean;
+  defaultTaxRatePct: number;
+}
+
 export interface GalaxyOtherStation {
   id: string;
   ownerId: string;
@@ -201,6 +210,8 @@ interface GalaxyMapClientProps {
   playerAllianceBeaconSystemIds: string[];
   /** Other players' stations (for world-state visibility). */
   otherStations: GalaxyOtherStation[];
+  /** Body stewardships across all systems (for permit / tax panel). */
+  bodyStewrds: GalaxyBodySteward[];
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +335,12 @@ function findRoute(
   return null;
 }
 
+/** Parse "{systemId}:{bodyIndex}" → "Body N". */
+function bodyLabel(bodyId: string): string {
+  const idx = bodyId.lastIndexOf(":");
+  return idx >= 0 ? `Body ${bodyId.slice(idx + 1)}` : bodyId;
+}
+
 /** Sum of per-hop distances along a route, in ly. */
 function routeTotalLy(hops: string[], sysById: Map<string, GalaxySystem>): number {
   let total = 0;
@@ -376,6 +393,7 @@ export function GalaxyMapClient({
   playerAllianceId,
   canPlaceBeacon,
   otherStations,
+  bodyStewrds,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -387,7 +405,9 @@ export function GalaxyMapClient({
 
   // ── Interaction state ─────────────────────────────────────────────────────
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(
+    () => systems.find((s) => s.isStationLocation)?.id ?? null,
+  );
   const [travelLoading, setTravelLoading] = useState(false);
   const [travelError, setTravelError] = useState<string | null>(null);
 
@@ -406,6 +426,11 @@ export function GalaxyMapClient({
   // ── Multi-ship selection + batch dispatch ──────────────────────────────────
   const [selectedShipIds, setSelectedShipIds] = useState<Set<string>>(new Set());
   const [multiDispatchLoading, setMultiDispatchLoading] = useState(false);
+
+  // ── Body stewardship tax editing ────────────────────────────────────────────
+  const [taxDraft, setTaxDraft] = useState<Map<string, string>>(new Map());
+  const [taxLoading, setTaxLoading] = useState<string | null>(null);
+  const [taxError, setTaxError] = useState<string | null>(null);
 
   // ── Animation tick — re-renders at ~30 fps while ships are in transit ────
   // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
@@ -721,6 +746,20 @@ export function GalaxyMapClient({
       dragInfoRef.current = null;
       isPanning.current = false;
       if (info.targetId && info.targetId !== info.ship.systemId) {
+        // Compute actual destination: use first route hop if target is out of direct range
+        let actualDest = info.targetId;
+        const shipSys = systemsRef.current.find((s) => s.id === info.ship.systemId);
+        const tgtSys  = systemsRef.current.find((s) => s.id === info.targetId);
+        if (shipSys && tgtSys && dist3D(shipSys, tgtSys) > baseRangeLy + 0.01) {
+          const route = findRoute(info.ship.systemId!, info.targetId, systemsRef.current, baseRangeLy);
+          if (route && route.length >= 2) {
+            actualDest = route[1]; // first reachable hop
+          } else {
+            setDragError("Out of range — no route found.");
+            setShipDispatchLoading(null);
+            return;
+          }
+        }
         setShipDispatchLoading(info.ship.id);
         setDragError(null);
         try {
@@ -728,7 +767,7 @@ export function GalaxyMapClient({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              destinationSystemId: info.targetId,
+              destinationSystemId: actualDest,
               shipId: info.ship.id,
             }),
           });
@@ -1066,6 +1105,28 @@ export function GalaxyMapClient({
       setDisputeError("Network error.");
     } finally {
       setDisputeLoading(null);
+    }
+  }
+
+  async function handleSetTax(bodyId: string, ratePct: number) {
+    setTaxLoading(bodyId);
+    setTaxError(null);
+    try {
+      const res = await fetch("/api/game/stewardship/set-tax", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ bodyId, taxRatePct: ratePct }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        router.refresh();
+      } else {
+        setTaxError(json.error?.message ?? "Failed to set tax rate.");
+      }
+    } catch {
+      setTaxError("Network error.");
+    } finally {
+      setTaxLoading(null);
     }
   }
 
@@ -2915,7 +2976,74 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* ── Ship dispatch ─────────────────────────────────────── */}
+              {/* ── Body stewardship ───────────────────────────────────── */}
+              {(() => {
+                const stewrdsHere = bodyStewrds.filter((s) => s.systemId === selectedSystem.id);
+                if (stewrdsHere.length === 0) return null;
+                return (
+                  <div className="py-2">
+                    <p className="mb-2 text-xs font-medium uppercase tracking-wider text-zinc-600">
+                      Body Stewardship
+                    </p>
+                    <div className="space-y-2">
+                      {stewrdsHere.map((s) => {
+                        const label = bodyLabel(s.bodyId);
+                        const draft = taxDraft.get(s.bodyId) ?? String(s.defaultTaxRatePct);
+                        return (
+                          <div
+                            key={s.bodyId}
+                            className={`rounded border px-2.5 py-2 text-xs ${s.isPlayerSteward ? "border-amber-900/50 bg-amber-950/20" : "border-zinc-800/60 bg-zinc-900/30"}`}
+                          >
+                            <div className="flex items-center justify-between gap-2">
+                              <span className={s.isPlayerSteward ? "text-amber-400" : "text-zinc-400"}>
+                                {label}
+                              </span>
+                              <span className="text-zinc-600">
+                                {s.isPlayerSteward ? "You (steward)" : `@${s.stewardHandle}`}
+                              </span>
+                            </div>
+                            {s.isPlayerSteward ? (
+                              <div className="mt-1.5 flex items-center gap-1.5">
+                                <span className="text-zinc-600">Default tax:</span>
+                                <input
+                                  type="number"
+                                  min={0}
+                                  max={50}
+                                  value={draft}
+                                  onChange={(e) =>
+                                    setTaxDraft((prev) => new Map(prev).set(s.bodyId, e.target.value))
+                                  }
+                                  className="w-12 rounded border border-zinc-700 bg-zinc-900 px-1 py-0.5 text-center text-xs text-zinc-200 focus:border-amber-600 focus:outline-none"
+                                />
+                                <span className="text-zinc-600">%</span>
+                                <button
+                                  onClick={() =>
+                                    handleSetTax(
+                                      s.bodyId,
+                                      Math.min(50, Math.max(0, Number(draft) || 0)),
+                                    )
+                                  }
+                                  disabled={taxLoading === s.bodyId}
+                                  className="rounded border border-amber-800/60 bg-amber-950/40 px-2 py-0.5 text-amber-400 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                                >
+                                  {taxLoading === s.bodyId ? "…" : "Set"}
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="mt-0.5 text-zinc-600">
+                                Default tax: {s.defaultTaxRatePct}%
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {taxError && <p className="text-xs text-red-400">{taxError}</p>}
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* ── Ship dispatch ───────────────────────────────────────── */}
               {ships.length > 0 && (() => {
                 // Categorise ships relative to the selected system
                 const shipsHere = ships.filter((s) => s.systemId === selectedSystem.id);

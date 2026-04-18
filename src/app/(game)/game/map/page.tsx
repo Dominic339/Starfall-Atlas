@@ -25,7 +25,7 @@ import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation, GalaxyBodySteward } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
@@ -115,6 +115,7 @@ export default async function GalaxyMapPage() {
     allianceMemberRes,
     otherStationsRes,
     allColoniesRes,
+    bodyStewrdshipsRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -211,6 +212,11 @@ export default async function GalaxyMapPage() {
       .from("colonies")
       .select("system_id")
       .eq("status", "active"),
+
+    // Body stewardships — all records (world state); includes tax rate
+    admin
+      .from("body_stewardship")
+      .select("body_id, steward_id, system_id, default_tax_rate_pct"),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -246,6 +252,7 @@ export default async function GalaxyMapPage() {
   };
   type OtherStationRow = { id: string; owner_id: string; current_system_id: string | null };
   type AllColonyRow = { system_id: string };
+  type BodyStewardRow = { body_id: string; steward_id: string; system_id: string; default_tax_rate_pct: number };
 
   const ships              = listResult<ShipRow>(shipsRes).data ?? [];
   const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
@@ -261,6 +268,7 @@ export default async function GalaxyMapPage() {
   const stationSystemId    = (stationRes.data as { current_system_id: string } | null)?.current_system_id ?? null;
   const otherStationRows   = listResult<OtherStationRow>(otherStationsRes).data ?? [];
   const allColonyRows      = listResult<AllColonyRow>(allColoniesRes).data ?? [];
+  const rawBodyStewrdRows  = listResult<BodyStewardRow>(bodyStewrdshipsRes).data ?? [];
 
   // Alliance beacon-placement permissions
   type MemberRow = { alliance_id: string; role: string };
@@ -277,6 +285,26 @@ export default async function GalaxyMapPage() {
   for (const c of allColonyRows) {
     totalColonyBySystem.set(c.system_id, (totalColonyBySystem.get(c.system_id) ?? 0) + 1);
   }
+
+  // ── Resolve handles for body stewards ────────────────────────────────────
+  const bodyStewardPlayerIds = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
+  const bodyStewardHandles   = new Map<string, string>();
+  if (bodyStewardPlayerIds.length > 0) {
+    type HandleRowBS = { id: string; handle: string };
+    const { data: bsHandleRows } = listResult<HandleRowBS>(
+      await admin.from("players").select("id, handle").in("id", bodyStewardPlayerIds),
+    );
+    for (const h of bsHandleRows ?? []) bodyStewardHandles.set(h.id, h.handle);
+  }
+
+  const galaxyBodyStewrds: GalaxyBodySteward[] = rawBodyStewrdRows.map((s) => ({
+    bodyId:           s.body_id,
+    systemId:         s.system_id,
+    stewardId:        s.steward_id,
+    stewardHandle:    bodyStewardHandles.get(s.steward_id) ?? "Unknown",
+    isPlayerSteward:  s.steward_id === player.id,
+    defaultTaxRatePct: s.default_tax_rate_pct,
+  }));
 
   // ── Resolve handles for other players' station owners ─────────────────────
   const otherStationOwnerIds = [...new Set(otherStationRows.map((s) => s.owner_id))];
@@ -652,6 +680,7 @@ export default async function GalaxyMapPage() {
         canPlaceBeacon={canPlaceBeacon}
         playerAllianceBeaconSystemIds={playerAllianceBeaconSystemIds}
         otherStations={galaxyOtherStations}
+        bodyStewrds={galaxyBodyStewrds}
       />
     </div>
   );
