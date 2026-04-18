@@ -42,7 +42,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
-import type { Ship, SystemDiscovery, SystemStewardship } from "@/lib/types/game";
+import type { Ship, SystemDiscovery, SystemStewardship, PlayerStation } from "@/lib/types/game";
 
 const DiscoverSchema = z.object({
   systemId: z.string().min(1).max(64),
@@ -80,26 +80,32 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  // ── Presence check ───────────────────────────────────────────────────────
-  // At least one of the player's ships must be docked at this system.
-  // Players have 2 starter ships; either ship being present suffices.
-  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
-    await admin
-      .from("ships")
-      .select("current_system_id")
-      .eq("owner_id", player.id),
-  );
+  // ── Presence check (ship or station) ─────────────────────────────────────
+  // At least one of the player's ships, or their station, must be in the system.
+  const [{ data: allShips }, { data: stationRow }] = await Promise.all([
+    listResult<Pick<Ship, "current_system_id">>(
+      await admin
+        .from("ships")
+        .select("current_system_id")
+        .eq("owner_id", player.id),
+    ),
+    maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
+      await admin
+        .from("player_stations")
+        .select("current_system_id")
+        .eq("owner_id", player.id)
+        .maybeSingle(),
+    ),
+  ]);
 
-  const shipPresent = (allShips ?? []).some(
-    (s) => s.current_system_id === systemId,
-  );
+  const shipPresent    = (allShips ?? []).some((s) => s.current_system_id === systemId);
+  const stationPresent = stationRow?.current_system_id === systemId;
 
-  if (!shipPresent) {
+  if (!shipPresent && !stationPresent) {
     return toErrorResponse(
       fail(
         "invalid_target",
-        "Your ship must be physically present in the system to discover it. " +
-          "Travel to the system and resolve your arrival first.",
+        "Your ship or station must be present in the system to discover it.",
       ).error,
     );
   }

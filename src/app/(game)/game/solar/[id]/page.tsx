@@ -153,10 +153,10 @@ export default async function SolarSystemPage({
       .eq("system_id", systemId)
       .eq("status", "active"),
 
-    // Body stewardship records in this system
+    // Body stewardship records in this system (includes default permit tax rate)
     admin
       .from("body_stewardship")
-      .select("body_id, steward_id")
+      .select("body_id, steward_id, default_tax_rate_pct")
       .eq("system_id", systemId),
   ]);
 
@@ -166,7 +166,7 @@ export default async function SolarSystemPage({
   type SurveyRow  = { body_id: string };
   type ResearchRow = { research_id: string };
   type AllColonyRow = { id: string; body_id: string; owner_id: string; population_tier: number };
-  type StewardRow = { body_id: string; steward_id: string };
+  type StewardRow = { body_id: string; steward_id: string; default_tax_rate_pct: number };
 
   const ships       = (shipsRes.data   ?? []) as ShipRow[];
   const fleets      = (fleetsRes.data  ?? []) as FleetRow[];
@@ -200,8 +200,8 @@ export default async function SolarSystemPage({
     for (const h of handleRows ?? []) ownerHandles.set(h.id, h.handle);
   }
 
-  // Map: bodyId → steward_id
-  const stewardByBodyId = new Map(stewardshipRows.map(s => [s.body_id, s.steward_id]));
+  // Map: bodyId → full steward row (steward_id + default_tax_rate_pct)
+  const stewardByBodyId = new Map(stewardshipRows.map(s => [s.body_id, s]));
 
   // Build other players' colony info for the scene
   const otherColonies: OtherColonyInfo[] = allSystemColonies
@@ -235,10 +235,13 @@ export default async function SolarSystemPage({
     }
   }
 
-  // Ship present? (for action eligibility — slot cap only blocks founding, not taxes/extraction)
-  const shipPresentHere = ships.length > 0;
-  const hasSystemAccess = isSol || isDiscovered;
-  const canActOnBodies  = shipPresentHere && hasSystemAccess;
+  // Presence flags
+  const shipPresentHere    = ships.length > 0;
+  const hasSystemAccess    = isSol || isDiscovered;
+  const canActOnBodies     = shipPresentHere && hasSystemAccess;
+  // Survey / discover also allowed when station is present (no ship required)
+  const canSurveyBodies    = (shipPresentHere || stationHere) && hasSystemAccess;
+  const canDiscover        = (shipPresentHere || stationHere) && !isDiscovered && !isSol;
 
   // ── Build per-body info ───────────────────────────────────────────────────
 
@@ -255,7 +258,7 @@ export default async function SolarSystemPage({
       canActOnBodies &&
       (body.canHostColony || (isHarsh && hasHarshResearch));
 
-    const stewardId = stewardByBodyId.get(bodyId) ?? null;
+    const stewardRow = stewardByBodyId.get(bodyId) ?? null;
     return {
       type:              body.type,
       size:              body.size,
@@ -264,8 +267,9 @@ export default async function SolarSystemPage({
       populationTier:    colony?.population_tier ?? null,
       isSurveyed:        surveyedBodyIds.has(bodyId),
       isColonisable,
-      stewardHandle:     stewardId ? (ownerHandles.get(stewardId) ?? null) : null,
-      isPlayerSteward:   stewardId === player.id,
+      stewardHandle:     stewardRow ? (ownerHandles.get(stewardRow.steward_id) ?? null) : null,
+      isPlayerSteward:   stewardRow?.steward_id === player.id,
+      defaultTaxRatePct: stewardRow?.default_tax_rate_pct ?? 0,
     };
   });
 
@@ -345,6 +349,8 @@ export default async function SolarSystemPage({
         stationId={stationId}
         isDiscovered={isDiscovered}
         canActOnBodies={canActOnBodies}
+        canSurveyBodies={canSurveyBodies}
+        canDiscover={canDiscover}
         isFirstColony={isFirstColony}
         spectralClass={system.spectralClass}
         bodyCount={system.bodyCount}
