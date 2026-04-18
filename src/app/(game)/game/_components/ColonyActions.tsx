@@ -150,8 +150,77 @@ export function ExtractButton({ colonyId, summary }: ExtractButtonProps) {
 }
 
 // ---------------------------------------------------------------------------
-// Unload ship cargo button
+// Revoke permit button (steward only)
 // ---------------------------------------------------------------------------
+
+interface RevokePermitButtonProps {
+  permitId: string;
+  granteeHandle: string;
+}
+
+export function RevokePermitButton({ permitId, granteeHandle }: RevokePermitButtonProps) {
+  const [state, setState] = useState<"idle" | "confirm" | "loading">("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [revoked, setRevoked] = useState(false);
+  const router = useRouter();
+
+  async function handleRevoke() {
+    setState("loading");
+    setError(null);
+    try {
+      const res = await fetch("/api/game/stewardship/revoke-permit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permitId }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error?.message ?? "Revoke failed.");
+        setState("idle");
+        return;
+      }
+      setRevoked(true);
+      router.refresh();
+    } catch {
+      setError("Network error.");
+      setState("idle");
+    }
+  }
+
+  if (revoked) return <span className="text-xs text-zinc-600">Revoked</span>;
+
+  if (state === "confirm") {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-zinc-500">Revoke {granteeHandle}'s permit?</span>
+        <button
+          onClick={handleRevoke}
+          className="rounded bg-red-800/60 border border-red-700/40 px-2 py-0.5 text-xs text-red-300 hover:bg-red-700/60 transition-colors"
+        >
+          Confirm
+        </button>
+        <button
+          onClick={() => setState("idle")}
+          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+        >
+          Cancel
+        </button>
+        {error && <span className="text-xs text-red-400">{error}</span>}
+      </div>
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setState("confirm")}
+      disabled={state === "loading"}
+      className="rounded border border-red-900/50 px-2 py-0.5 text-xs text-red-600 hover:border-red-700 hover:text-red-400 transition-colors disabled:opacity-50"
+    >
+      Revoke
+    </button>
+  );
+}
+
 
 interface UnloadButtonProps {
   shipId: string;
