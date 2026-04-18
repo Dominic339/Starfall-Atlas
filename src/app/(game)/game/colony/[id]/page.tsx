@@ -40,7 +40,7 @@ import type {
   PlayerResearch,
   SurveyResult,
 } from "@/lib/types/game";
-import { CollectButton, ExtractButton } from "../../_components/ColonyActions";
+import { CollectButton, ExtractButton, RevokePermitButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import { runEngineTick } from "@/lib/game/engineTick";
 import type { BodyType } from "@/lib/types/enums";
@@ -90,7 +90,7 @@ export default async function ColonyPage({
   if (!colony) notFound();
 
   // Parallel data fetches
-  const [invRes, structuresRes, stationRes, researchRes, surveyRes, shipsRes] = await Promise.all([
+  const [invRes, structuresRes, stationRes, researchRes, surveyRes, shipsRes, stewardshipRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -114,6 +114,12 @@ export default async function ColonyPage({
       .select("id, name, cargo_cap, dispatch_mode, auto_state, auto_target_colony_id, pinned_colony_id")
       .eq("owner_id", player.id)
       .eq("current_system_id", colony.system_id),
+    // Body stewardship for this body
+    admin
+      .from("body_stewardship")
+      .select("steward_id, default_tax_rate_pct")
+      .eq("body_id", colony.body_id)
+      .maybeSingle(),
   ]);
 
   const colonyInventory = (invRes.data ?? []) as Pick<ResourceInventoryRow, "resource_type" | "quantity">[];
@@ -126,6 +132,57 @@ export default async function ColonyPage({
       (r) => r.research_id,
     ),
   );
+
+  // Stewardship + permit resolution
+  type StewardshipRow = { steward_id: string; default_tax_rate_pct: number };
+  type PermitRow = { id: string; steward_id: string; grantee_id: string; tax_rate_pct: number; status: string };
+
+  const stewardship = (stewardshipRes.data as StewardshipRow | null) ?? null;
+  const isPlayerSteward = stewardship?.steward_id === player.id;
+
+  let stewardHandle: string | null = null;
+  let activePermits: (PermitRow & { granteeHandle: string })[] = [];
+  let myPermit: PermitRow | null = null;
+
+  if (stewardship) {
+    if (isPlayerSteward) {
+      // Steward: fetch all active permits on this body so they can be shown/revoked
+      const { data: permitRows } = await admin
+        .from("colony_permits")
+        .select("id, steward_id, grantee_id, tax_rate_pct, status")
+        .eq("body_id", colony.body_id)
+        .eq("status", "active");
+
+      const granteeIds = (permitRows ?? []).map((p: PermitRow) => p.grantee_id);
+      let granteeHandleMap = new Map<string, string>();
+      if (granteeIds.length > 0) {
+        const { data: handleRows } = await admin
+          .from("players")
+          .select("id, handle")
+          .in("id", granteeIds);
+        granteeHandleMap = new Map(
+          (handleRows ?? []).map((h: { id: string; handle: string }) => [h.id, h.handle]),
+        );
+      }
+      activePermits = (permitRows ?? []).map((p: PermitRow) => ({
+        ...p,
+        granteeHandle: granteeHandleMap.get(p.grantee_id) ?? "Unknown",
+      }));
+    } else {
+      // Grantee: fetch steward handle + own permit
+      const [{ data: stewardPlayer }, { data: permitRow }] = await Promise.all([
+        admin.from("players").select("handle").eq("id", stewardship.steward_id).maybeSingle(),
+        admin
+          .from("colony_permits")
+          .select("id, steward_id, grantee_id, tax_rate_pct, status")
+          .eq("body_id", colony.body_id)
+          .eq("grantee_id", player.id)
+          .maybeSingle(),
+      ]);
+      stewardHandle = (stewardPlayer as { handle: string } | null)?.handle ?? null;
+      myPermit = (permitRow as PermitRow | null) ?? null;
+    }
+  }
 
   // Get station iron for "can afford" check
   let stationIron = 0;
@@ -279,6 +336,26 @@ export default async function ColonyPage({
               </span>
             )}
           </p>
+          {/* Colony health bar */}
+          {colony.status === "active" && (
+            <div className="mt-2 flex items-center gap-2 max-w-xs">
+              <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    health === "neglected"  ? "bg-red-600"
+                    : health === "struggling" ? "bg-amber-500"
+                    : "bg-emerald-600"
+                  }`}
+                  style={{ width: `${Math.round(healthMult * 100)}%` }}
+                />
+              </div>
+              <span className={`text-xs font-mono shrink-0 ${
+                health === "neglected" ? "text-red-500" : health === "struggling" ? "text-amber-500" : "text-emerald-600"
+              }`}>
+                {Math.round(healthMult * 100)}%
+              </span>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Link
@@ -500,6 +577,66 @@ export default async function ColonyPage({
               </p>
             )}
           </div>
+        </section>
+      )}
+
+      {/* Stewardship / Permit */}
+      {stewardship && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Stewardship
+          </h2>
+          {isPlayerSteward ? (
+            <div className="rounded-lg border border-yellow-900/40 bg-yellow-950/20 px-4 py-3 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-sm font-medium text-yellow-400">You are the steward</p>
+                <span className="text-xs text-zinc-600">
+                  Default tax: <span className="font-mono text-zinc-400">{stewardship.default_tax_rate_pct}%</span>
+                </span>
+              </div>
+              {activePermits.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-xs text-zinc-600 uppercase tracking-wider">Active permits</p>
+                  {activePermits.map((permit) => (
+                    <div key={permit.id} className="flex items-center justify-between gap-3 rounded border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+                      <div>
+                        <span className="text-sm text-zinc-300">{permit.granteeHandle}</span>
+                        <span className="ml-2 text-xs text-amber-600/80">{permit.tax_rate_pct}% tax</span>
+                      </div>
+                      <RevokePermitButton permitId={permit.id} granteeHandle={permit.granteeHandle} />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-zinc-600">
+                  No active permits — other players will be granted a permit automatically when they found here.
+                </p>
+              )}
+            </div>
+          ) : (
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">Steward:</span>
+                <span className="text-sm text-yellow-500">{stewardHandle ?? "Unknown"}</span>
+              </div>
+              {myPermit ? (
+                <p className="text-xs text-zinc-500">
+                  Permit{" "}
+                  <span className={myPermit.status === "active" ? "text-emerald-500" : "text-red-500"}>
+                    {myPermit.status}
+                  </span>
+                  {myPermit.status === "active" && myPermit.tax_rate_pct > 0 && (
+                    <span className="ml-1 text-amber-600">· {myPermit.tax_rate_pct}% extraction deducted to steward</span>
+                  )}
+                  {myPermit.status === "active" && myPermit.tax_rate_pct === 0 && (
+                    <span className="ml-1 text-zinc-600">· no extraction tax</span>
+                  )}
+                </p>
+              ) : (
+                <p className="text-xs text-zinc-600">No permit record found.</p>
+              )}
+            </div>
+          )}
         </section>
       )}
 
