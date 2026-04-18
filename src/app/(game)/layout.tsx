@@ -64,6 +64,12 @@ export default async function GameLayout({
               Station
             </Link>
             <Link
+              href="/game/market"
+              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              Market
+            </Link>
+            <Link
               href="/game/research"
               className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
             >
