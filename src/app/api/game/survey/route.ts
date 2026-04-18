@@ -31,7 +31,7 @@ import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
-import type { Ship, SystemDiscovery, SurveyResult } from "@/lib/types/game";
+import type { Ship, SystemDiscovery, SurveyResult, PlayerStation } from "@/lib/types/game";
 
 const SurveySchema = z.object({
   bodyId: z.string().min(1).max(128),
@@ -84,24 +84,32 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  // ── Ship presence check ───────────────────────────────────────────────────
-  // Either of the player's ships being present is sufficient.
-  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
-    await admin
-      .from("ships")
-      .select("current_system_id")
-      .eq("owner_id", player.id),
-  );
+  // ── Presence check (ship or station) ─────────────────────────────────────
+  // Either a ship or the player's station being present in the system suffices.
+  const [{ data: allShips }, { data: stationRow }] = await Promise.all([
+    listResult<Pick<Ship, "current_system_id">>(
+      await admin
+        .from("ships")
+        .select("current_system_id")
+        .eq("owner_id", player.id),
+    ),
+    maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
+      await admin
+        .from("player_stations")
+        .select("current_system_id")
+        .eq("owner_id", player.id)
+        .maybeSingle(),
+    ),
+  ]);
 
-  const shipPresent = (allShips ?? []).some(
-    (s) => s.current_system_id === systemId,
-  );
+  const shipPresent    = (allShips ?? []).some((s) => s.current_system_id === systemId);
+  const stationPresent = stationRow?.current_system_id === systemId;
 
-  if (!shipPresent) {
+  if (!shipPresent && !stationPresent) {
     return toErrorResponse(
       fail(
         "invalid_target",
-        "Your ship must be physically present in the system to survey it.",
+        "Your ship or station must be present in the system to survey it.",
       ).error,
     );
   }

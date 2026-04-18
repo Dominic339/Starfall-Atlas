@@ -422,12 +422,38 @@ export async function POST(request: NextRequest) {
   // ignoreDuplicates: true means a re-founding of a collapsed body does NOT
   // transfer stewardship — the original steward retains it.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  void (admin as any)
+  await (admin as any)
     .from("body_stewardship")
     .upsert(
       { body_id: bodyId, steward_id: player.id, system_id: systemId },
       { onConflict: "body_id", ignoreDuplicates: true },
     );
+
+  // ── Auto-create colony permit if this player is not the steward ────────────
+  // When a non-steward founds here, create a permit with the steward's default rate.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: stewardRow } = await (admin as any)
+    .from("body_stewardship")
+    .select("steward_id, default_tax_rate_pct")
+    .eq("body_id", bodyId)
+    .maybeSingle();
+
+  if (stewardRow && stewardRow.steward_id !== player.id) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    void (admin as any)
+      .from("colony_permits")
+      .upsert(
+        {
+          body_id:       bodyId,
+          steward_id:    stewardRow.steward_id,
+          grantee_id:    player.id,
+          tax_type:      "percentage",
+          tax_rate_pct:  stewardRow.default_tax_rate_pct ?? 0,
+          status:        "active",
+        },
+        { onConflict: "body_id,grantee_id" },
+      );
+  }
 
   // ── Emit world event (fire-and-forget) ────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

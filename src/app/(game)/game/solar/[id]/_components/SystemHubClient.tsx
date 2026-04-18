@@ -24,17 +24,19 @@ import type { SolarSceneSystemData, SolarSceneShipData, SolarSceneFleetData } fr
 // ---------------------------------------------------------------------------
 
 export interface BodyInfo {
-  type:            string;
-  size:            string;
-  bodyId:          string;   // "{systemId}:{index}"
-  colonyId:        string | null;
-  populationTier:  number | null;
-  isSurveyed:      boolean;
-  isColonisable:   boolean;  // server-computed
+  type:               string;
+  size:               string;
+  bodyId:             string;   // "{systemId}:{index}"
+  colonyId:           string | null;
+  populationTier:     number | null;
+  isSurveyed:         boolean;
+  isColonisable:      boolean;  // server-computed
   /** Handle of whoever claimed stewardship of this body (null = unclaimed). */
-  stewardHandle:   string | null;
+  stewardHandle:      string | null;
   /** True if this player is the steward of this body. */
-  isPlayerSteward: boolean;
+  isPlayerSteward:    boolean;
+  /** Default permit tax rate (0–50%) set by the steward. */
+  defaultTaxRatePct:  number;
 }
 
 export interface OtherColonyInfo {
@@ -60,21 +62,25 @@ export interface FleetInfo {
 }
 
 export interface SystemHubClientProps {
-  systemId:           string;
-  system:             SolarSceneSystemData;
-  bodies:             BodyInfo[];           // parallel to system.bodies, richer data
-  ships:              ShipInfo[];
-  fleets:             FleetInfo[];
+  systemId:            string;
+  system:              SolarSceneSystemData;
+  bodies:              BodyInfo[];           // parallel to system.bodies, richer data
+  ships:               ShipInfo[];
+  fleets:              FleetInfo[];
   coloniesBodyIndices: number[];
-  stationHere:        boolean;
-  stationId:          string | null;
-  isDiscovered:       boolean;
-  canActOnBodies:     boolean;             // ship present + system accessible
-  isFirstColony:      boolean;
-  spectralClass:      string;
-  bodyCount:          number;
+  stationHere:         boolean;
+  stationId:           string | null;
+  isDiscovered:        boolean;
+  canActOnBodies:      boolean;             // ship present + system accessible (colony founding etc.)
+  /** Ship or station present + system accessible (survey, discover). */
+  canSurveyBodies:     boolean;
+  /** Ship or station present + not yet discovered + not Sol. */
+  canDiscover:         boolean;
+  isFirstColony:       boolean;
+  spectralClass:       string;
+  bodyCount:           number;
   /** Other players' colonies in this system (for world-state visibility). */
-  otherColonies:      OtherColonyInfo[];
+  otherColonies:       OtherColonyInfo[];
 }
 
 // ---------------------------------------------------------------------------
@@ -161,21 +167,29 @@ function PlanetPanel({
   bodyIndex,
   systemId,
   canActOnBodies,
+  canSurveyBodies,
   isFirstColony,
   onStartSupply,
   onClose,
 }: {
-  body:           BodyInfo;
-  bodyIndex:      number;
-  systemId:       string;
-  canActOnBodies: boolean;
-  isFirstColony:  boolean;
-  onStartSupply:  () => void;
-  onClose:        () => void;
+  body:            BodyInfo;
+  bodyIndex:       number;
+  systemId:        string;
+  canActOnBodies:  boolean;
+  canSurveyBodies: boolean;
+  isFirstColony:   boolean;
+  onStartSupply:   () => void;
+  onClose:         () => void;
 }) {
-  const survey = useApiAction();
-  const found  = useApiAction();
+  const survey  = useApiAction();
+  const found   = useApiAction();
   const collect = useApiAction();
+  const setTax  = useApiAction();
+
+  // Inline tax-rate editor state (steward only)
+  const [taxInput,    setTaxInput]    = useState<number>(body.defaultTaxRatePct);
+  // Confirm-before-found state (when founding on a steward's body with tax > 0)
+  const [pendingFound, setPendingFound] = useState(false);
 
   const dotColor = BODY_COLORS[body.type] ?? "#9ca3af";
   const label    = bodyLabel(body.type);
@@ -222,18 +236,65 @@ function PlanetPanel({
           </div>
         )}
 
+        {/* Steward info */}
+        {body.stewardHandle && (
+          body.isPlayerSteward ? (
+            /* Steward: tax rate editor */
+            <div className="rounded border border-yellow-800/40 bg-yellow-950/20 px-3 py-2 space-y-2">
+              <p className="text-xs font-medium text-yellow-500">You are the steward</p>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-zinc-500 shrink-0">Permit tax:</label>
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={taxInput}
+                  onChange={(e) => setTaxInput(Math.max(0, Math.min(50, Number(e.target.value))))}
+                  className="w-16 rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 text-right"
+                />
+                <span className="text-xs text-zinc-600">%</span>
+                <button
+                  onClick={() => setTax.run(
+                    "/api/game/stewardship/set-tax",
+                    { bodyId: body.bodyId, taxRatePct: taxInput },
+                    "Tax rate saved.",
+                  )}
+                  disabled={setTax.loading || taxInput === body.defaultTaxRatePct}
+                  className="rounded bg-yellow-800/50 border border-yellow-700/40 px-2 py-0.5 text-xs text-yellow-300 hover:bg-yellow-700/50 transition-colors disabled:opacity-40"
+                >
+                  {setTax.loading ? "Saving…" : "Save"}
+                </button>
+              </div>
+              {setTax.error   && <p className="text-xs text-red-400">{setTax.error}</p>}
+              {setTax.success && <p className="text-xs text-yellow-400">{setTax.success}</p>}
+            </div>
+          ) : (
+            /* Non-steward: show steward + rate info */
+            <div className="rounded border border-zinc-800 bg-zinc-900/50 px-3 py-2">
+              <p className="text-xs text-zinc-500">
+                Steward: <span className="text-yellow-600">{body.stewardHandle}</span>
+              </p>
+              {body.defaultTaxRatePct > 0 && (
+                <p className="text-xs text-amber-600/80 mt-0.5">
+                  Permit tax: {body.defaultTaxRatePct}% of extraction
+                </p>
+              )}
+            </div>
+          )
+        )}
+
         {/* Survey */}
         {body.isSurveyed ? (
           <div className="flex items-center gap-2 text-xs text-teal-600">
             <span>✓</span><span>Surveyed</span>
           </div>
-        ) : canActOnBodies ? (
+        ) : canSurveyBodies ? (
           <div>
             <button
               onClick={() => survey.run(
                 "/api/game/survey",
                 { bodyId: body.bodyId },
-                "Survey dispatched!",
+                "Survey complete!",
               )}
               disabled={survey.loading}
               className="w-full rounded bg-teal-800/60 border border-teal-700/50 px-3 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-700/60 transition-colors disabled:opacity-50"
@@ -244,25 +305,58 @@ function PlanetPanel({
             {survey.success && <p className="mt-1 text-xs text-teal-400">{survey.success}</p>}
           </div>
         ) : (
-          <p className="text-xs text-zinc-700">Ship must be present to survey</p>
+          <p className="text-xs text-zinc-700">Ship or station must be present to survey</p>
         )}
 
         {/* Found colony */}
         {!body.colonyId && body.isColonisable && canActOnBodies && (
           <div>
-            <button
-              onClick={() => found.run(
-                "/api/game/colony/found",
-                { bodyId: body.bodyId },
-                "Colony founded!",
-              )}
-              disabled={found.loading}
-              className="w-full rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50"
-            >
-              {found.loading ? "Founding…" : "Found Colony"}
-            </button>
-            {isFirstColony && (
-              <p className="mt-1 text-xs text-zinc-600">First colony is free.</p>
+            {/* Permit tax confirmation for non-steward bodies with a tax rate */}
+            {pendingFound ? (
+              <div className="rounded border border-amber-800/50 bg-amber-950/30 px-3 py-2 space-y-2">
+                <p className="text-xs text-amber-300">
+                  {body.stewardHandle} has set a {body.defaultTaxRatePct}% extraction tax on this body.
+                  A permit will be created automatically.
+                </p>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setPendingFound(false);
+                      found.run("/api/game/colony/found", { bodyId: body.bodyId }, "Colony founded!");
+                    }}
+                    disabled={found.loading}
+                    className="flex-1 rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50"
+                  >
+                    Confirm →
+                  </button>
+                  <button
+                    onClick={() => setPendingFound(false)}
+                    className="rounded border border-zinc-700 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <button
+                  onClick={() => {
+                    const needsConfirm = !body.isPlayerSteward && body.stewardHandle && body.defaultTaxRatePct > 0;
+                    if (needsConfirm) {
+                      setPendingFound(true);
+                    } else {
+                      found.run("/api/game/colony/found", { bodyId: body.bodyId }, "Colony founded!");
+                    }
+                  }}
+                  disabled={found.loading}
+                  className="w-full rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50"
+                >
+                  {found.loading ? "Founding…" : "Found Colony"}
+                </button>
+                {isFirstColony && (
+                  <p className="mt-1 text-xs text-zinc-600">First colony is free.</p>
+                )}
+              </>
             )}
             {found.error   && <p className="mt-1 text-xs text-red-400">{found.error}</p>}
             {found.success && <p className="mt-1 text-xs text-emerald-400">{found.success}</p>}
@@ -425,6 +519,7 @@ function SystemOverviewPanel({
   fleets,
   stationHere,
   isDiscovered,
+  canDiscover,
   spectralClass,
   bodyCount,
   onSelectBody,
@@ -433,21 +528,23 @@ function SystemOverviewPanel({
   onShipDragStart,
   otherColonies,
 }: {
-  systemId:      string;
-  system:        SolarSceneSystemData;
-  bodies:        BodyInfo[];
-  ships:         ShipInfo[];
-  fleets:        FleetInfo[];
-  stationHere:   boolean;
-  isDiscovered:  boolean;
-  spectralClass: string;
-  bodyCount:     number;
-  onSelectBody:  (idx: number) => void;
-  onSelectShip:  (id: string) => void;
-  draggingShipId: string | null;
+  systemId:        string;
+  system:          SolarSceneSystemData;
+  bodies:          BodyInfo[];
+  ships:           ShipInfo[];
+  fleets:          FleetInfo[];
+  stationHere:     boolean;
+  isDiscovered:    boolean;
+  canDiscover:     boolean;
+  spectralClass:   string;
+  bodyCount:       number;
+  onSelectBody:    (idx: number) => void;
+  onSelectShip:    (id: string) => void;
+  draggingShipId:  string | null;
   onShipDragStart: (shipId: string) => void;
-  otherColonies: OtherColonyInfo[];
+  otherColonies:   OtherColonyInfo[];
 }) {
+  const discover = useApiAction();
   // Map bodyIndex → other-colony info for quick lookup
   const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
@@ -464,6 +561,28 @@ function SystemOverviewPanel({
           {isDiscovered && " · Discovered"}
         </p>
       </div>
+
+      {/* Discover system */}
+      {canDiscover && (
+        <div className="border-b border-zinc-800/50 px-4 py-2">
+          {discover.success ? (
+            <p className="text-xs text-emerald-500">{discover.success}</p>
+          ) : (
+            <button
+              onClick={() => discover.run(
+                "/api/game/discover",
+                { systemId },
+                "System discovered!",
+              )}
+              disabled={discover.loading}
+              className="w-full rounded bg-emerald-800/50 border border-emerald-700/40 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/50 transition-colors disabled:opacity-50"
+            >
+              {discover.loading ? "Discovering…" : "Discover this system →"}
+            </button>
+          )}
+          {discover.error && <p className="mt-1 text-xs text-red-400">{discover.error}</p>}
+        </div>
+      )}
 
       {/* Station */}
       {stationHere && (
@@ -617,8 +736,8 @@ function SystemOverviewPanel({
 
 export function SystemHubClient({
   systemId, system, bodies, ships, fleets, coloniesBodyIndices,
-  stationHere, stationId, isDiscovered, canActOnBodies, isFirstColony,
-  spectralClass, bodyCount, otherColonies,
+  stationHere, stationId, isDiscovered, canActOnBodies, canSurveyBodies,
+  canDiscover, isFirstColony, spectralClass, bodyCount, otherColonies,
 }: SystemHubClientProps) {
   const router = useRouter();
 
@@ -839,6 +958,7 @@ export function SystemHubClient({
             bodyIndex={selectedBodyIdx}
             systemId={systemId}
             canActOnBodies={canActOnBodies}
+            canSurveyBodies={canSurveyBodies}
             isFirstColony={isFirstColony}
             onStartSupply={() => {
               setSupplySourceIdx(selectedBodyIdx);
@@ -875,6 +995,7 @@ export function SystemHubClient({
             fleets={fleets}
             stationHere={stationHere}
             isDiscovered={isDiscovered}
+            canDiscover={canDiscover}
             spectralClass={spectralClass}
             bodyCount={bodyCount}
             onSelectBody={setSelectedBodyIdx}
