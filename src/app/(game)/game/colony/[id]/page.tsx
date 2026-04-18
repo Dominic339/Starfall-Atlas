@@ -40,7 +40,7 @@ import type {
   PlayerResearch,
   SurveyResult,
 } from "@/lib/types/game";
-import { CollectButton, ExtractButton, RevokePermitButton } from "../../_components/ColonyActions";
+import { CollectButton, ExtractButton, RevokePermitButton, EuxBuyButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import { runEngineTick } from "@/lib/game/engineTick";
 import type { BodyType } from "@/lib/types/enums";
@@ -90,7 +90,8 @@ export default async function ColonyPage({
   if (!colony) notFound();
 
   // Parallel data fetches
-  const [invRes, structuresRes, stationRes, researchRes, surveyRes, shipsRes, stewardshipRes] = await Promise.all([
+  const euxSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const [invRes, structuresRes, stationRes, researchRes, surveyRes, shipsRes, stewardshipRes, euxUsageRes] = await Promise.all([
     admin
       .from("resource_inventory")
       .select("resource_type, quantity")
@@ -120,6 +121,13 @@ export default async function ColonyPage({
       .select("steward_id, default_tax_rate_pct")
       .eq("body_id", colony.body_id)
       .maybeSingle(),
+
+    // EUX purchases in last 24h (for daily limit display)
+    admin
+      .from("universal_exchange_purchases")
+      .select("quantity")
+      .eq("player_id", player.id)
+      .gte("purchased_at", euxSince),
   ]);
 
   const colonyInventory = (invRes.data ?? []) as Pick<ResourceInventoryRow, "resource_type" | "quantity">[];
@@ -183,6 +191,20 @@ export default async function ColonyPage({
       myPermit = (permitRow as PermitRow | null) ?? null;
     }
   }
+
+  // EUX daily usage
+  const euxDailyUsed = (euxUsageRes.data ?? []).reduce(
+    (sum: number, r: { quantity: number }) => sum + r.quantity,
+    0,
+  );
+  const euxOptions = (["iron", "carbon", "ice"] as const).map((rt) => {
+    const floor = BALANCE.emergencyExchange.floorPricePerUnit[rt] ?? 5;
+    const pricePerUnit = Math.ceil(
+      floor * BALANCE.emergencyExchange.markupMultiplier *
+      (1 + BALANCE.emergencyExchange.transactionFeePercent / 100),
+    );
+    return { resourceType: rt, pricePerUnit };
+  });
 
   // Get station iron for "can afford" check
   let stationIron = 0;
@@ -576,6 +598,43 @@ export default async function ColonyPage({
                 Habitat Module T{habitatTier}: upkeep −{Math.round(upkeepRedFrac * 100)}%
               </p>
             )}
+          </div>
+        </section>
+      )}
+
+      {/* Emergency Universal Exchange */}
+      {colony.status === "active" && (
+        <section>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
+            Emergency Supply
+          </h2>
+          <div className={`rounded-lg border px-4 py-3 ${
+            health !== "well_supplied"
+              ? "border-orange-900/50 bg-orange-950/20"
+              : "border-zinc-800 bg-zinc-900/50"
+          }`}>
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="text-xs text-zinc-500">
+                  Emergency Universal Exchange — instant delivery at {BALANCE.emergencyExchange.markupMultiplier}× markup
+                  {health !== "well_supplied" && (
+                    <span className="ml-1 text-orange-500">· colony needs supplies</span>
+                  )}
+                </p>
+                <p className="mt-0.5 text-xs text-zinc-700">
+                  {BALANCE.emergencyExchange.dailyLimitUnits} units/day · {BALANCE.emergencyExchange.transactionFeePercent}% fee · iron, carbon, ice only
+                </p>
+              </div>
+            </div>
+            <div className="mt-3">
+              <EuxBuyButton
+                colonyId={colony.id}
+                options={euxOptions}
+                dailyUsed={euxDailyUsed}
+                dailyLimit={BALANCE.emergencyExchange.dailyLimitUnits}
+                playerCredits={player.credits}
+              />
+            </div>
           </div>
         </section>
       )}
