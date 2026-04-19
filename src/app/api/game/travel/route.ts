@@ -29,6 +29,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { listResult, maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
+import { findActiveLane } from "@/lib/game/gateResolution";
 import { BALANCE } from "@/lib/config/balance";
 import type { Ship, TravelJob } from "@/lib/types/game";
 
@@ -142,18 +143,54 @@ export async function POST(request: NextRequest) {
     { x: destEntry.x, y: destEntry.y, z: destEntry.z },
   );
 
-  // Phase 4: direct travel within base range (no lane required).
-  // Relay stations and lanes extend this range in later phases.
+  // Phase 7: direct travel within base range; long-range via active lanes.
   const maxRangeLy = BALANCE.lanes.baseRangeLy;
+  let laneId: string | null = null;
+
   if (distanceLy > maxRangeLy) {
-    return toErrorResponse(
-      fail(
-        "lane_out_of_range",
-        `${destEntry.properName ?? destinationSystemId} is ${distanceLy.toFixed(2)} ly away. ` +
-          `Maximum direct travel range is ${maxRangeLy} ly. ` +
-          `Build relay stations to extend your reach.`,
-      ).error,
-    );
+    // Look for an active lane that connects these two systems and is accessible.
+    // Fetch player's alliance membership for access-level checks.
+    const { data: memberRow } = await admin
+      .from("alliance_members")
+      .select("alliance_id")
+      .eq("player_id", player.id)
+      .maybeSingle();
+    const playerAllianceId = (memberRow as { alliance_id: string } | null)?.alliance_id ?? null;
+
+    const lane = await findActiveLane(admin, fromSystemId, destinationSystemId, player.id, playerAllianceId);
+
+    if (!lane) {
+      return toErrorResponse(
+        fail(
+          "lane_out_of_range",
+          `${destEntry.properName ?? destinationSystemId} is ${distanceLy.toFixed(2)} ly away. ` +
+            `Maximum direct range is ${maxRangeLy} ly. ` +
+            `Build a hyperspace gate and lane to reach this system.`,
+        ).error,
+      );
+    }
+
+    if (lane.access_level === "private" && lane.owner_id !== player.id) {
+      return toErrorResponse(
+        fail("forbidden", "This lane is private. Only its owner may use it.").error,
+      );
+    }
+
+    if (lane.access_level === "alliance_only") {
+      const { data: memberRow2 } = await admin
+        .from("alliance_members")
+        .select("alliance_id")
+        .eq("player_id", player.id)
+        .maybeSingle();
+      const allianceId = (memberRow2 as { alliance_id: string } | null)?.alliance_id ?? null;
+      if (allianceId !== lane.alliance_id) {
+        return toErrorResponse(
+          fail("forbidden", "This lane is restricted to a specific alliance.").error,
+        );
+      }
+    }
+
+    laneId = lane.id;
   }
 
   // ── Create travel job ────────────────────────────────────────────────────
@@ -188,7 +225,7 @@ export async function POST(request: NextRequest) {
         player_id: player.id,
         from_system_id: fromSystemId,
         to_system_id: destinationSystemId,
-        lane_id: null,
+        lane_id: laneId,
         depart_at: now.toISOString(),
         arrive_at: arriveAt.toISOString(),
         transit_tax_paid: 0,

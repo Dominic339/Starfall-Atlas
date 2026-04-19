@@ -13,7 +13,7 @@
  * the right-sidebar panel are plain HTML/React rendered on top.
  */
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { SolarSceneWrapper } from "./SolarSceneWrapper";
@@ -61,6 +61,42 @@ export interface FleetInfo {
   status: string;
 }
 
+export interface GateInfo {
+  status: "none" | "inactive" | "active" | "neutral";
+  completeAt: string | null;
+}
+
+export interface LaneInfo {
+  id:               string;
+  remoteSystemId:   string;
+  remoteSystemName: string;
+  ownerId:          string;
+  isOwner:          boolean;
+  accessLevel:      string;
+  transitTaxRate:   number;
+}
+
+export interface GovernanceInfo {
+  stewardId:            string | null;
+  stewardHandle:        string | null;
+  /** True = steward holds governance; false = majority controller overrides. */
+  stewardHasGovernance: boolean;
+  majorityControl: {
+    controllerId:     string;
+    controllerHandle: string;
+    allianceId:       string | null;
+    allianceName:     string | null;
+    influenceShare:   number;
+    isConfirmed:      boolean;
+    controlSince:     string;
+  } | null;
+  playerInfluence:    number;
+  totalInfluence:     number;
+  playerColonyCount:  number;
+  /** True when the player (or their alliance) currently meets the threshold. */
+  canClaimMajority:   boolean;
+}
+
 export interface SystemHubClientProps {
   systemId:            string;
   system:              SolarSceneSystemData;
@@ -81,6 +117,14 @@ export interface SystemHubClientProps {
   bodyCount:           number;
   /** Other players' colonies in this system (for world-state visibility). */
   otherColonies:       OtherColonyInfo[];
+  /** True when this player is the system governance holder. */
+  isSystemGovernor:    boolean;
+  /** Gate status for this system. */
+  gateInfo:            GateInfo;
+  /** Active hyperspace lanes connected to this system. */
+  activeLanes:         LaneInfo[];
+  /** Governance and influence state for this system. */
+  governanceInfo:      GovernanceInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -508,6 +552,74 @@ function ShipPanel({
 }
 
 // ---------------------------------------------------------------------------
+// Gate/lane constants (must match BALANCE on server side)
+// ---------------------------------------------------------------------------
+
+const GATE_BUILD_HOURS   = 24;
+const GATE_RECLAIM_HOURS = 6;
+const LANE_BUILD_HOURS   = 12;
+
+// ---------------------------------------------------------------------------
+// Gate timer — shows "Xh Ym left" for a construction job
+// ---------------------------------------------------------------------------
+
+function GateTimer({ completeAt }: { completeAt: string }) {
+  const [label, setLabel] = useState("");
+
+  useEffect(() => {
+    function update() {
+      const msLeft = new Date(completeAt).getTime() - Date.now();
+      if (msLeft <= 0) { setLabel("complete"); return; }
+      const h = Math.floor(msLeft / 3_600_000);
+      const m = Math.floor((msLeft % 3_600_000) / 60_000);
+      setLabel(h > 0 ? `${h}h ${m}m left` : `${m}m left`);
+    }
+    update();
+    const id = setInterval(update, 30_000);
+    return () => clearInterval(id);
+  }, [completeAt]);
+
+  return <span>{label}</span>;
+}
+
+// ---------------------------------------------------------------------------
+// Lane build mini-panel (rendered inside SystemOverviewPanel when gate active)
+// ---------------------------------------------------------------------------
+
+function LaneBuildPanel({ systemId }: { systemId: string }) {
+  const [toSystemId, setToSystemId] = useState("");
+  const lane = useApiAction();
+
+  return (
+    <div className="pt-1 space-y-1">
+      <p className="text-xs text-zinc-600">Build lane to system:</p>
+      <div className="flex gap-1">
+        <input
+          type="text"
+          value={toSystemId}
+          onChange={e => setToSystemId(e.target.value.trim())}
+          placeholder="system ID (e.g. hyg:70890)"
+          className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 placeholder-zinc-700 focus:border-violet-600 focus:outline-none"
+        />
+        <button
+          onClick={() => lane.run(
+            "/api/game/lane/build",
+            { fromSystemId: systemId, toSystemId },
+            "Lane construction started!",
+          )}
+          disabled={lane.loading || !toSystemId}
+          className="rounded bg-violet-800/50 border border-violet-700/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+        >
+          {lane.loading ? "…" : `(${LANE_BUILD_HOURS}h)`}
+        </button>
+      </div>
+      {lane.error   && <p className="text-xs text-red-400">{lane.error}</p>}
+      {lane.success && <p className="text-xs text-violet-400">{lane.success}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // System overview panel (default sidebar content)
 // ---------------------------------------------------------------------------
 
@@ -527,24 +639,35 @@ function SystemOverviewPanel({
   draggingShipId,
   onShipDragStart,
   otherColonies,
+  isSystemGovernor,
+  gateInfo,
+  activeLanes,
+  governanceInfo,
 }: {
-  systemId:        string;
-  system:          SolarSceneSystemData;
-  bodies:          BodyInfo[];
-  ships:           ShipInfo[];
-  fleets:          FleetInfo[];
-  stationHere:     boolean;
-  isDiscovered:    boolean;
-  canDiscover:     boolean;
-  spectralClass:   string;
-  bodyCount:       number;
-  onSelectBody:    (idx: number) => void;
-  onSelectShip:    (id: string) => void;
-  draggingShipId:  string | null;
-  onShipDragStart: (shipId: string) => void;
-  otherColonies:   OtherColonyInfo[];
+  systemId:         string;
+  system:           SolarSceneSystemData;
+  bodies:           BodyInfo[];
+  ships:            ShipInfo[];
+  fleets:           FleetInfo[];
+  stationHere:      boolean;
+  isDiscovered:     boolean;
+  canDiscover:      boolean;
+  spectralClass:    string;
+  bodyCount:        number;
+  onSelectBody:     (idx: number) => void;
+  onSelectShip:     (id: string) => void;
+  draggingShipId:   string | null;
+  onShipDragStart:  (shipId: string) => void;
+  otherColonies:    OtherColonyInfo[];
+  isSystemGovernor: boolean;
+  gateInfo:         GateInfo;
+  activeLanes:      LaneInfo[];
+  governanceInfo:   GovernanceInfo;
 }) {
   const discover = useApiAction();
+  const gate     = useApiAction();
+  const govClaim = useApiAction();
+  const govContest = useApiAction();
   // Map bodyIndex → other-colony info for quick lookup
   const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
@@ -581,6 +704,107 @@ function SystemOverviewPanel({
             </button>
           )}
           {discover.error && <p className="mt-1 text-xs text-red-400">{discover.error}</p>}
+        </div>
+      )}
+
+      {/* Gate & Lanes */}
+      {isDiscovered && (
+        <div className="border-b border-zinc-800/50 px-4 py-2 space-y-1.5">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">Gate</p>
+
+          {gateInfo.status === "none" && isSystemGovernor && (
+            <div>
+              <button
+                onClick={() => gate.run(
+                  "/api/game/gate/build",
+                  { systemId },
+                  "Gate construction started!",
+                )}
+                disabled={gate.loading}
+                className="w-full rounded bg-violet-800/50 border border-violet-700/40 px-3 py-1 text-xs font-medium text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+              >
+                {gate.loading ? "Starting…" : `Build Gate (${GATE_BUILD_HOURS}h)`}
+              </button>
+              {gate.error   && <p className="mt-1 text-xs text-red-400">{gate.error}</p>}
+              {gate.success && <p className="mt-1 text-xs text-violet-400">{gate.success}</p>}
+            </div>
+          )}
+
+          {gateInfo.status === "none" && !isSystemGovernor && (
+            <p className="text-xs text-zinc-700">No gate — system steward can build one</p>
+          )}
+
+          {gateInfo.status === "inactive" && (
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-yellow-600 animate-pulse" />
+              <span className="text-xs text-yellow-600">
+                Under construction
+                {gateInfo.completeAt && (
+                  <> — <GateTimer completeAt={gateInfo.completeAt} /></>
+                )}
+              </span>
+              {isSystemGovernor && (
+                <button
+                  onClick={() => gate.run("/api/game/gate/build", { systemId }, "Gate activated!")}
+                  disabled={gate.loading}
+                  className="ml-auto text-xs text-violet-500 hover:text-violet-300"
+                >
+                  Check
+                </button>
+              )}
+            </div>
+          )}
+
+          {gateInfo.status === "active" && (
+            <div className="flex items-center gap-2">
+              <span className="h-1.5 w-1.5 rounded-full bg-violet-400" />
+              <span className="text-xs text-violet-400 font-medium">Gate Active</span>
+            </div>
+          )}
+
+          {gateInfo.status === "neutral" && (
+            <div className="space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="h-1.5 w-1.5 rounded-full bg-zinc-500" />
+                <span className="text-xs text-zinc-500">Gate Neutral (unclaimed)</span>
+              </div>
+              {isSystemGovernor && (
+                <button
+                  onClick={() => gate.run("/api/game/gate/reclaim", { systemId }, "Reclaim started!")}
+                  disabled={gate.loading}
+                  className="w-full rounded border border-violet-800/50 px-3 py-1 text-xs text-violet-500 hover:border-violet-600 hover:text-violet-300 transition-colors disabled:opacity-50"
+                >
+                  {gate.loading ? "Starting…" : `Reclaim Gate (${GATE_RECLAIM_HOURS}h)`}
+                </button>
+              )}
+              {gate.error   && <p className="text-xs text-red-400">{gate.error}</p>}
+              {gate.success && <p className="text-xs text-violet-400">{gate.success}</p>}
+            </div>
+          )}
+
+          {/* Lane builder — only when this system has an active gate owned by player */}
+          {gateInfo.status === "active" && isSystemGovernor && (
+            <LaneBuildPanel systemId={systemId} />
+          )}
+
+          {/* Active lanes */}
+          {activeLanes.length > 0 && (
+            <div className="pt-1 space-y-1">
+              <p className="text-xs text-zinc-700">Lanes:</p>
+              {activeLanes.map(lane => (
+                <div key={lane.id} className="flex items-center gap-1.5 text-xs">
+                  <span className="h-px w-3 bg-violet-600" />
+                  <span className="text-zinc-400 truncate flex-1">{lane.remoteSystemName}</span>
+                  {lane.accessLevel !== "public" && (
+                    <span className="text-zinc-700 capitalize">{lane.accessLevel.replace("_", " ")}</span>
+                  )}
+                  {lane.transitTaxRate > 0 && (
+                    <span className="text-amber-700">{lane.transitTaxRate}%</span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
@@ -711,6 +935,104 @@ function SystemOverviewPanel({
         </div>
       )}
 
+      {/* System Governance */}
+      {isDiscovered && (
+        <div className="border-t border-zinc-800/50 px-4 py-3 space-y-2">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">System Governance</p>
+
+          {/* Steward row */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Steward</span>
+            <span className="text-xs text-amber-400 truncate max-w-[140px]" title={governanceInfo.stewardHandle ?? "None"}>
+              {governanceInfo.stewardHandle ?? "Unclaimed"}
+              {governanceInfo.stewardHasGovernance && (
+                <span className="ml-1 text-zinc-600">(governs)</span>
+              )}
+            </span>
+          </div>
+
+          {/* Majority controller row */}
+          {governanceInfo.majorityControl && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500">Majority</span>
+              <span className={`text-xs truncate max-w-[140px] ${governanceInfo.majorityControl.isConfirmed ? "text-violet-400" : "text-orange-400"}`}>
+                {governanceInfo.majorityControl.allianceName
+                  ? `[${governanceInfo.majorityControl.allianceName}]`
+                  : governanceInfo.majorityControl.controllerHandle}
+                {!governanceInfo.majorityControl.isConfirmed && (
+                  <span className="ml-1 text-orange-600">(contested)</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {/* Player influence bar */}
+          {governanceInfo.totalInfluence > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-zinc-600">Your influence</span>
+                <span className="text-xs text-zinc-400">
+                  {governanceInfo.playerInfluence} / {governanceInfo.totalInfluence} pts
+                  {" "}({((governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-violet-600 transition-all"
+                  style={{
+                    width: `${Math.min(100, (governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Claim Majority button */}
+          {governanceInfo.canClaimMajority && !governanceInfo.majorityControl?.isConfirmed && (
+            <div>
+              {govClaim.success ? (
+                <p className="text-xs text-emerald-500">{govClaim.success}</p>
+              ) : (
+                <button
+                  onClick={() => govClaim.run(
+                    "/api/game/governance/claim-majority",
+                    { systemId },
+                    "Majority control claimed!",
+                  )}
+                  disabled={govClaim.loading}
+                  className="w-full rounded bg-violet-800/50 border border-violet-700/40 px-3 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+                >
+                  {govClaim.loading ? "Claiming…" : "Claim Majority Control →"}
+                </button>
+              )}
+              {govClaim.error && <p className="mt-1 text-xs text-red-400">{govClaim.error}</p>}
+            </div>
+          )}
+
+          {/* Contest button — shown when majority control exists and player is steward or wants a re-check */}
+          {governanceInfo.majorityControl && governanceInfo.majorityControl.isConfirmed && (
+            <div>
+              {govContest.success ? (
+                <p className="text-xs text-zinc-400">{govContest.success}</p>
+              ) : (
+                <button
+                  onClick={() => govContest.run(
+                    "/api/game/governance/contest",
+                    { systemId },
+                    "Influence re-checked.",
+                  )}
+                  disabled={govContest.loading}
+                  className="w-full rounded bg-zinc-800/50 border border-zinc-700/40 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/30 transition-colors disabled:opacity-50"
+                >
+                  {govContest.loading ? "Checking…" : "Contest majority control"}
+                </button>
+              )}
+              {govContest.error && <p className="mt-1 text-xs text-red-400">{govContest.error}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom links */}
       <div className="border-t border-zinc-800 p-3 space-y-1.5">
         <Link
@@ -738,6 +1060,7 @@ export function SystemHubClient({
   systemId, system, bodies, ships, fleets, coloniesBodyIndices,
   stationHere, stationId, isDiscovered, canActOnBodies, canSurveyBodies,
   canDiscover, isFirstColony, spectralClass, bodyCount, otherColonies,
+  isSystemGovernor, gateInfo, activeLanes, governanceInfo,
 }: SystemHubClientProps) {
   const router = useRouter();
 
@@ -1003,6 +1326,10 @@ export function SystemHubClient({
             draggingShipId={draggingShipId}
             onShipDragStart={handleShipDragStart}
             otherColonies={otherColonies}
+            isSystemGovernor={isSystemGovernor}
+            gateInfo={gateInfo}
+            activeLanes={activeLanes}
+            governanceInfo={governanceInfo}
           />
         )}
       </div>

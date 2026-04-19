@@ -53,13 +53,13 @@ export default async function CommandPage() {
   // Parallel fetches for summary data
   const [shipsRes, coloniesRes, stationRes, pendingJobsRes] = await Promise.all([
     admin.from("ships").select("id, name, current_system_id, ship_state").eq("owner_id", player.id),
-    admin.from("colonies").select("id, system_id, body_id, status, population_tier, upkeep_missed_periods").eq("owner_id", player.id),
+    admin.from("colonies").select("id, system_id, body_id, status, population_tier, upkeep_missed_periods, abandoned_at").eq("owner_id", player.id),
     admin.from("player_stations").select("*").eq("owner_id", player.id).maybeSingle(),
     admin.from("travel_jobs").select("id").eq("player_id", player.id).eq("status", "pending"),
   ]);
 
   const ships = listResult<Pick<Ship, "id" | "name" | "current_system_id" | "ship_state">>(shipsRes).data ?? [];
-  const colonies = listResult<Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier" | "upkeep_missed_periods">>(coloniesRes).data ?? [];
+  const colonies = listResult<Pick<Colony, "id" | "system_id" | "body_id" | "status" | "population_tier" | "upkeep_missed_periods" | "abandoned_at">>(coloniesRes).data ?? [];
   const station = maybeSingleResult<PlayerStation>(stationRes).data ?? null;
   const pendingTravelCount = (listResult<Pick<TravelJob, "id">>(pendingJobsRes).data ?? []).length;
 
@@ -80,7 +80,9 @@ export default async function CommandPage() {
   const inTransitShips = ships.filter((s) => s.current_system_id === null);
   const activeColonies = colonies.filter((c) => c.status === "active");
   const neglectedColonies = activeColonies.filter((c) => c.upkeep_missed_periods >= 3);
+  const abandonedColonies = colonies.filter((c) => c.status === "abandoned");
   const showDev = player.is_dev || process.env.NODE_ENV !== "production";
+  const windowMs = BALANCE.inactivity.resolutionWindowDays * 24 * 3_600_000;
 
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-8">
@@ -101,6 +103,46 @@ export default async function CommandPage() {
           </p>
         </div>
       </div>
+
+      {/* Abandoned colony alert */}
+      {abandonedColonies.length > 0 && (
+        <section className="rounded-lg border border-amber-700 bg-amber-950/30 px-4 py-3 space-y-2">
+          <p className="text-sm font-semibold text-amber-400">
+            ⚠ {abandonedColonies.length} abandoned {abandonedColonies.length === 1 ? "colony" : "colonies"} — act now to prevent collapse
+          </p>
+          <div className="space-y-1.5">
+            {abandonedColonies.map((colony) => {
+              const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
+              const abandonedAt = colony.abandoned_at ? new Date(colony.abandoned_at) : requestTime;
+              const collapseAt = new Date(abandonedAt.getTime() + windowMs);
+              const msLeft = collapseAt.getTime() - requestTime.getTime();
+              const daysLeft = Math.max(0, Math.floor(msLeft / 86_400_000));
+              const hoursLeft = Math.max(0, Math.floor((msLeft % 86_400_000) / 3_600_000));
+              return (
+                <div key={colony.id} className="flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-xs text-zinc-300">
+                      {systemDisplayName(colony.system_id)}
+                      <span className="ml-1 text-zinc-600">· Body {bodyIdx} · T{colony.population_tier}</span>
+                    </span>
+                    <span className="ml-2 text-xs text-amber-500">
+                      {msLeft > 0
+                        ? `collapses in ${daysLeft}d ${hoursLeft}h`
+                        : "collapse imminent"}
+                    </span>
+                  </div>
+                  <Link
+                    href={`/game/colony/${colony.id}`}
+                    className="shrink-0 rounded border border-amber-700/60 bg-amber-900/30 px-2.5 py-0.5 text-xs font-medium text-amber-300 hover:bg-amber-800/40 transition-colors"
+                  >
+                    Reactivate →
+                  </Link>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {/* Dev controls — shown first so dev users see them immediately */}
       {showDev && (
@@ -245,11 +287,15 @@ export default async function CommandPage() {
                 <div
                   key={colony.id}
                   className={`flex items-center justify-between rounded-lg border px-4 py-2.5 ${
-                    isNeglected
-                      ? "border-red-900 bg-red-950/20"
-                      : isStruggling
-                        ? "border-amber-900 bg-amber-950/10"
-                        : "border-zinc-800 bg-zinc-900/70"
+                    colony.status === "abandoned"
+                      ? "border-amber-800 bg-amber-950/20"
+                      : colony.status === "collapsed"
+                        ? "border-zinc-700 bg-zinc-900/30 opacity-60"
+                        : isNeglected
+                          ? "border-red-900 bg-red-950/20"
+                          : isStruggling
+                            ? "border-amber-900 bg-amber-950/10"
+                            : "border-zinc-800 bg-zinc-900/70"
                   }`}
                 >
                   <div>
@@ -267,7 +313,21 @@ export default async function CommandPage() {
                     {isStruggling && (
                       <p className="text-xs text-amber-400">Low supplies</p>
                     )}
-                    {colony.status !== "active" && (
+                    {colony.status === "abandoned" && (() => {
+                      const abandonedAt = colony.abandoned_at ? new Date(colony.abandoned_at) : requestTime;
+                      const msLeft = abandonedAt.getTime() + windowMs - requestTime.getTime();
+                      const daysLeft = Math.max(0, Math.floor(msLeft / 86_400_000));
+                      const hoursLeft = Math.max(0, Math.floor((msLeft % 86_400_000) / 3_600_000));
+                      return (
+                        <p className="text-xs text-amber-500">
+                          Abandoned — {msLeft > 0 ? `collapses in ${daysLeft}d ${hoursLeft}h` : "collapse imminent"}
+                        </p>
+                      );
+                    })()}
+                    {colony.status === "collapsed" && (
+                      <p className="text-xs text-zinc-600">Collapsed</p>
+                    )}
+                    {colony.status !== "active" && colony.status !== "abandoned" && colony.status !== "collapsed" && (
                       <p className="text-xs text-zinc-600 capitalize">{colony.status}</p>
                     )}
                   </div>
@@ -289,12 +349,14 @@ export default async function CommandPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Navigate
         </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {[
             { href: "/game/map", label: "Galaxy Map", color: "text-indigo-400 border-indigo-800/40" },
             { href: "/game/station", label: "Station", color: "text-amber-400 border-amber-800/40" },
             { href: "/game/research", label: "Research", color: "text-teal-400 border-teal-800/40" },
             { href: "/game/alliance", label: "Alliance", color: "text-violet-400 border-violet-800/40" },
+            { href: "/game/auctions", label: "Auctions", color: "text-rose-400 border-rose-800/40" },
+            { href: "/game/market", label: "Market", color: "text-orange-400 border-orange-800/40" },
           ].map(({ href, label, color }) => (
             <Link
               key={href}

@@ -34,6 +34,8 @@ export type GameErrorCode =
   | "colony_limit_reached"
   | "invalid_target" // body is not suitable for the action
   | "lane_out_of_range"
+  | "threshold_not_met" // majority threshold not reached
+  | "already_auctioned" // item already has an active auction
   | "internal_error"
   | "not_implemented"; // placeholder for unbuilt features
 

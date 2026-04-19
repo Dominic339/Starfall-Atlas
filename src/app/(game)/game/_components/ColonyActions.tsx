@@ -222,6 +222,124 @@ export function RevokePermitButton({ permitId, granteeHandle }: RevokePermitButt
 }
 
 
+// ---------------------------------------------------------------------------
+// Emergency Universal Exchange buy button
+// ---------------------------------------------------------------------------
+
+interface EuxResourceOption {
+  resourceType: "iron" | "carbon" | "ice";
+  pricePerUnit: number;
+}
+
+interface EuxBuyButtonProps {
+  colonyId: string;
+  options: EuxResourceOption[];
+  dailyUsed: number;
+  dailyLimit: number;
+  playerCredits: number;
+}
+
+export function EuxBuyButton({
+  colonyId,
+  options,
+  dailyUsed,
+  dailyLimit,
+  playerCredits,
+}: EuxBuyButtonProps) {
+  const [resourceType, setResourceType] = useState<"iron" | "carbon" | "ice">(
+    options[0]?.resourceType ?? "iron",
+  );
+  const [qty, setQty] = useState(1);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [result, setResult] = useState<{ qty: number; cost: number } | null>(null);
+  const router = useRouter();
+
+  const selected = options.find((o) => o.resourceType === resourceType);
+  const pricePerUnit = selected?.pricePerUnit ?? 0;
+  const totalCost = qty * pricePerUnit;
+  const remaining = dailyLimit - dailyUsed;
+  const canBuy = playerCredits >= totalCost && remaining >= qty;
+
+  if (result) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="text-xs text-emerald-400">
+          Delivered {result.qty} {resourceType} (−{result.cost} ¢)
+        </span>
+        <button
+          onClick={() => setResult(null)}
+          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+        >
+          Buy more
+        </button>
+      </div>
+    );
+  }
+
+  async function handleBuy() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/game/eux/buy", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colonyId, resourceType, quantity: qty }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error?.message ?? "Purchase failed.");
+      } else {
+        setResult({ qty, cost: json.data.creditsSpent });
+        router.refresh();
+      }
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center gap-2 flex-wrap">
+        <select
+          value={resourceType}
+          onChange={(e) => setResourceType(e.target.value as "iron" | "carbon" | "ice")}
+          className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 focus:border-orange-600 focus:outline-none"
+        >
+          {options.map((o) => (
+            <option key={o.resourceType} value={o.resourceType}>
+              {o.resourceType} ({o.pricePerUnit} ¢/u)
+            </option>
+          ))}
+        </select>
+        <input
+          type="number"
+          min={1}
+          max={Math.min(remaining, 500)}
+          value={qty}
+          onChange={(e) => setQty(Math.max(1, Math.min(remaining, Number(e.target.value) || 1)))}
+          className="w-16 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-center text-xs text-zinc-200 focus:border-orange-600 focus:outline-none"
+        />
+        <button
+          onClick={handleBuy}
+          disabled={loading || !canBuy}
+          title={!canBuy ? (remaining < qty ? "Daily limit reached" : `Need ${totalCost} ¢`) : undefined}
+          className="rounded border border-orange-800/60 bg-orange-950/40 px-3 py-1 text-xs font-medium text-orange-300 hover:bg-orange-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+        >
+          {loading ? "Buying…" : `Buy (${totalCost.toLocaleString()} ¢)`}
+        </button>
+      </div>
+      <p className="text-xs text-zinc-700">
+        Daily limit: {dailyUsed}/{dailyLimit} used
+        {remaining === 0 && <span className="ml-1 text-orange-600">· limit reached</span>}
+      </p>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
 interface UnloadButtonProps {
   shipId: string;
   /** Pre-formatted cargo summary, e.g. "5 iron, 3 carbon" */
@@ -286,6 +404,55 @@ export function UnloadButton({ shipId, summary }: UnloadButtonProps) {
         className="rounded bg-indigo-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
       >
         {loading ? "Unloading…" : `Unload to Station (${summary})`}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Reactivate abandoned colony button
+// ---------------------------------------------------------------------------
+
+export function ReactivateButton({ colonyId }: { colonyId: string }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone]       = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleReactivate() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/game/colony/reactivate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colonyId }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error?.message ?? "Reactivation failed.");
+      } else {
+        setDone(true);
+        router.refresh();
+      }
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (done) return <p className="text-xs text-emerald-500">Colony reactivated!</p>;
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleReactivate}
+        disabled={loading}
+        className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+      >
+        {loading ? "Reactivating…" : "Reactivate Colony"}
       </button>
       {error && <p className="text-xs text-red-400">{error}</p>}
     </div>
