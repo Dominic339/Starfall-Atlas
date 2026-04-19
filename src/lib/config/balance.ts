@@ -176,6 +176,15 @@ export const BALANCE = {
 
     /** Minutes added to the auction timer when anti-snipe triggers */
     antiSnipeExtensionMinutes: 5,
+
+    /** Minimum auction duration in hours */
+    minDurationHours: 1,
+
+    /** Maximum auction duration in days */
+    maxDurationDays: 7,
+
+    /** Default auction duration in hours shown in the create form */
+    defaultDurationHours: 24,
   },
 
   // -------------------------------------------------------------------------

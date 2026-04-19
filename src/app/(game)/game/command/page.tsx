@@ -349,12 +349,14 @@ export default async function CommandPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Navigate
         </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {[
             { href: "/game/map", label: "Galaxy Map", color: "text-indigo-400 border-indigo-800/40" },
             { href: "/game/station", label: "Station", color: "text-amber-400 border-amber-800/40" },
             { href: "/game/research", label: "Research", color: "text-teal-400 border-teal-800/40" },
             { href: "/game/alliance", label: "Alliance", color: "text-violet-400 border-violet-800/40" },
+            { href: "/game/auctions", label: "Auctions", color: "text-rose-400 border-rose-800/40" },
+            { href: "/game/market", label: "Market", color: "text-orange-400 border-orange-800/40" },
           ].map(({ href, label, color }) => (
             <Link
               key={href}
