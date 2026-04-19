@@ -76,6 +76,27 @@ export interface LaneInfo {
   transitTaxRate:   number;
 }
 
+export interface GovernanceInfo {
+  stewardId:            string | null;
+  stewardHandle:        string | null;
+  /** True = steward holds governance; false = majority controller overrides. */
+  stewardHasGovernance: boolean;
+  majorityControl: {
+    controllerId:     string;
+    controllerHandle: string;
+    allianceId:       string | null;
+    allianceName:     string | null;
+    influenceShare:   number;
+    isConfirmed:      boolean;
+    controlSince:     string;
+  } | null;
+  playerInfluence:    number;
+  totalInfluence:     number;
+  playerColonyCount:  number;
+  /** True when the player (or their alliance) currently meets the threshold. */
+  canClaimMajority:   boolean;
+}
+
 export interface SystemHubClientProps {
   systemId:            string;
   system:              SolarSceneSystemData;
@@ -102,6 +123,8 @@ export interface SystemHubClientProps {
   gateInfo:            GateInfo;
   /** Active hyperspace lanes connected to this system. */
   activeLanes:         LaneInfo[];
+  /** Governance and influence state for this system. */
+  governanceInfo:      GovernanceInfo;
 }
 
 // ---------------------------------------------------------------------------
@@ -619,6 +642,7 @@ function SystemOverviewPanel({
   isSystemGovernor,
   gateInfo,
   activeLanes,
+  governanceInfo,
 }: {
   systemId:         string;
   system:           SolarSceneSystemData;
@@ -638,9 +662,12 @@ function SystemOverviewPanel({
   isSystemGovernor: boolean;
   gateInfo:         GateInfo;
   activeLanes:      LaneInfo[];
+  governanceInfo:   GovernanceInfo;
 }) {
   const discover = useApiAction();
   const gate     = useApiAction();
+  const govClaim = useApiAction();
+  const govContest = useApiAction();
   // Map bodyIndex → other-colony info for quick lookup
   const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
@@ -908,6 +935,104 @@ function SystemOverviewPanel({
         </div>
       )}
 
+      {/* System Governance */}
+      {isDiscovered && (
+        <div className="border-t border-zinc-800/50 px-4 py-3 space-y-2">
+          <p className="text-xs text-zinc-600 uppercase tracking-wider">System Governance</p>
+
+          {/* Steward row */}
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-zinc-500">Steward</span>
+            <span className="text-xs text-amber-400 truncate max-w-[140px]" title={governanceInfo.stewardHandle ?? "None"}>
+              {governanceInfo.stewardHandle ?? "Unclaimed"}
+              {governanceInfo.stewardHasGovernance && (
+                <span className="ml-1 text-zinc-600">(governs)</span>
+              )}
+            </span>
+          </div>
+
+          {/* Majority controller row */}
+          {governanceInfo.majorityControl && (
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-zinc-500">Majority</span>
+              <span className={`text-xs truncate max-w-[140px] ${governanceInfo.majorityControl.isConfirmed ? "text-violet-400" : "text-orange-400"}`}>
+                {governanceInfo.majorityControl.allianceName
+                  ? `[${governanceInfo.majorityControl.allianceName}]`
+                  : governanceInfo.majorityControl.controllerHandle}
+                {!governanceInfo.majorityControl.isConfirmed && (
+                  <span className="ml-1 text-orange-600">(contested)</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {/* Player influence bar */}
+          {governanceInfo.totalInfluence > 0 && (
+            <div>
+              <div className="flex items-center justify-between mb-0.5">
+                <span className="text-xs text-zinc-600">Your influence</span>
+                <span className="text-xs text-zinc-400">
+                  {governanceInfo.playerInfluence} / {governanceInfo.totalInfluence} pts
+                  {" "}({((governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100).toFixed(1)}%)
+                </span>
+              </div>
+              <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
+                <div
+                  className="h-full rounded-full bg-violet-600 transition-all"
+                  style={{
+                    width: `${Math.min(100, (governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100)}%`,
+                  }}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Claim Majority button */}
+          {governanceInfo.canClaimMajority && !governanceInfo.majorityControl?.isConfirmed && (
+            <div>
+              {govClaim.success ? (
+                <p className="text-xs text-emerald-500">{govClaim.success}</p>
+              ) : (
+                <button
+                  onClick={() => govClaim.run(
+                    "/api/game/governance/claim-majority",
+                    { systemId },
+                    "Majority control claimed!",
+                  )}
+                  disabled={govClaim.loading}
+                  className="w-full rounded bg-violet-800/50 border border-violet-700/40 px-3 py-1.5 text-xs font-medium text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+                >
+                  {govClaim.loading ? "Claiming…" : "Claim Majority Control →"}
+                </button>
+              )}
+              {govClaim.error && <p className="mt-1 text-xs text-red-400">{govClaim.error}</p>}
+            </div>
+          )}
+
+          {/* Contest button — shown when majority control exists and player is steward or wants a re-check */}
+          {governanceInfo.majorityControl && governanceInfo.majorityControl.isConfirmed && (
+            <div>
+              {govContest.success ? (
+                <p className="text-xs text-zinc-400">{govContest.success}</p>
+              ) : (
+                <button
+                  onClick={() => govContest.run(
+                    "/api/game/governance/contest",
+                    { systemId },
+                    "Influence re-checked.",
+                  )}
+                  disabled={govContest.loading}
+                  className="w-full rounded bg-zinc-800/50 border border-zinc-700/40 px-3 py-1.5 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/30 transition-colors disabled:opacity-50"
+                >
+                  {govContest.loading ? "Checking…" : "Contest majority control"}
+                </button>
+              )}
+              {govContest.error && <p className="mt-1 text-xs text-red-400">{govContest.error}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Bottom links */}
       <div className="border-t border-zinc-800 p-3 space-y-1.5">
         <Link
@@ -935,7 +1060,7 @@ export function SystemHubClient({
   systemId, system, bodies, ships, fleets, coloniesBodyIndices,
   stationHere, stationId, isDiscovered, canActOnBodies, canSurveyBodies,
   canDiscover, isFirstColony, spectralClass, bodyCount, otherColonies,
-  isSystemGovernor, gateInfo, activeLanes,
+  isSystemGovernor, gateInfo, activeLanes, governanceInfo,
 }: SystemHubClientProps) {
   const router = useRouter();
 
@@ -1204,6 +1329,7 @@ export function SystemHubClient({
             isSystemGovernor={isSystemGovernor}
             gateInfo={gateInfo}
             activeLanes={activeLanes}
+            governanceInfo={governanceInfo}
           />
         )}
       </div>

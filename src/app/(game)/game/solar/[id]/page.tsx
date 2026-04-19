@@ -23,10 +23,11 @@ import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player } from "@/lib/types/game";
 import type { SolarSceneSystemData } from "./_components/SolarScene";
-import type { BodyInfo, ShipInfo, FleetInfo, OtherColonyInfo } from "./_components/SystemHubClient";
+import type { BodyInfo, ShipInfo, FleetInfo, OtherColonyInfo, GovernanceInfo } from "./_components/SystemHubClient";
 import { SystemHubClient } from "./_components/SystemHubClient";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
+import { refreshInfluenceCache, checkContestedRevert } from "@/lib/game/influence";
 
 export const dynamic = "force-dynamic";
 
@@ -75,11 +76,13 @@ export default async function SolarSystemPage({
   );
   if (!player) redirect("/login");
 
-  // ── Engine tick + travel resolution (lazy) ────────────────────────────────
+  // ── Engine tick + travel resolution + influence refresh (lazy) ───────────
   const requestTime = new Date();
   await Promise.all([
     runEngineTick(admin, player.id, requestTime),
     runTravelResolution(admin, player.id, requestTime),
+    refreshInfluenceCache(admin, systemId).catch(() => undefined),
+    checkContestedRevert(admin, systemId).catch(() => undefined),
   ]);
 
   // ── Parallel fetches ─────────────────────────────────────────────────────
@@ -89,6 +92,7 @@ export default async function SolarSystemPage({
     surveyRes, playerColoniesRes, researchRes,
     allSystemColoniesRes, stewardshipRes,
     systemStewardshipRes, gateRes, lanesRes,
+    influenceCacheRes, majorityControlRes,
   ] = await Promise.all([
     // Ships in this system (full data)
     admin
@@ -180,6 +184,19 @@ export default async function SolarSystemPage({
       .select("id, from_system_id, to_system_id, owner_id, access_level, transit_tax_rate, is_active")
       .eq("is_active", true)
       .or(`from_system_id.eq.${systemId},to_system_id.eq.${systemId}`),
+
+    // Influence cache for this system (freshly computed above)
+    admin
+      .from("system_influence_cache")
+      .select("player_id, influence, colony_count")
+      .eq("system_id", systemId),
+
+    // Majority control record for this system
+    admin
+      .from("system_majority_control")
+      .select("controller_id, alliance_id, influence_share, is_confirmed, control_since")
+      .eq("system_id", systemId)
+      .maybeSingle(),
   ]);
 
   type ShipRow    = { id: string; name: string; dispatch_mode: string; cargo_cap: number; speed_ly_per_hr: number; ship_state: string };
@@ -190,6 +207,8 @@ export default async function SolarSystemPage({
   type AllColonyRow = { id: string; body_id: string; owner_id: string; population_tier: number };
   type StewardRow = { body_id: string; steward_id: string; default_tax_rate_pct: number };
   type LaneRow = { id: string; from_system_id: string; to_system_id: string; owner_id: string; access_level: string; transit_tax_rate: number; is_active: boolean };
+  type InfluenceCacheRow = { player_id: string; influence: number; colony_count: number };
+  type MajorityControlRow = { controller_id: string; alliance_id: string | null; influence_share: number; is_confirmed: boolean; control_since: string };
 
   const ships       = (shipsRes.data   ?? []) as ShipRow[];
   const fleets      = (fleetsRes.data  ?? []) as FleetRow[];
@@ -252,6 +271,93 @@ export default async function SolarSystemPage({
       transitTaxRate:   l.transit_tax_rate,
     };
   });
+
+  // ── Build governance info ─────────────────────────────────────────────────
+  const influenceCacheRows = listResult<InfluenceCacheRow>(influenceCacheRes).data ?? [];
+  const majorityControlRow = majorityControlRes.data as MajorityControlRow | null;
+
+  const totalInfluence = influenceCacheRows.reduce((s, r) => s + r.influence, 0);
+  const playerInfluenceRow = influenceCacheRows.find((r) => r.player_id === player.id);
+  const playerInfluence    = playerInfluenceRow?.influence ?? 0;
+  const playerColonyCount  = playerInfluenceRow?.colony_count ?? 0;
+
+  // Determine if the player (or their alliance) can claim majority now.
+  const playerInfluenceShare = totalInfluence > 0 ? playerInfluence / totalInfluence : 0;
+  const { BALANCE: _BAL } = await import("@/lib/config/balance");
+  const minColonies = _BAL.influence.majorityThresholdMinColonies;
+
+  // Check alliance aggregate if player is in an alliance
+  type AMMemberRow = { player_id: string; alliance_id: string };
+  const { data: allianceMembersRaw } = await admin
+    .from("alliance_members")
+    .select("player_id, alliance_id")
+    .in("player_id", influenceCacheRows.map((r) => r.player_id));
+  const allianceMembersInSystem = (allianceMembersRaw ?? []) as AMMemberRow[];
+  const allianceMembershipMap = new Map(allianceMembersInSystem.map((r) => [r.player_id, r.alliance_id]));
+  const playerAllianceIdInSystem = allianceMembershipMap.get(player.id) ?? null;
+
+  let canClaimMajority = false;
+  if (playerInfluenceShare > 0.5 && playerColonyCount >= minColonies) {
+    canClaimMajority = true;
+  } else if (playerAllianceIdInSystem) {
+    const allianceInfluence = influenceCacheRows
+      .filter((r) => allianceMembershipMap.get(r.player_id) === playerAllianceIdInSystem)
+      .reduce((s, r) => s + r.influence, 0);
+    const allianceColonies = influenceCacheRows
+      .filter((r) => allianceMembershipMap.get(r.player_id) === playerAllianceIdInSystem)
+      .reduce((s, r) => s + r.colony_count, 0);
+    const allianceShare = totalInfluence > 0 ? allianceInfluence / totalInfluence : 0;
+    if (allianceShare > 0.5 && allianceColonies >= minColonies) {
+      canClaimMajority = true;
+    }
+  }
+
+  // Resolve handles for steward + majority controller
+  const governancePlayerIds = new Set<string>();
+  if (systemStewardRow?.steward_id) governancePlayerIds.add(systemStewardRow.steward_id);
+  if (majorityControlRow?.controller_id) governancePlayerIds.add(majorityControlRow.controller_id);
+
+  // We'll resolve these handles from ownerHandles below, after that map is built.
+  // (ownerHandles is built a few lines down — we do a separate lookup here first.)
+  type GovHandleRow = { id: string; handle: string };
+  const govHandleRows = governancePlayerIds.size > 0
+    ? (listResult<GovHandleRow>(
+        await admin.from("players").select("id, handle").in("id", [...governancePlayerIds]),
+      ).data ?? [])
+    : [];
+  const govHandles = new Map(govHandleRows.map((r) => [r.id, r.handle]));
+
+  // Alliance name for majority controller's alliance (if applicable)
+  let majorityAllianceName: string | null = null;
+  if (majorityControlRow?.alliance_id) {
+    const { data: allianceRow } = await admin
+      .from("alliances")
+      .select("name")
+      .eq("id", majorityControlRow.alliance_id)
+      .maybeSingle();
+    majorityAllianceName = (allianceRow as { name: string } | null)?.name ?? null;
+  }
+
+  const governanceInfo: GovernanceInfo = {
+    stewardId:            systemStewardRow?.steward_id ?? null,
+    stewardHandle:        systemStewardRow?.steward_id ? (govHandles.get(systemStewardRow.steward_id) ?? null) : null,
+    stewardHasGovernance: systemStewardRow?.has_governance ?? true,
+    majorityControl: majorityControlRow
+      ? {
+          controllerId:     majorityControlRow.controller_id,
+          controllerHandle: govHandles.get(majorityControlRow.controller_id) ?? "Unknown",
+          allianceId:       majorityControlRow.alliance_id,
+          allianceName:     majorityAllianceName,
+          influenceShare:   majorityControlRow.influence_share,
+          isConfirmed:      majorityControlRow.is_confirmed,
+          controlSince:     majorityControlRow.control_since,
+        }
+      : null,
+    playerInfluence,
+    totalInfluence,
+    playerColonyCount,
+    canClaimMajority,
+  };
 
   // Resolve handles for other colony owners
   const otherOwnerIds = [...new Set(
@@ -424,6 +530,7 @@ export default async function SolarSystemPage({
         isSystemGovernor={isSystemGovernor}
         gateInfo={gateInfo}
         activeLanes={activeLanes}
+        governanceInfo={governanceInfo}
       />
     </div>
   );
