@@ -186,6 +186,21 @@ export interface GalaxyTravelLine {
   departAt: string | null;
 }
 
+/** An active hyperspace lane visible on the galaxy map. */
+export interface GalaxyLane {
+  id: string;
+  fromSystemId: string;
+  toSystemId: string;
+  accessLevel: "public" | "alliance_only" | "private";
+  isOwner: boolean;
+  /** SVG coordinates of the from-system */
+  x1: number;
+  y1: number;
+  /** SVG coordinates of the to-system */
+  x2: number;
+  y2: number;
+}
+
 interface GalaxyMapClientProps {
   systems: GalaxySystem[];
   ships: GalaxyShip[];
@@ -196,6 +211,10 @@ interface GalaxyMapClientProps {
   disputes: GalaxyDispute[];
   /** Active travel lines (ship/fleet in-transit paths). */
   travelLines: GalaxyTravelLine[];
+  /** Active hyperspace lanes (world-visible). */
+  lanes: GalaxyLane[];
+  /** System IDs that have an active hyperspace gate. */
+  gateSystemIds: Set<string>;
   pixelsPerLy: number;
   baseRangeLy: number;
   viewboxW: number;
@@ -385,6 +404,8 @@ export function GalaxyMapClient({
   territories,
   disputes,
   travelLines,
+  lanes,
+  gateSystemIds,
   pixelsPerLy,
   baseRangeLy,
   viewboxW,
@@ -1604,6 +1625,27 @@ export function GalaxyMapClient({
               );
             })}
 
+            {/* ── Hyperspace lane lines ─────────────────────────────────────── */}
+            {lanes.map((lane) => {
+              const stroke =
+                lane.accessLevel === "private"      ? "#c026d3" :  // fuchsia-600
+                lane.accessLevel === "alliance_only" ? "#7c3aed" :  // violet-700
+                                                       "#6d28d9";   // violet-800 (public)
+              const dashArray = lane.accessLevel === "private" ? `${6 / scale},${4 / scale}` : "none";
+              return (
+                <line
+                  key={lane.id}
+                  x1={lane.x1} y1={lane.y1}
+                  x2={lane.x2} y2={lane.y2}
+                  stroke={stroke}
+                  strokeWidth={lane.isOwner ? 2.5 / scale : 1.5 / scale}
+                  strokeDasharray={dashArray}
+                  opacity={0.55}
+                  pointerEvents="none"
+                />
+              );
+            })}
+
             {/* ── System stars ──────────────────────────────────────────────── */}
             {systems.map((sys) => {
               const r = nodeRadius(sys);
@@ -1622,6 +1664,21 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
+                  {/* Gate ring — violet diamond-ish halo for systems with active gates */}
+                  {gateSystemIds.has(sys.id) && (
+                    <circle
+                      cx={sys.svgX}
+                      cy={sys.svgY}
+                      r={r + 5}
+                      fill="none"
+                      stroke="#7c3aed"
+                      strokeWidth={1.5 / scale}
+                      strokeDasharray={`${4 / scale},${3 / scale}`}
+                      opacity={0.7}
+                      pointerEvents="none"
+                    />
+                  )}
+
                   {/* Selection ring */}
                   {isSelected && (
                     <circle

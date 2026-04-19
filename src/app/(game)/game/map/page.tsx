@@ -25,7 +25,7 @@ import type { Player } from "@/lib/types/game";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { resolveOverdueDisputes } from "@/lib/game/disputeResolution";
 import { GalaxyMapClient } from "./_components/GalaxyMapClient";
-import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation, GalaxyBodySteward } from "./_components/GalaxyMapClient";
+import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation, GalaxyBodySteward, GalaxyLane } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { runTravelResolution } from "@/lib/game/travelResolution";
@@ -116,6 +116,8 @@ export default async function GalaxyMapPage() {
     otherStationsRes,
     allColoniesRes,
     bodyStewrdshipsRes,
+    lanesRes,
+    gatesRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -217,6 +219,18 @@ export default async function GalaxyMapPage() {
     admin
       .from("body_stewardship")
       .select("body_id, steward_id, system_id, default_tax_rate_pct"),
+
+    // Active hyperspace lanes (world state — all players see them)
+    admin
+      .from("hyperspace_lanes")
+      .select("id, from_system_id, to_system_id, access_level, owner_id")
+      .eq("is_active", true),
+
+    // Active hyperspace gates — all systems (world state)
+    admin
+      .from("hyperspace_gates")
+      .select("system_id, owner_id, status")
+      .eq("status", "active"),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -253,6 +267,9 @@ export default async function GalaxyMapPage() {
   type OtherStationRow = { id: string; owner_id: string; current_system_id: string | null };
   type AllColonyRow = { system_id: string };
   type BodyStewardRow = { body_id: string; steward_id: string; system_id: string; default_tax_rate_pct: number };
+
+  type LaneRow2  = { id: string; from_system_id: string; to_system_id: string; access_level: string; owner_id: string };
+  type GateRow2  = { system_id: string; owner_id: string; status: string };
 
   const ships              = listResult<ShipRow>(shipsRes).data ?? [];
   const colonies           = listResult<ColonyRow>(coloniesRes).data ?? [];
@@ -305,6 +322,27 @@ export default async function GalaxyMapPage() {
     isPlayerSteward:  s.steward_id === player.id,
     defaultTaxRatePct: s.default_tax_rate_pct,
   }));
+
+  // ── Build lane + gate lists for client ────────────────────────────────────
+  const rawLaneRows   = listResult<LaneRow2>(lanesRes).data ?? [];
+  const rawGateRows   = listResult<GateRow2>(gatesRes).data ?? [];
+  const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
+
+  const galaxyLanes: GalaxyLane[] = rawLaneRows
+    .filter((l) => systemSvgMap.has(l.from_system_id) && systemSvgMap.has(l.to_system_id))
+    .map((l) => {
+      const from = systemSvgMap.get(l.from_system_id)!;
+      const to   = systemSvgMap.get(l.to_system_id)!;
+      return {
+        id:           l.id,
+        fromSystemId: l.from_system_id,
+        toSystemId:   l.to_system_id,
+        accessLevel:  l.access_level as "public" | "alliance_only" | "private",
+        isOwner:      l.owner_id === player.id,
+        x1: from.svgX, y1: from.svgY,
+        x2: to.svgX,   y2: to.svgY,
+      };
+    });
 
   // ── Resolve handles for other players' station owners ─────────────────────
   const otherStationOwnerIds = [...new Set(otherStationRows.map((s) => s.owner_id))];
@@ -681,6 +719,8 @@ export default async function GalaxyMapPage() {
         playerAllianceBeaconSystemIds={playerAllianceBeaconSystemIds}
         otherStations={galaxyOtherStations}
         bodyStewrds={galaxyBodyStewrds}
+        lanes={galaxyLanes}
+        gateSystemIds={activeGateSystems}
       />
     </div>
   );

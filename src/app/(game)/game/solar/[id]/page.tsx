@@ -88,6 +88,7 @@ export default async function SolarSystemPage({
     stationRes, discoveryRes,
     surveyRes, playerColoniesRes, researchRes,
     allSystemColoniesRes, stewardshipRes,
+    systemStewardshipRes, gateRes, lanesRes,
   ] = await Promise.all([
     // Ships in this system (full data)
     admin
@@ -158,6 +159,27 @@ export default async function SolarSystemPage({
       .from("body_stewardship")
       .select("body_id, steward_id, default_tax_rate_pct")
       .eq("system_id", systemId),
+
+    // System-level stewardship (for governance/gate eligibility)
+    admin
+      .from("system_stewardship")
+      .select("steward_id, has_governance")
+      .eq("system_id", systemId)
+      .maybeSingle(),
+
+    // Hyperspace gate for this system (if any)
+    admin
+      .from("hyperspace_gates")
+      .select("id, status, built_at")
+      .eq("system_id", systemId)
+      .maybeSingle(),
+
+    // Active lanes connected to this system
+    admin
+      .from("hyperspace_lanes")
+      .select("id, from_system_id, to_system_id, owner_id, access_level, transit_tax_rate, is_active")
+      .eq("is_active", true)
+      .or(`from_system_id.eq.${systemId},to_system_id.eq.${systemId}`),
   ]);
 
   type ShipRow    = { id: string; name: string; dispatch_mode: string; cargo_cap: number; speed_ly_per_hr: number; ship_state: string };
@@ -167,6 +189,7 @@ export default async function SolarSystemPage({
   type ResearchRow = { research_id: string };
   type AllColonyRow = { id: string; body_id: string; owner_id: string; population_tier: number };
   type StewardRow = { body_id: string; steward_id: string; default_tax_rate_pct: number };
+  type LaneRow = { id: string; from_system_id: string; to_system_id: string; owner_id: string; access_level: string; transit_tax_rate: number; is_active: boolean };
 
   const ships       = (shipsRes.data   ?? []) as ShipRow[];
   const fleets      = (fleetsRes.data  ?? []) as FleetRow[];
@@ -186,6 +209,49 @@ export default async function SolarSystemPage({
   // All colonies in this system (any player)
   const allSystemColonies = listResult<AllColonyRow>(allSystemColoniesRes).data ?? [];
   const stewardshipRows   = listResult<StewardRow>(stewardshipRes).data ?? [];
+
+  // System-level governance
+  const systemStewardRow = systemStewardshipRes.data as { steward_id: string; has_governance: boolean } | null;
+  const isSystemGovernor = !!(systemStewardRow && systemStewardRow.steward_id === player.id && systemStewardRow.has_governance);
+
+  // Gate for this system
+  type GateRow = { id: string; status: string; built_at: string | null };
+  const gateRow = gateRes.data as GateRow | null;
+  type GateInfo = { status: "none" | "inactive" | "active" | "neutral"; completeAt: string | null };
+
+  // Fetch pending gate construction job if gate is inactive
+  let gateInfo: GateInfo = { status: "none", completeAt: null };
+  if (gateRow) {
+    let completeAt: string | null = null;
+    if (gateRow.status === "inactive" || gateRow.status === "neutral") {
+      const { data: jobRow } = await admin
+        .from("gate_construction_jobs")
+        .select("complete_at")
+        .eq("gate_id", gateRow.id)
+        .eq("status", "pending")
+        .maybeSingle();
+      completeAt = (jobRow as { complete_at: string } | null)?.complete_at ?? null;
+    }
+    gateInfo = { status: gateRow.status as GateInfo["status"], completeAt };
+  }
+
+  // Active lanes connected to this system
+  const activeLaneRows = listResult<LaneRow>(lanesRes).data ?? [];
+  // Resolve system names for lane endpoints
+  const { getCatalogEntry: _getCE, systemDisplayName: getDisplayName } = await import("@/lib/catalog");
+  type LaneInfo = { id: string; remoteSystemId: string; remoteSystemName: string; ownerId: string; isOwner: boolean; accessLevel: string; transitTaxRate: number };
+  const activeLanes: LaneInfo[] = activeLaneRows.map(l => {
+    const remoteId = l.from_system_id === systemId ? l.to_system_id : l.from_system_id;
+    return {
+      id:               l.id,
+      remoteSystemId:   remoteId,
+      remoteSystemName: getDisplayName(remoteId),
+      ownerId:          l.owner_id,
+      isOwner:          l.owner_id === player.id,
+      accessLevel:      l.access_level,
+      transitTaxRate:   l.transit_tax_rate,
+    };
+  });
 
   // Resolve handles for other colony owners
   const otherOwnerIds = [...new Set(
@@ -355,6 +421,9 @@ export default async function SolarSystemPage({
         spectralClass={system.spectralClass}
         bodyCount={system.bodyCount}
         otherColonies={otherColonies}
+        isSystemGovernor={isSystemGovernor}
+        gateInfo={gateInfo}
+        activeLanes={activeLanes}
       />
     </div>
   );

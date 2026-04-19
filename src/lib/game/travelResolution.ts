@@ -17,6 +17,7 @@
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { rankColonyCandidates } from "@/lib/game/shipAutomation";
+import { resolveGateJobs, resolveLaneJobs } from "@/lib/game/gateResolution";
 import { BALANCE } from "@/lib/config/balance";
 import type { Ship, TravelJob, Colony, PlayerStation } from "@/lib/types/game";
 import type { SystemId, ColonyId } from "@/lib/types/game";
@@ -56,6 +57,11 @@ export async function runTravelResolution(
     .eq("owner_id", playerId);
 
   let ships: Ship[] = (shipRows ?? []) as Ship[];
+
+  // Resolve any completed gate/lane construction jobs (fire-and-forget, best-effort)
+  void resolveGateJobs(admin, playerId, requestTime).catch(() => undefined);
+  void resolveLaneJobs(admin, playerId, requestTime).catch(() => undefined);
+
   if (ships.length === 0) {
     return { jobsResolved: 0, shipsAutoAdvanced: 0, fleetsArrived: 0 };
   }
