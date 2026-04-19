@@ -123,6 +123,12 @@ export const BALANCE = {
 
     /** Hours to build a standard lane (without Stabilized Wormhole) */
     constructionHours: 12,
+
+    /** Maximum number of active lanes a single player may own. */
+    maxOwnedLanes: 20,
+
+    /** Hours a warp tunnel lane remains active before expiring. */
+    warpTunnelExpiryHours: 48,
   },
 
   // -------------------------------------------------------------------------

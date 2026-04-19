@@ -126,13 +126,26 @@ export async function consumePremiumItem(
       );
     }
 
+    const now = new Date().toISOString();
     await admin
       .from("premium_entitlements")
-      .update({ consumed: true, consumed_at: new Date().toISOString() })
+      .update({ consumed: true, consumed_at: now })
       .eq("id", entitlementId);
 
-    await admin.rpc("increment_colony_slots", { p_player_id: player.id }).catch(() => {
-      // RPC may not exist in all environments; fall back to direct update.
+    // Increment colony_slots directly using postgres arithmetic
+    await admin.rpc("increment_player_colony_slots", { p_player_id: player.id }).catch(async () => {
+      // RPC fallback: read-then-write (not transactional but acceptable for premium use)
+      const { data: p } = await admin
+        .from("players")
+        .select("colony_slots")
+        .eq("id", player.id)
+        .maybeSingle();
+      if (p) {
+        await admin
+          .from("players")
+          .update({ colony_slots: (p.colony_slots ?? 1) + 1 })
+          .eq("id", player.id);
+      }
     });
 
     return ok({ consumed: true, appliedEffect: "Colony slot unlocked." });
