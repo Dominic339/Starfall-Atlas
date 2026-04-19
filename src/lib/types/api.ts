@@ -36,6 +36,7 @@ export type GameErrorCode =
   | "lane_out_of_range"
   | "threshold_not_met" // majority threshold not reached
   | "already_auctioned" // item already has an active auction
+  | "rate_limited"
   | "internal_error"
   | "not_implemented"; // placeholder for unbuilt features
 

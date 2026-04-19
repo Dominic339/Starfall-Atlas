@@ -66,8 +66,28 @@ export default async function AlliancePage() {
     playerId: string;
     handle: string;
     role: AllianceRole;
+    allianceCredits: number;
   };
   let members: MemberWithHandle[] = [];
+
+  type GoalEntry = {
+    id: string;
+    title: string;
+    resourceType: string;
+    quantityTarget: number;
+    quantityFilled: number;
+    creditReward: number;
+    deadlineAt: string;
+    completedAt: string | null;
+  };
+  let goals: GoalEntry[] = [];
+
+  type StorageEntry = { resourceType: string; quantity: number };
+  let storage: StorageEntry[] = [];
+
+  type StationEntry = { resourceType: string; quantity: number };
+  let stationInventory: StationEntry[] = [];
+  let playerAllianceCredits = 0;
 
   type BeaconRow = { id: string; systemId: string; systemName: string; placedAt: string };
   let beacons: BeaconRow[] = [];
@@ -101,11 +121,11 @@ export default async function AlliancePage() {
     }
 
     // ── Fetch all members with player handles ──────────────────────────────
-    type RawMemberRow = { id: string; player_id: string; role: AllianceRole };
+    type RawMemberRow = { id: string; player_id: string; role: AllianceRole; alliance_credits: number };
     const { data: rawMembers } = listResult<RawMemberRow>(
       await admin
         .from("alliance_members")
-        .select("id, player_id, role")
+        .select("id, player_id, role, alliance_credits")
         .eq("alliance_id", membership.alliance_id)
         .order("joined_at", { ascending: true }),
     );
@@ -127,6 +147,7 @@ export default async function AlliancePage() {
       playerId: m.player_id,
       handle: handleMap.get(m.player_id) ?? "Unknown",
       role: m.role,
+      allianceCredits: m.alliance_credits,
     }));
 
     // ── Fetch active beacons ───────────────────────────────────────────────
@@ -152,6 +173,69 @@ export default async function AlliancePage() {
       systemName: systemNameMap.get(b.system_id) ?? b.system_id,
       placedAt: b.placed_at,
     }));
+
+    // ── Fetch active goals, alliance storage, player station + credits ─────
+    const now = new Date().toISOString();
+    type RawGoalRow = {
+      id: string; title: string; resource_type: string;
+      quantity_target: number; quantity_filled: number;
+      credit_reward: number; deadline_at: string; completed_at: string | null;
+    };
+    type RawStorageRow = { resource_type: string; quantity: number };
+
+    const [goalsRes, storageRes, stationRes] = await Promise.all([
+      admin
+        .from("alliance_goals")
+        .select("id, title, resource_type, quantity_target, quantity_filled, credit_reward, deadline_at, completed_at")
+        .eq("alliance_id", membership.alliance_id)
+        .eq("expired", false)
+        .is("completed_at", null)
+        .gt("deadline_at", now)
+        .order("deadline_at", { ascending: true }),
+      admin
+        .from("resource_inventory")
+        .select("resource_type, quantity")
+        .eq("location_type", "alliance_storage")
+        .eq("location_id", membership.alliance_id),
+      admin
+        .from("player_stations")
+        .select("id")
+        .eq("owner_id", player.id)
+        .maybeSingle(),
+    ]);
+
+    goals = ((goalsRes.data ?? []) as RawGoalRow[]).map((g) => ({
+      id: g.id,
+      title: g.title,
+      resourceType: g.resource_type,
+      quantityTarget: g.quantity_target,
+      quantityFilled: g.quantity_filled,
+      creditReward: g.credit_reward,
+      deadlineAt: g.deadline_at,
+      completedAt: g.completed_at,
+    }));
+
+    storage = ((storageRes.data ?? []) as RawStorageRow[]).map((r) => ({
+      resourceType: r.resource_type,
+      quantity: r.quantity,
+    }));
+
+    const stationId = (stationRes.data as { id: string } | null)?.id ?? null;
+    if (stationId) {
+      const { data: stInv } = await admin
+        .from("resource_inventory")
+        .select("resource_type, quantity")
+        .eq("location_type", "station")
+        .eq("location_id", stationId)
+        .order("quantity", { ascending: false });
+      stationInventory = ((stInv ?? []) as RawStorageRow[]).map((r) => ({
+        resourceType: r.resource_type,
+        quantity: r.quantity,
+      }));
+    }
+
+    playerAllianceCredits =
+      members.find((m) => m.playerId === player.id)?.allianceCredits ?? 0;
   }
 
   // ── Fetch disputes involving this alliance ────────────────────────────────
@@ -324,6 +408,10 @@ export default async function AlliancePage() {
         }}
         disputes={allianceDisputes}
         playerFleets={playerFleets}
+        goals={goals}
+        storage={storage}
+        stationInventory={stationInventory}
+        playerAllianceCredits={playerAllianceCredits}
       />
     </div>
   );

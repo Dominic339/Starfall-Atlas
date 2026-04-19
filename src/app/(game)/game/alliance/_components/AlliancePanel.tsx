@@ -33,6 +33,22 @@ export interface DisputePanelEntry {
   msLeft: number;
 }
 
+export interface GoalEntry {
+  id: string;
+  title: string;
+  resourceType: string;
+  quantityTarget: number;
+  quantityFilled: number;
+  creditReward: number;
+  deadlineAt: string;
+  completedAt: string | null;
+}
+
+export interface StorageEntry {
+  resourceType: string;
+  quantity: number;
+}
+
 export interface AlliancePanelProps {
   // null when player has no alliance
   alliance: {
@@ -50,6 +66,7 @@ export interface AlliancePanelProps {
     playerId: string;
     handle: string;
     role: AllianceRole;
+    allianceCredits: number;
   }[];
   /** Territory summary computed server-side. */
   territory: {
@@ -71,6 +88,14 @@ export interface AlliancePanelProps {
   disputes: DisputePanelEntry[];
   /** Player's active non-disbanded fleets for reinforcement selector. */
   playerFleets: { id: string; name: string; currentSystemId: string | null; currentSystemName: string | null }[];
+  /** Active resource-collection goals for the alliance. */
+  goals: GoalEntry[];
+  /** Current resources in alliance shared storage. */
+  storage: StorageEntry[];
+  /** Player's station inventory (for contribution/deposit forms). */
+  stationInventory: StorageEntry[];
+  /** This player's alliance credit balance. */
+  playerAllianceCredits: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +165,10 @@ export function AlliancePanel({
   territory,
   disputes,
   playerFleets,
+  goals,
+  storage,
+  stationInventory,
+  playerAllianceCredits,
 }: AlliancePanelProps) {
   const router = useRouter();
 
@@ -166,6 +195,34 @@ export function AlliancePanel({
   const [disputeFleetId, setDisputeFleetId] = useState<Record<string, string>>({});
   const [disputeLoading, setDisputeLoading] = useState<Record<string, boolean>>({});
   const [disputeError, setDisputeError]     = useState<string | null>(null);
+
+  // ── Goals ─────────────────────────────────────────────────────────────────
+  const [goalContribQty, setGoalContribQty]     = useState<Record<string, number>>({});
+  const [goalContribLoading, setGoalContribLoading] = useState<Record<string, boolean>>({});
+  const [goalContribResult, setGoalContribResult]   = useState<Record<string, string>>({});
+  const [goalContribError, setGoalContribError]     = useState<Record<string, string>>({});
+  // Create goal form
+  const [newGoalTitle, setNewGoalTitle]       = useState("");
+  const [newGoalResource, setNewGoalResource] = useState(stationInventory[0]?.resourceType ?? "iron");
+  const [newGoalTarget, setNewGoalTarget]     = useState(100);
+  const [newGoalReward, setNewGoalReward]     = useState(0);
+  const [newGoalDeadlineH, setNewGoalDeadlineH] = useState(72);
+  const [newGoalLoading, setNewGoalLoading]   = useState(false);
+  const [newGoalError, setNewGoalError]       = useState<string | null>(null);
+  const [newGoalDone, setNewGoalDone]         = useState(false);
+
+  // ── Storage ───────────────────────────────────────────────────────────────
+  const [depositResource, setDepositResource] = useState(stationInventory[0]?.resourceType ?? "iron");
+  const [depositQty, setDepositQty]           = useState(1);
+  const [depositLoading, setDepositLoading]   = useState(false);
+  const [depositError, setDepositError]       = useState<string | null>(null);
+  const [depositDone, setDepositDone]         = useState<string | null>(null);
+
+  const [withdrawResource, setWithdrawResource] = useState(storage[0]?.resourceType ?? "iron");
+  const [withdrawQty, setWithdrawQty]           = useState(1);
+  const [withdrawLoading, setWithdrawLoading]   = useState(false);
+  const [withdrawError, setWithdrawError]       = useState<string | null>(null);
+  const [withdrawDone, setWithdrawDone]         = useState<string | null>(null);
 
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -254,6 +311,62 @@ export function AlliancePanel({
     const err = await callApi("/api/game/dispute/reinforce", { disputeId, fleetId });
     setDisputeLoading((prev) => ({ ...prev, [disputeId]: false }));
     if (err) { setDisputeError(err); return; }
+    router.refresh();
+  }
+
+  async function handleContribute(goalId: string, resourceType: string) {
+    const qty = goalContribQty[goalId] ?? 1;
+    setGoalContribLoading((p: Record<string, boolean>) => ({ ...p, [goalId]: true }));
+    setGoalContribError((p: Record<string, string>) => ({ ...p, [goalId]: "" }));
+    const err = await callApi("/api/game/alliance/goal/contribute", { goalId, quantity: qty });
+    setGoalContribLoading((p: Record<string, boolean>) => ({ ...p, [goalId]: false }));
+    if (err) {
+      setGoalContribError((p: Record<string, string>) => ({ ...p, [goalId]: err }));
+    } else {
+      setGoalContribResult((p: Record<string, string>) => ({ ...p, [goalId]: `Contributed ${qty} ${resourceType}` }));
+      router.refresh();
+    }
+  }
+
+  async function handleCreateGoal() {
+    setNewGoalLoading(true);
+    setNewGoalError(null);
+    const err = await callApi("/api/game/alliance/goal/create", {
+      title: newGoalTitle,
+      resourceType: newGoalResource,
+      quantityTarget: newGoalTarget,
+      creditReward: newGoalReward,
+      deadlineHours: newGoalDeadlineH,
+    });
+    setNewGoalLoading(false);
+    if (err) { setNewGoalError(err); return; }
+    setNewGoalDone(true);
+    router.refresh();
+  }
+
+  async function handleDeposit() {
+    setDepositLoading(true);
+    setDepositError(null);
+    const err = await callApi("/api/game/alliance/storage/deposit", {
+      resourceType: depositResource,
+      quantity: depositQty,
+    });
+    setDepositLoading(false);
+    if (err) { setDepositError(err); return; }
+    setDepositDone(`Deposited ${depositQty} ${depositResource}`);
+    router.refresh();
+  }
+
+  async function handleWithdraw() {
+    setWithdrawLoading(true);
+    setWithdrawError(null);
+    const err = await callApi("/api/game/alliance/storage/withdraw", {
+      resourceType: withdrawResource,
+      quantity: withdrawQty,
+    });
+    setWithdrawLoading(false);
+    if (err) { setWithdrawError(err); return; }
+    setWithdrawDone(`Withdrew ${withdrawQty} ${withdrawResource} (−${withdrawQty} credits)`);
     router.refresh();
   }
 
@@ -459,7 +572,12 @@ export function AlliancePanel({
                   </span>
                 )}
               </div>
-              <div className="shrink-0">
+              <div className="shrink-0 flex items-center gap-2">
+                {m.allianceCredits > 0 && (
+                  <span className="text-xs text-amber-500 tabular-nums">
+                    {m.allianceCredits.toLocaleString()} ✦
+                  </span>
+                )}
                 <RoleBadge role={m.role} />
               </div>
             </div>
@@ -647,6 +765,254 @@ export function AlliancePanel({
             <p className="text-xs text-zinc-700">
               Beacons inside your territory loop are protected from disputes.
             </p>
+          </div>
+        )}
+      </div>
+
+      {/* ── Goals ─────────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <SectionHeading
+          title="Alliance Goals"
+          meta={goals.length > 0 ? `${goals.length} active` : undefined}
+        />
+
+        {/* Create goal form (officer/founder) */}
+        {isPrivileged && (
+          <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-950/60 px-4 py-3 space-y-2.5">
+            <p className="text-xs text-zinc-600">Post a resource-collection goal for members</p>
+            {newGoalDone ? (
+              <p className="text-xs text-emerald-400">Goal created!</p>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  value={newGoalTitle}
+                  onChange={(e) => setNewGoalTitle(e.target.value)}
+                  maxLength={60}
+                  placeholder="Goal title…"
+                  className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-200 placeholder-zinc-600 focus:border-indigo-600 focus:outline-none"
+                />
+                <div className="flex flex-wrap gap-2">
+                  <input
+                    type="text"
+                    value={newGoalResource}
+                    onChange={(e) => setNewGoalResource(e.target.value)}
+                    placeholder="resource (e.g. iron)"
+                    className="w-28 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 focus:border-indigo-600 focus:outline-none"
+                  />
+                  <input
+                    type="number"
+                    min={1}
+                    value={newGoalTarget}
+                    onChange={(e) => setNewGoalTarget(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-20 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-center text-xs text-zinc-200 focus:border-indigo-600 focus:outline-none"
+                    placeholder="qty"
+                  />
+                  <select
+                    value={newGoalDeadlineH}
+                    onChange={(e) => setNewGoalDeadlineH(Number(e.target.value))}
+                    className="rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 focus:border-indigo-600 focus:outline-none"
+                  >
+                    {[24, 48, 72, 168, 336, 720].map((h) => (
+                      <option key={h} value={h}>{h < 24 ? `${h}h` : `${h / 24}d`}</option>
+                    ))}
+                  </select>
+                  <button
+                    onClick={handleCreateGoal}
+                    disabled={newGoalLoading || newGoalTitle.length < 3}
+                    className="rounded border border-indigo-700 bg-indigo-950/60 px-3 py-1 text-xs font-semibold text-indigo-300 hover:bg-indigo-900/60 disabled:opacity-50 transition-colors"
+                  >
+                    {newGoalLoading ? "Creating…" : "Create Goal"}
+                  </button>
+                </div>
+                {newGoalError && <p className="text-xs text-red-400">{newGoalError}</p>}
+              </>
+            )}
+          </div>
+        )}
+
+        {goals.length === 0 ? (
+          <p className="text-xs text-zinc-700 py-2">No active goals.</p>
+        ) : (
+          <div className="space-y-3">
+            {goals.map((g) => {
+              const pct = Math.min(100, Math.round((g.quantityFilled / g.quantityTarget) * 100));
+              const remaining = g.quantityTarget - g.quantityFilled;
+              const stationHas = stationInventory.find((s) => s.resourceType === g.resourceType)?.quantity ?? 0;
+              const maxContrib = Math.min(remaining, stationHas);
+              const contrib = goalContribQty[g.id] ?? Math.min(1, maxContrib);
+              const contribResult = goalContribResult[g.id];
+              const contribErr = goalContribError[g.id];
+              const hoursLeft = Math.max(0, (new Date(g.deadlineAt).getTime() - Date.now()) / 3_600_000);
+              return (
+                <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-medium text-zinc-200">{g.title}</p>
+                      <p className="text-xs text-zinc-600">
+                        {g.resourceType} · {g.quantityFilled}/{g.quantityTarget} · {hoursLeft < 24
+                          ? `${Math.ceil(hoursLeft)}h left`
+                          : `${Math.floor(hoursLeft / 24)}d left`}
+                      </p>
+                    </div>
+                    <span className="text-xs text-zinc-500 tabular-nums shrink-0">{pct}%</span>
+                  </div>
+                  <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
+                    <div
+                      className="h-full bg-indigo-600 transition-all"
+                      style={{ width: `${pct}%` }}
+                    />
+                  </div>
+                  {contribResult ? (
+                    <p className="text-xs text-emerald-400">{contribResult} · +{goalContribQty[g.id] ?? contrib} credits</p>
+                  ) : maxContrib > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="number"
+                        min={1}
+                        max={maxContrib}
+                        value={contrib}
+                        onChange={(e) =>
+                          setGoalContribQty((p) => ({ ...p, [g.id]: Math.min(maxContrib, Math.max(1, Number(e.target.value) || 1)) }))
+                        }
+                        className="w-16 rounded border border-zinc-700 bg-zinc-900 px-2 py-0.5 text-center text-xs text-zinc-200 focus:border-indigo-600 focus:outline-none"
+                      />
+                      <span className="text-xs text-zinc-600">{g.resourceType} (you have {stationHas})</span>
+                      <button
+                        onClick={() => handleContribute(g.id, g.resourceType)}
+                        disabled={goalContribLoading[g.id] || contrib < 1}
+                        className="rounded border border-teal-700/60 bg-teal-950/40 px-2.5 py-0.5 text-xs font-medium text-teal-300 hover:bg-teal-900/50 disabled:opacity-50 transition-colors"
+                      >
+                        {goalContribLoading[g.id] ? "…" : "Contribute"}
+                      </button>
+                      {contribErr && <span className="text-xs text-red-400">{contribErr}</span>}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-zinc-700">
+                      {stationHas === 0
+                        ? `No ${g.resourceType} in your station`
+                        : "Goal complete"}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* ── Alliance Storage ───────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <SectionHeading
+          title="Alliance Storage"
+          meta={`${playerAllianceCredits} ✦ credits`}
+        />
+        <p className="mb-4 text-xs text-zinc-700">
+          Deposit resources to share with the alliance. Withdraw using credits (1 credit = 1 unit).
+        </p>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          {/* Deposit */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-3 space-y-2">
+            <p className="text-xs font-semibold text-zinc-500">Deposit from Station</p>
+            {depositDone ? (
+              <p className="text-xs text-emerald-400">{depositDone}</p>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <select
+                    value={depositResource}
+                    onChange={(e) => setDepositResource(e.target.value)}
+                    className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                  >
+                    {stationInventory.length > 0
+                      ? stationInventory.map((s) => (
+                          <option key={s.resourceType} value={s.resourceType}>
+                            {s.resourceType} ({s.quantity})
+                          </option>
+                        ))
+                      : <option value="">No resources</option>
+                    }
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    value={depositQty}
+                    onChange={(e) => setDepositQty(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-16 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-center text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
+                  />
+                </div>
+                <button
+                  onClick={handleDeposit}
+                  disabled={depositLoading || stationInventory.length === 0}
+                  className="w-full rounded border border-zinc-700 bg-zinc-800/60 px-3 py-1 text-xs font-medium text-zinc-300 hover:bg-zinc-700/60 disabled:opacity-50 transition-colors"
+                >
+                  {depositLoading ? "Depositing…" : "Deposit"}
+                </button>
+                {depositError && <p className="text-xs text-red-400">{depositError}</p>}
+              </>
+            )}
+          </div>
+
+          {/* Withdraw */}
+          <div className="rounded-lg border border-zinc-800 bg-zinc-950/40 px-3 py-3 space-y-2">
+            <p className="text-xs font-semibold text-zinc-500">
+              Withdraw to Station <span className="text-zinc-700">(costs 1 credit/unit)</span>
+            </p>
+            {withdrawDone ? (
+              <p className="text-xs text-emerald-400">{withdrawDone}</p>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <select
+                    value={withdrawResource}
+                    onChange={(e) => setWithdrawResource(e.target.value)}
+                    className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                  >
+                    {storage.length > 0
+                      ? storage.map((s) => (
+                          <option key={s.resourceType} value={s.resourceType}>
+                            {s.resourceType} ({s.quantity})
+                          </option>
+                        ))
+                      : <option value="">Storage empty</option>
+                    }
+                  </select>
+                  <input
+                    type="number"
+                    min={1}
+                    value={withdrawQty}
+                    onChange={(e) => setWithdrawQty(Math.max(1, Number(e.target.value) || 1))}
+                    className="w-16 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-center text-xs text-zinc-200 focus:border-zinc-500 focus:outline-none"
+                  />
+                </div>
+                <p className="text-xs text-zinc-700">
+                  Cost: {withdrawQty} credits · You have: {playerAllianceCredits} ✦
+                </p>
+                <button
+                  onClick={handleWithdraw}
+                  disabled={withdrawLoading || storage.length === 0 || playerAllianceCredits < withdrawQty}
+                  className="w-full rounded border border-amber-800/60 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                >
+                  {withdrawLoading ? "Withdrawing…" : "Withdraw"}
+                </button>
+                {withdrawError && <p className="text-xs text-red-400">{withdrawError}</p>}
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* Storage inventory display */}
+        {storage.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {storage.map((s) => (
+              <span
+                key={s.resourceType}
+                className="rounded border border-zinc-700/50 bg-zinc-800/50 px-2 py-0.5 text-xs text-zinc-400"
+              >
+                {s.quantity.toLocaleString()} {s.resourceType}
+              </span>
+            ))}
           </div>
         )}
       </div>

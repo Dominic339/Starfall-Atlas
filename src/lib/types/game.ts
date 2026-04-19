@@ -405,6 +405,10 @@ export interface HyperspaceLane {
   is_active: boolean;
   built_at: string | null;
   alliance_id: AllianceId | null;
+  /** Set for warp tunnels — lane deactivates after this timestamp. */
+  expires_at: string | null;
+  /** When true, lane can only be traversed from_system_id → to_system_id. */
+  is_one_way: boolean;
   created_at: string;
   updated_at: string;
 }

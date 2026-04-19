@@ -131,7 +131,13 @@ export async function findActiveLane(
 
   if (!rows || rows.length === 0) return null;
 
-  for (const lane of rows as HyperspaceLane[]) {
+  const now = Date.now();
+  for (const lane of rows as (HyperspaceLane & { expires_at?: string | null; is_one_way?: boolean })[]) {
+    // Skip expired warp tunnels
+    if (lane.expires_at && new Date(lane.expires_at).getTime() <= now) continue;
+    // One-way lanes: only usable from_system_id → to_system_id
+    if (lane.is_one_way && lane.from_system_id !== fromSystemId) continue;
+
     if (lane.access_level === "public") return lane;
     if (lane.access_level === "private" && lane.owner_id === playerId) return lane;
     if (lane.access_level === "alliance_only" && playerAllianceId && lane.alliance_id === playerAllianceId) return lane;
