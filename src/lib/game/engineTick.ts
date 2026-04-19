@@ -21,6 +21,7 @@
 
 import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
+import { resolvePlayerInactivity, touchPlayerActivity } from "@/lib/game/inactivity";
 import { applyGrowthResolution, calculateAccumulatedTax } from "@/lib/game/taxes";
 import {
   upkeepPeriodsToResolve,
@@ -64,6 +65,9 @@ export async function runEngineTick(
   playerId: string,
   requestTime: Date = new Date(),
 ): Promise<EngineTickResult> {
+  // ── 0. Inactivity resolution (lazy, before activity timestamp update) ────────
+  await resolvePlayerInactivity(admin, playerId, requestTime).catch(() => undefined);
+
   // ── 1. Fetch colonies ──────────────────────────────────────────────────────
   const { data: rawColonies } = await admin
     .from("colonies")
@@ -73,10 +77,11 @@ export async function runEngineTick(
 
   const colonies: Colony[] = rawColonies ?? [];
   if (colonies.length === 0) {
-    // Still run sol stipend for players with no colonies (prevents softlock).
+    // Still run sol stipend and touch activity for players with no active colonies.
     const { creditsCollected, stipendGranted } = await applyCreditsTick(
       admin, playerId, 0, requestTime,
     );
+    void touchPlayerActivity(admin, playerId, requestTime).catch(() => undefined);
     return {
       coloniesGrown: 0, upkeepPeriodsResolved: 0, ironConsumed: 0,
       foodConsumed: 0, biomassConverted: 0, creditsCollected, stipendGranted,
@@ -441,6 +446,9 @@ export async function runEngineTick(
   const { creditsCollected, stipendGranted } = await applyCreditsTick(
     admin, playerId, totalTaxCollected, requestTime,
   );
+
+  // ── 11. Update last_active_at (after inactivity check, not before) ────────
+  void touchPlayerActivity(admin, playerId, requestTime).catch(() => undefined);
 
   return {
     coloniesGrown:         growthUpdates.length,

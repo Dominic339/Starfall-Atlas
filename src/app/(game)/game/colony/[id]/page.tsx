@@ -40,7 +40,7 @@ import type {
   PlayerResearch,
   SurveyResult,
 } from "@/lib/types/game";
-import { CollectButton, ExtractButton, RevokePermitButton, EuxBuyButton } from "../../_components/ColonyActions";
+import { CollectButton, ExtractButton, RevokePermitButton, EuxBuyButton, ReactivateButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import { runEngineTick } from "@/lib/game/engineTick";
 import type { BodyType } from "@/lib/types/enums";
@@ -394,6 +394,51 @@ export default async function ColonyPage({
           </Link>
         </div>
       </div>
+
+      {/* ── Abandoned banner ──────────────────────────────────────────────── */}
+      {colony.status === "abandoned" && (() => {
+        const windowMs    = BALANCE.inactivity.resolutionWindowDays * 24 * 3_600_000;
+        const abandonedAt = colony.abandoned_at ? new Date(colony.abandoned_at) : now;
+        const collapseAt  = new Date(abandonedAt.getTime() + windowMs);
+        const msLeft      = collapseAt.getTime() - now.getTime();
+        const daysLeft    = Math.max(0, Math.floor(msLeft / 86_400_000));
+        const hoursLeft   = Math.max(0, Math.floor((msLeft % 86_400_000) / 3_600_000));
+        const withinWindow = msLeft > 0;
+        return (
+          <div className="rounded-lg border border-amber-800 bg-amber-950/30 px-4 py-3 space-y-2">
+            <p className="text-sm font-medium text-amber-400">
+              Colony Abandoned
+            </p>
+            {withinWindow ? (
+              <>
+                <p className="text-xs text-zinc-400">
+                  This colony was abandoned due to inactivity. You have{" "}
+                  <span className="font-semibold text-amber-300">
+                    {daysLeft}d {hoursLeft}h
+                  </span>{" "}
+                  left to reactivate before it collapses and the body reopens for others.
+                </p>
+                <ReactivateButton colonyId={colony.id} />
+              </>
+            ) : (
+              <p className="text-xs text-zinc-500">
+                The reactivation window has expired. This colony will collapse on the next engine tick.
+              </p>
+            )}
+          </div>
+        );
+      })()}
+
+      {/* ── Collapsed banner ──────────────────────────────────────────────── */}
+      {colony.status === "collapsed" && (
+        <div className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-4 py-3">
+          <p className="text-sm font-medium text-zinc-500">Colony Collapsed</p>
+          <p className="mt-1 text-xs text-zinc-600">
+            This colony collapsed after the reactivation window expired. The body is now available for re-colonization.
+            Any structures left behind exist as ruins and may be salvaged by the new colony owner.
+          </p>
+        </div>
+      )}
 
       {/* Health warning */}
       {colony.status === "active" && health !== "well_supplied" && (

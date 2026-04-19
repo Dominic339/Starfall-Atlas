@@ -409,3 +409,52 @@ export function UnloadButton({ shipId, summary }: UnloadButtonProps) {
     </div>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Reactivate abandoned colony button
+// ---------------------------------------------------------------------------
+
+export function ReactivateButton({ colonyId }: { colonyId: string }) {
+  const [loading, setLoading] = useState(false);
+  const [done, setDone]       = useState(false);
+  const [error, setError]     = useState<string | null>(null);
+  const router = useRouter();
+
+  async function handleReactivate() {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/game/colony/reactivate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ colonyId }),
+      });
+      const json = await res.json();
+      if (!json.ok) {
+        setError(json.error?.message ?? "Reactivation failed.");
+      } else {
+        setDone(true);
+        router.refresh();
+      }
+    } catch {
+      setError("Network error.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (done) return <p className="text-xs text-emerald-500">Colony reactivated!</p>;
+
+  return (
+    <div className="space-y-1">
+      <button
+        onClick={handleReactivate}
+        disabled={loading}
+        className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+      >
+        {loading ? "Reactivating…" : "Reactivate Colony"}
+      </button>
+      {error && <p className="text-xs text-red-400">{error}</p>}
+    </div>
+  );
+}
