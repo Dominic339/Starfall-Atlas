@@ -110,3 +110,39 @@ body {
 .solar-station-marker {
   animation: solar-station-pulse 2s ease-in-out infinite;
 }
+
+/* Galaxy map: undiscovered star subtle twinkle */
+@keyframes galaxy-star-twinkle {
+  0%, 100% { opacity: 0.18; }
+  45%       { opacity: 0.32; }
+  55%       { opacity: 0.24; }
+}
+
+.galaxy-star-twinkle {
+  animation: galaxy-star-twinkle 4s ease-in-out infinite;
+}
+
+/* Galaxy map: current-location animated pulse ring */
+@keyframes galaxy-current-pulse {
+  0%   { opacity: 0.55; transform: scale(1);    }
+  60%  { opacity: 0.20; transform: scale(1.18); }
+  100% { opacity: 0.55; transform: scale(1);    }
+}
+
+.galaxy-current-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-current-pulse 2.4s ease-in-out infinite;
+}
+
+/* Galaxy map: gate ring slow rotation */
+@keyframes galaxy-gate-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.galaxy-gate-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-gate-spin 12s linear infinite;
+}
