@@ -95,6 +95,8 @@ export interface GovernanceInfo {
   playerColonyCount:  number;
   /** True when the player (or their alliance) currently meets the threshold. */
   canClaimMajority:   boolean;
+  /** Mining royalty rate (0–20%) charged to non-governing extractors. */
+  royaltyRate:        number;
 }
 
 export interface SystemHubClientProps {
@@ -213,17 +215,19 @@ function PlanetPanel({
   canActOnBodies,
   canSurveyBodies,
   isFirstColony,
+  isSystemGovernor,
   onStartSupply,
   onClose,
 }: {
-  body:            BodyInfo;
-  bodyIndex:       number;
-  systemId:        string;
-  canActOnBodies:  boolean;
-  canSurveyBodies: boolean;
-  isFirstColony:   boolean;
-  onStartSupply:   () => void;
-  onClose:         () => void;
+  body:             BodyInfo;
+  bodyIndex:        number;
+  systemId:         string;
+  canActOnBodies:   boolean;
+  canSurveyBodies:  boolean;
+  isFirstColony:    boolean;
+  isSystemGovernor: boolean;
+  onStartSupply:    () => void;
+  onClose:          () => void;
 }) {
   const survey  = useApiAction();
   const found   = useApiAction();
@@ -281,11 +285,13 @@ function PlanetPanel({
         )}
 
         {/* Steward info */}
-        {body.stewardHandle && (
-          body.isPlayerSteward ? (
-            /* Steward: tax rate editor */
+        {(body.stewardHandle || isSystemGovernor) && (
+          (body.isPlayerSteward || (isSystemGovernor && !body.stewardHandle)) ? (
+            /* Steward / system governor: tax rate editor */
             <div className="rounded border border-yellow-800/40 bg-yellow-950/20 px-3 py-2 space-y-2">
-              <p className="text-xs font-medium text-yellow-500">You are the steward</p>
+              <p className="text-xs font-medium text-yellow-500">
+                {body.isPlayerSteward ? "You are the steward" : "Set default permit tax (system governor)"}
+              </p>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-zinc-500 shrink-0">Permit tax:</label>
                 <input
@@ -664,10 +670,12 @@ function SystemOverviewPanel({
   activeLanes:      LaneInfo[];
   governanceInfo:   GovernanceInfo;
 }) {
-  const discover = useApiAction();
-  const gate     = useApiAction();
-  const govClaim = useApiAction();
-  const govContest = useApiAction();
+  const discover    = useApiAction();
+  const gate        = useApiAction();
+  const govClaim    = useApiAction();
+  const govContest  = useApiAction();
+  const setRoyalty  = useApiAction();
+  const [royaltyInput, setRoyaltyInput] = useState<number>(governanceInfo.royaltyRate);
   // Map bodyIndex → other-colony info for quick lookup
   const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
@@ -964,6 +972,45 @@ function SystemOverviewPanel({
                 )}
               </span>
             </div>
+          )}
+
+          {/* Royalty rate — editor for governance holder, read-only for others */}
+          {isDiscovered && (
+            isSystemGovernor ? (
+              <div className="rounded border border-orange-900/40 bg-orange-950/20 px-2 py-1.5 space-y-1.5">
+                <p className="text-xs font-medium text-orange-500">Mining royalty (your system)</p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={0}
+                    max={20}
+                    value={royaltyInput}
+                    onChange={(e) => setRoyaltyInput(Math.max(0, Math.min(20, Number(e.target.value))))}
+                    className="w-12 rounded border border-zinc-700 bg-zinc-800 px-2 py-0.5 text-xs text-zinc-200 text-right"
+                  />
+                  <span className="text-xs text-zinc-600">%</span>
+                  <button
+                    onClick={() => setRoyalty.run(
+                      "/api/game/governance/set-royalty",
+                      { systemId, royaltyRatePct: royaltyInput },
+                      "Royalty rate saved.",
+                    )}
+                    disabled={setRoyalty.loading || royaltyInput === governanceInfo.royaltyRate}
+                    className="rounded bg-orange-800/50 border border-orange-700/40 px-2 py-0.5 text-xs text-orange-300 hover:bg-orange-700/50 transition-colors disabled:opacity-40"
+                  >
+                    {setRoyalty.loading ? "Saving…" : "Save"}
+                  </button>
+                </div>
+                <p className="text-xs text-zinc-600">Charged to non-governing extractors</p>
+                {setRoyalty.error   && <p className="text-xs text-red-400">{setRoyalty.error}</p>}
+                {setRoyalty.success && <p className="text-xs text-orange-400">{setRoyalty.success}</p>}
+              </div>
+            ) : governanceInfo.royaltyRate > 0 ? (
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-zinc-500">Mining royalty</span>
+                <span className="text-xs text-orange-600">{governanceInfo.royaltyRate}%</span>
+              </div>
+            ) : null
           )}
 
           {/* Player influence bar */}
@@ -1283,6 +1330,7 @@ export function SystemHubClient({
             canActOnBodies={canActOnBodies}
             canSurveyBodies={canSurveyBodies}
             isFirstColony={isFirstColony}
+            isSystemGovernor={isSystemGovernor}
             onStartSupply={() => {
               setSupplySourceIdx(selectedBodyIdx);
               setSelectedBodyIdx(null);

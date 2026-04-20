@@ -164,10 +164,10 @@ export default async function SolarSystemPage({
       .select("body_id, steward_id, default_tax_rate_pct")
       .eq("system_id", systemId),
 
-    // System-level stewardship (for governance/gate eligibility)
+    // System-level stewardship (for governance/gate eligibility + royalty)
     admin
       .from("system_stewardship")
-      .select("steward_id, has_governance")
+      .select("steward_id, has_governance, royalty_rate")
       .eq("system_id", systemId)
       .maybeSingle(),
 
@@ -230,7 +230,7 @@ export default async function SolarSystemPage({
   const stewardshipRows   = listResult<StewardRow>(stewardshipRes).data ?? [];
 
   // System-level governance
-  const systemStewardRow = systemStewardshipRes.data as { steward_id: string; has_governance: boolean } | null;
+  const systemStewardRow = systemStewardshipRes.data as { steward_id: string; has_governance: boolean; royalty_rate: number } | null;
   const isSystemGovernor = !!(systemStewardRow && systemStewardRow.steward_id === player.id && systemStewardRow.has_governance);
 
   // Gate for this system
@@ -357,6 +357,7 @@ export default async function SolarSystemPage({
     totalInfluence,
     playerColonyCount,
     canClaimMajority,
+    royaltyRate: systemStewardRow?.royalty_rate ?? 0,
   };
 
   // Resolve handles for other colony owners

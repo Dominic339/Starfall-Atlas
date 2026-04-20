@@ -16,7 +16,7 @@
  *   - Reset view button
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -232,6 +232,26 @@ interface GalaxyMapClientProps {
   /** Body stewardships across all systems (for permit / tax panel). */
   bodyStewrds: GalaxyBodySteward[];
 }
+
+// ---------------------------------------------------------------------------
+// Pre-computed background star field (static, deterministic — no React state needed)
+// ---------------------------------------------------------------------------
+
+const BG_STARS: { x: number; y: number; r: number; opacity: number; warm: boolean }[] = (() => {
+  const out: { x: number; y: number; r: number; opacity: number; warm: boolean }[] = [];
+  let s = 0x9e3779b9 >>> 0;
+  const lcg = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 0x100000000; };
+  for (let i = 0; i < 420; i++) {
+    out.push({
+      x:       lcg() * 1000,
+      y:       lcg() * 700,
+      r:       0.25 + lcg() * 0.85,
+      opacity: 0.07 + lcg() * 0.28,
+      warm:    lcg() > 0.65,
+    });
+  }
+  return out;
+})();
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1331,6 +1351,17 @@ export function GalaxyMapClient({
         >
           {/* ── Defs: glow filter, markers ──────────────────────────────── */}
           <defs>
+            {/* Layered star glow — used on main star bodies */}
+            <filter id="star-glow" x="-120%" y="-120%" width="340%" height="340%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur1" />
+              <feGaussianBlur in="SourceGraphic" stdDeviation="6"   result="blur2" />
+              <feMerge>
+                <feMergeNode in="blur2" />
+                <feMergeNode in="blur1" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            {/* Soft glow — lighter version for secondary elements */}
             <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur stdDeviation="3" result="blur" />
               <feMerge>
@@ -1345,22 +1376,58 @@ export function GalaxyMapClient({
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
-            {/* Nebula-like background gradient */}
+            {/* Soft blur for undiscovered star twinkle */}
+            <filter id="twinkle-blur" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="1.2" />
+            </filter>
+            {/* Nebula patch gradients */}
+            <radialGradient id="nebula1" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#4c1d95" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#4c1d95" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula2" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#164e63" stopOpacity="0.14" />
+              <stop offset="100%" stopColor="#164e63" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula3" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#7f1d1d" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#7f1d1d" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula4" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#1e3a5f" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#1e3a5f" stopOpacity="0"    />
+            </radialGradient>
+            {/* Core nebula glow (central density) */}
             <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#1a1a2e" stopOpacity="0.6" />
-              <stop offset="100%" stopColor="#06060a" stopOpacity="0" />
+              <stop offset="0%"   stopColor="#1a1a2e" stopOpacity="0.7" />
+              <stop offset="100%" stopColor="#06060a" stopOpacity="0"   />
             </radialGradient>
           </defs>
 
-          {/* Background */}
-          <rect width={viewboxW} height={viewboxH} fill="#06060a" />
-          <ellipse
-            cx={viewboxW / 2}
-            cy={viewboxH / 2}
-            rx={viewboxW * 0.45}
-            ry={viewboxH * 0.4}
-            fill="url(#bgGlow)"
-          />
+          {/* ── Background: dark void + nebula patches + star field ──────── */}
+          <rect width={viewboxW} height={viewboxH} fill="#05050d" />
+
+          {/* Nebula patches — soft color washes at different positions */}
+          <ellipse cx={viewboxW * 0.28} cy={viewboxH * 0.35} rx={180} ry={130} fill="url(#nebula1)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.72} cy={viewboxH * 0.60} rx={220} ry={150} fill="url(#nebula2)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.55} cy={viewboxH * 0.20} rx={160} ry={100} fill="url(#nebula3)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.15} cy={viewboxH * 0.75} rx={140} ry={110} fill="url(#nebula4)" pointerEvents="none" />
+          {/* Central density haze */}
+          <ellipse cx={viewboxW / 2} cy={viewboxH / 2} rx={viewboxW * 0.45} ry={viewboxH * 0.4} fill="url(#bgGlow)" pointerEvents="none" />
+
+          {/* Background star field — tiny distant stars (not part of the catalog) */}
+          <g pointerEvents="none" className="galaxy-bg-stars">
+            {BG_STARS.map((s, i) => (
+              <circle
+                key={i}
+                cx={s.x}
+                cy={s.y}
+                r={s.r}
+                fill={s.warm ? "#ffe8d6" : "#cce8ff"}
+                opacity={s.opacity}
+              />
+            ))}
+          </g>
 
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
@@ -1646,15 +1713,15 @@ export function GalaxyMapClient({
               );
             })}
 
-            {/* ── System stars ──────────────────────────────────────────────── */}
+            {/* ── System stars ────────────────────────────────────────────── */}
             {systems.map((sys) => {
               const r = nodeRadius(sys);
               const color = spectralColor(sys.spectralClass);
               const isHovered   = sys.id === hoveredId;
               const isSelected  = sys.id === selectedId;
               const isCurrent   = sys.isCurrentLocation;
-              const isDim       = !sys.isDiscovered && !sys.hasDockedShip;
-              const opacity     = isDim ? 0.35 : 1;
+              const isDisc      = sys.isDiscovered;
+              const isDim       = !isDisc && !sys.hasDockedShip;
 
               return (
                 <g
@@ -1664,72 +1731,186 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
-                  {/* Gate ring — violet diamond-ish halo for systems with active gates */}
+                  {/* ── Undiscovered: faint twinkle only ─────────────────── */}
+                  {isDim && (
+                    <>
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r * 1.8}
+                        fill={color}
+                        opacity={0.04}
+                        pointerEvents="none"
+                        filter="url(#twinkle-blur)"
+                      />
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r}
+                        fill="#4b5563"
+                        opacity={0.30}
+                        className="galaxy-star-twinkle"
+                        pointerEvents="none"
+                      />
+                    </>
+                  )}
+
+                  {/* ── Discovered / occupied: full corona rendering ────── */}
+                  {!isDim && (
+                    <>
+                      {/* Outermost diffuse halo */}
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r * 4.5}
+                        fill={isCurrent ? "#34d399" : color}
+                        opacity={sys.isStationLocation ? 0.07 : 0.04}
+                        pointerEvents="none"
+                      />
+                      {/* Outer corona */}
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r * 2.8}
+                        fill={isCurrent ? "#34d399" : color}
+                        opacity={sys.isStationLocation ? 0.12 : 0.08}
+                        pointerEvents="none"
+                      />
+                      {/* Inner corona */}
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r * 1.7}
+                        fill={isCurrent ? "#6ee7b7" : color}
+                        opacity={0.18}
+                        pointerEvents="none"
+                      />
+                      {/* Diffraction spikes — only for non-tiny stars */}
+                      {r >= 6 && (
+                        <g pointerEvents="none" opacity={0.22}>
+                          <line
+                            x1={sys.svgX - r * 3} y1={sys.svgY}
+                            x2={sys.svgX + r * 3} y2={sys.svgY}
+                            stroke={isCurrent ? "#6ee7b7" : color}
+                            strokeWidth={0.6 / scale}
+                          />
+                          <line
+                            x1={sys.svgX} y1={sys.svgY - r * 3}
+                            x2={sys.svgX} y2={sys.svgY + r * 3}
+                            stroke={isCurrent ? "#6ee7b7" : color}
+                            strokeWidth={0.6 / scale}
+                          />
+                        </g>
+                      )}
+                      {/* Diagonal spikes for O/B/A type (hot, bright) */}
+                      {(sys.spectralClass === "O" || sys.spectralClass === "B" || sys.spectralClass === "A") && r >= 5 && (
+                        <g pointerEvents="none" opacity={0.13}>
+                          <line
+                            x1={sys.svgX - r * 2.2} y1={sys.svgY - r * 2.2}
+                            x2={sys.svgX + r * 2.2} y2={sys.svgY + r * 2.2}
+                            stroke={color}
+                            strokeWidth={0.5 / scale}
+                          />
+                          <line
+                            x1={sys.svgX + r * 2.2} y1={sys.svgY - r * 2.2}
+                            x2={sys.svgX - r * 2.2} y2={sys.svgY + r * 2.2}
+                            stroke={color}
+                            strokeWidth={0.5 / scale}
+                          />
+                        </g>
+                      )}
+                    </>
+                  )}
+
+                  {/* Gate ring — hexagonal outline for systems with active gates */}
                   {gateSystemIds.has(sys.id) && (
-                    <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={r + 5}
-                      fill="none"
-                      stroke="#7c3aed"
-                      strokeWidth={1.5 / scale}
-                      strokeDasharray={`${4 / scale},${3 / scale}`}
-                      opacity={0.7}
-                      pointerEvents="none"
-                    />
+                    <g pointerEvents="none">
+                      {/* Hexagon approximated as a circle with dashes that look like segments */}
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 6}
+                        fill="none"
+                        stroke="#7c3aed"
+                        strokeWidth={1.2 / scale}
+                        strokeDasharray={`${(r + 6) * Math.PI / 6 * 0.72 / scale} ${(r + 6) * Math.PI / 6 * 0.28 / scale}`}
+                        opacity={0.75}
+                        className="galaxy-gate-spin"
+                      />
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 8.5}
+                        fill="none"
+                        stroke="#a78bfa"
+                        strokeWidth={0.5 / scale}
+                        opacity={0.30}
+                      />
+                    </g>
                   )}
 
                   {/* Selection ring */}
                   {isSelected && (
-                    <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={(r + 7) / scale > r + 7 ? r + 7 : r + 7}
-                      fill="none"
-                      stroke="#818cf8"
-                      strokeWidth={1.5 / scale}
-                    />
+                    <>
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 9}
+                        fill="none"
+                        stroke="#818cf8"
+                        strokeWidth={1.5 / scale}
+                        opacity={0.85}
+                      />
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 13}
+                        fill="none"
+                        stroke="#818cf8"
+                        strokeWidth={0.5 / scale}
+                        opacity={0.25}
+                        strokeDasharray={`${3 / scale} ${2 / scale}`}
+                      />
+                    </>
                   )}
 
-                  {/* Current location pulse ring */}
+                  {/* Current location — animated pulse ring */}
                   {isCurrent && (
-                    <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={r + 12}
-                      fill="none"
-                      stroke="#34d399"
-                      strokeWidth={1 / scale}
-                      opacity={0.4}
-                    />
+                    <>
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 14}
+                        fill="none"
+                        stroke="#34d399"
+                        strokeWidth={1 / scale}
+                        className="galaxy-current-pulse"
+                        pointerEvents="none"
+                      />
+                      <circle
+                        cx={sys.svgX} cy={sys.svgY}
+                        r={r + 20}
+                        fill="none"
+                        stroke="#34d399"
+                        strokeWidth={0.4 / scale}
+                        opacity={0.15}
+                        pointerEvents="none"
+                      />
+                    </>
                   )}
 
-                  {/* Hover hover ring */}
+                  {/* Hover ring */}
                   {isHovered && !isSelected && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={r + 5}
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={r + 7}
                       fill="none"
                       stroke={color}
                       strokeWidth={1 / scale}
-                      opacity={0.4}
+                      opacity={0.45}
                     />
                   )}
 
-                  {/* Drag-target highlight ring — ship drag, fleet drag, or station relocation */}
+                  {/* Drag-target highlight */}
                   {(dragInfo?.targetId === sys.id || stationDrag?.targetId === sys.id || fleetDragInfo?.targetId === sys.id) && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={r + 10}
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={r + 11}
                       fill="none"
                       stroke={
-                        stationDrag?.targetId === sys.id
-                          ? "#fbbf24"
-                          : fleetDragInfo?.targetId === sys.id
-                            ? "#c4b5fd"
-                            : "#a5b4fc"
+                        stationDrag?.targetId === sys.id   ? "#fbbf24"
+                        : fleetDragInfo?.targetId === sys.id ? "#c4b5fd"
+                        :                                      "#a5b4fc"
                       }
                       strokeWidth={2 / scale}
                       opacity={0.9}
@@ -1737,35 +1918,21 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Station aura — breathing fill glow marks the player hub */}
+                  {/* Station breathing aura */}
                   {sys.isStationLocation && (
-                    <>
-                      <circle
-                        cx={sys.svgX}
-                        cy={sys.svgY}
-                        r={r * 3.5}
-                        fill={color}
-                        className="galaxy-station-aura"
-                        pointerEvents="none"
-                      />
-                      <circle
-                        cx={sys.svgX}
-                        cy={sys.svgY}
-                        r={r + 9}
-                        fill="none"
-                        stroke="#f59e0b"
-                        strokeWidth={1 / scale}
-                        opacity={0.30}
-                        pointerEvents="none"
-                      />
-                    </>
+                    <circle
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={r * 3.2}
+                      fill={color}
+                      className="galaxy-station-aura"
+                      pointerEvents="none"
+                    />
                   )}
 
-                  {/* Colony breathing ring — pulse for player's own colonies (green) */}
+                  {/* Colony orbit ring — player's own */}
                   {sys.myColonyCount > 0 && !isCurrent && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
+                      cx={sys.svgX} cy={sys.svgY}
                       r={r + 5}
                       fill="none"
                       stroke="#34d399"
@@ -1774,11 +1941,10 @@ export function GalaxyMapClient({
                       pointerEvents="none"
                     />
                   )}
-                  {/* Other players' colonies ring (amber, slightly larger) */}
+                  {/* Other players' colony ring */}
                   {(sys.colonyCount - sys.myColonyCount) > 0 && !isCurrent && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
+                      cx={sys.svgX} cy={sys.svgY}
                       r={r + 8}
                       fill="none"
                       stroke="#f59e0b"
@@ -1789,68 +1955,10 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Star glow (discovered/important only) */}
-                  {(sys.isDiscovered || sys.colonyCount > 0) && (
+                  {/* Transit origin / destination rings */}
+                  {sys.isTransitOrigin && !isCurrent && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
-                      r={r * 2}
-                      fill={color}
-                      opacity={sys.isStationLocation ? 0.14 : 0.08}
-                      pointerEvents="none"
-                    />
-                  )}
-
-                  {/* Main star body */}
-                  <circle
-                    cx={sys.svgX}
-                    cy={sys.svgY}
-                    r={r}
-                    fill={isDim ? "#374151" : isCurrent ? "#34d399" : color}
-                    opacity={opacity}
-                    filter={
-                      isCurrent || isSelected || sys.isStationLocation
-                        ? "url(#glow)"
-                        : undefined
-                    }
-                  />
-
-                  {/* Colony dot (top-right of star) — green = mine, amber = others' */}
-                  {sys.myColonyCount > 0 && (
-                    <circle
-                      cx={sys.svgX + r * 0.7}
-                      cy={sys.svgY - r * 0.7}
-                      r={3}
-                      fill="#34d399"
-                      opacity={0.9}
-                    />
-                  )}
-                  {(sys.colonyCount - sys.myColonyCount) > 0 && (
-                    <circle
-                      cx={sys.svgX + r * 0.7}
-                      cy={sys.svgY - r * 0.7 + (sys.myColonyCount > 0 ? 5 : 0)}
-                      r={2.5}
-                      fill="#f59e0b"
-                      opacity={0.75}
-                    />
-                  )}
-
-                  {/* Fleet indicator (bottom-right) */}
-                  {sys.hasDockedFleet && (
-                    <circle
-                      cx={sys.svgX + r * 0.7}
-                      cy={sys.svgY + r * 0.7}
-                      r={2.5}
-                      fill="#a78bfa"
-                      opacity={0.9}
-                    />
-                  )}
-
-                  {/* Transit origin marker — ship departed from here */}
-                  {sys.isTransitOrigin && !sys.isCurrentLocation && (
-                    <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
+                      cx={sys.svgX} cy={sys.svgY}
                       r={r + 7}
                       fill="none"
                       stroke="#6366f1"
@@ -1858,11 +1966,9 @@ export function GalaxyMapClient({
                       opacity={0.35}
                     />
                   )}
-                  {/* In-transit destination marker — ship is heading here */}
                   {sys.isInTransitTarget && (
                     <circle
-                      cx={sys.svgX}
-                      cy={sys.svgY}
+                      cx={sys.svgX} cy={sys.svgY}
                       r={r + 5}
                       fill="none"
                       stroke="#818cf8"
@@ -1872,38 +1978,104 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Steward crown mark (small ring, player-owned) */}
+                  {/* ── Main star body ─────────────────────────────────── */}
+                  {!isDim && (
+                    <circle
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={r}
+                      fill={isCurrent ? "#34d399" : color}
+                      filter="url(#star-glow)"
+                    />
+                  )}
+                  {/* Bright core highlight */}
+                  {!isDim && (
+                    <circle
+                      cx={sys.svgX} cy={sys.svgY}
+                      r={r * 0.38}
+                      fill="white"
+                      opacity={0.55}
+                      pointerEvents="none"
+                    />
+                  )}
+
+                  {/* Colony dot — green = mine */}
+                  {sys.myColonyCount > 0 && (
+                    <circle
+                      cx={sys.svgX + r * 0.75}
+                      cy={sys.svgY - r * 0.75}
+                      r={2.5}
+                      fill="#34d399"
+                      opacity={0.9}
+                    />
+                  )}
+                  {/* Colony dot — others' */}
+                  {(sys.colonyCount - sys.myColonyCount) > 0 && (
+                    <circle
+                      cx={sys.svgX + r * 0.75}
+                      cy={sys.svgY - r * 0.75 + (sys.myColonyCount > 0 ? 5 : 0)}
+                      r={2}
+                      fill="#f59e0b"
+                      opacity={0.75}
+                    />
+                  )}
+
+                  {/* Fleet indicator dot */}
+                  {sys.hasDockedFleet && (
+                    <circle
+                      cx={sys.svgX + r * 0.75}
+                      cy={sys.svgY + r * 0.75}
+                      r={2.5}
+                      fill="#a78bfa"
+                      opacity={0.9}
+                    />
+                  )}
+
+                  {/* Steward crown mark */}
                   {sys.isPlayerSteward && (
                     <circle
-                      cx={sys.svgX - r * 0.7}
-                      cy={sys.svgY - r * 0.7}
+                      cx={sys.svgX - r * 0.75}
+                      cy={sys.svgY - r * 0.75}
                       r={2.5}
                       fill="#fbbf24"
                       opacity={0.9}
                     />
                   )}
 
-                  {/* System label */}
-                  {showLabel(sys) && (
-                    <text
-                      x={sys.svgX}
-                      y={sys.svgY + r + 11}
-                      textAnchor="middle"
-                      fontSize={10 / scale < 8 ? 8 : 10 / scale > 13 ? 13 : 10 / scale}
-                      fill={
-                        isCurrent
-                          ? "#34d399"
-                          : isSelected
-                            ? "#a5b4fc"
-                            : sys.isDiscovered
-                              ? "#d1d5db"
-                              : "#6b7280"
-                      }
-                      className="select-none pointer-events-none"
-                    >
-                      {sys.name}
-                    </text>
-                  )}
+                  {/* System label — with subtle background pill */}
+                  {showLabel(sys) && (() => {
+                    const labelY = sys.svgY + r + 12;
+                    const labelX = sys.svgX;
+                    const approxW = sys.name.length * 5.8;
+                    const fs = Math.max(8, Math.min(13, 10 / scale));
+                    const labelColor =
+                      isCurrent   ? "#34d399"
+                      : isSelected  ? "#a5b4fc"
+                      : isDisc      ? "#d1d5db"
+                      :               "#6b7280";
+                    return (
+                      <g pointerEvents="none" className="select-none">
+                        <rect
+                          x={labelX - approxW / 2 - 3}
+                          y={labelY - fs * 0.85}
+                          width={approxW + 6}
+                          height={fs + 3}
+                          rx={2}
+                          fill="#05050d"
+                          fillOpacity={0.65}
+                        />
+                        <text
+                          x={labelX}
+                          y={labelY}
+                          textAnchor="middle"
+                          fontSize={fs}
+                          fill={labelColor}
+                          letterSpacing="0.3"
+                        >
+                          {sys.name}
+                        </text>
+                      </g>
+                    );
+                  })()}
                 </g>
               );
             })}
