@@ -16,7 +16,7 @@
  *   - Reset view button
  */
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 
@@ -232,6 +232,26 @@ interface GalaxyMapClientProps {
   /** Body stewardships across all systems (for permit / tax panel). */
   bodyStewrds: GalaxyBodySteward[];
 }
+
+// ---------------------------------------------------------------------------
+// Pre-computed background star field (static, deterministic — no React state needed)
+// ---------------------------------------------------------------------------
+
+const BG_STARS: { x: number; y: number; r: number; opacity: number; warm: boolean }[] = (() => {
+  const out: { x: number; y: number; r: number; opacity: number; warm: boolean }[] = [];
+  let s = 0x9e3779b9 >>> 0;
+  const lcg = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 0x100000000; };
+  for (let i = 0; i < 420; i++) {
+    out.push({
+      x:       lcg() * 1000,
+      y:       lcg() * 700,
+      r:       0.25 + lcg() * 0.85,
+      opacity: 0.07 + lcg() * 0.28,
+      warm:    lcg() > 0.65,
+    });
+  }
+  return out;
+})();
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -1331,6 +1351,17 @@ export function GalaxyMapClient({
         >
           {/* ── Defs: glow filter, markers ──────────────────────────────── */}
           <defs>
+            {/* Layered star glow — used on main star bodies */}
+            <filter id="star-glow" x="-120%" y="-120%" width="340%" height="340%">
+              <feGaussianBlur in="SourceGraphic" stdDeviation="2.5" result="blur1" />
+              <feGaussianBlur in="SourceGraphic" stdDeviation="6"   result="blur2" />
+              <feMerge>
+                <feMergeNode in="blur2" />
+                <feMergeNode in="blur1" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+            {/* Soft glow — lighter version for secondary elements */}
             <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
               <feGaussianBlur stdDeviation="3" result="blur" />
               <feMerge>
@@ -1345,22 +1376,58 @@ export function GalaxyMapClient({
                 <feMergeNode in="SourceGraphic" />
               </feMerge>
             </filter>
-            {/* Nebula-like background gradient */}
+            {/* Soft blur for undiscovered star twinkle */}
+            <filter id="twinkle-blur" x="-100%" y="-100%" width="300%" height="300%">
+              <feGaussianBlur stdDeviation="1.2" />
+            </filter>
+            {/* Nebula patch gradients */}
+            <radialGradient id="nebula1" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#4c1d95" stopOpacity="0.18" />
+              <stop offset="100%" stopColor="#4c1d95" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula2" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#164e63" stopOpacity="0.14" />
+              <stop offset="100%" stopColor="#164e63" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula3" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#7f1d1d" stopOpacity="0.10" />
+              <stop offset="100%" stopColor="#7f1d1d" stopOpacity="0"    />
+            </radialGradient>
+            <radialGradient id="nebula4" cx="50%" cy="50%" r="50%">
+              <stop offset="0%"   stopColor="#1e3a5f" stopOpacity="0.12" />
+              <stop offset="100%" stopColor="#1e3a5f" stopOpacity="0"    />
+            </radialGradient>
+            {/* Core nebula glow (central density) */}
             <radialGradient id="bgGlow" cx="50%" cy="50%" r="50%">
-              <stop offset="0%" stopColor="#1a1a2e" stopOpacity="0.6" />
-              <stop offset="100%" stopColor="#06060a" stopOpacity="0" />
+              <stop offset="0%"   stopColor="#1a1a2e" stopOpacity="0.7" />
+              <stop offset="100%" stopColor="#06060a" stopOpacity="0"   />
             </radialGradient>
           </defs>
 
-          {/* Background */}
-          <rect width={viewboxW} height={viewboxH} fill="#06060a" />
-          <ellipse
-            cx={viewboxW / 2}
-            cy={viewboxH / 2}
-            rx={viewboxW * 0.45}
-            ry={viewboxH * 0.4}
-            fill="url(#bgGlow)"
-          />
+          {/* ── Background: dark void + nebula patches + star field ──────── */}
+          <rect width={viewboxW} height={viewboxH} fill="#05050d" />
+
+          {/* Nebula patches — soft color washes at different positions */}
+          <ellipse cx={viewboxW * 0.28} cy={viewboxH * 0.35} rx={180} ry={130} fill="url(#nebula1)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.72} cy={viewboxH * 0.60} rx={220} ry={150} fill="url(#nebula2)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.55} cy={viewboxH * 0.20} rx={160} ry={100} fill="url(#nebula3)" pointerEvents="none" />
+          <ellipse cx={viewboxW * 0.15} cy={viewboxH * 0.75} rx={140} ry={110} fill="url(#nebula4)" pointerEvents="none" />
+          {/* Central density haze */}
+          <ellipse cx={viewboxW / 2} cy={viewboxH / 2} rx={viewboxW * 0.45} ry={viewboxH * 0.4} fill="url(#bgGlow)" pointerEvents="none" />
+
+          {/* Background star field — tiny distant stars (not part of the catalog) */}
+          <g pointerEvents="none" className="galaxy-bg-stars">
+            {BG_STARS.map((s, i) => (
+              <circle
+                key={i}
+                cx={s.x}
+                cy={s.y}
+                r={s.r}
+                fill={s.warm ? "#ffe8d6" : "#cce8ff"}
+                opacity={s.opacity}
+              />
+            ))}
+          </g>
 
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
