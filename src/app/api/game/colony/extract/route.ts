@@ -34,6 +34,7 @@ import {
   researchLevel,
   extractionBonusMultiplier,
 } from "@/lib/game/colonyStructures";
+import { BALANCE } from "@/lib/config/balance";
 import type {
   Colony,
   Structure,
@@ -193,8 +194,84 @@ export async function POST(request: NextRequest) {
       { onConflict: "location_type,location_id,resource_type" },
     );
 
+  // ── Royalty payment (fire-and-forget) ─────────────────────────────────────
+  // Derive system_id from body_id format "systemId:bodyIndex"
+  const lastColon  = colony.body_id.lastIndexOf(":");
+  const systemId   = lastColon > 0 ? colony.body_id.slice(0, lastColon) : null;
+
+  if (systemId) {
+    void payRoyalty(admin, systemId, player.id, extracted);
+  }
+
   return Response.json({
     ok: true,
     data: { extracted, colonyId },
   });
+}
+
+// ---------------------------------------------------------------------------
+// Royalty helper — runs fire-and-forget, never throws into the main request
+// ---------------------------------------------------------------------------
+
+type ExtractionAmount = { resource_type: string; quantity: number };
+
+async function payRoyalty(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  admin: any,
+  systemId: string,
+  colonyOwnerId: string,
+  extracted: ExtractionAmount[],
+): Promise<void> {
+  try {
+    const { data: stewardRow } = await admin
+      .from("system_stewardship")
+      .select("steward_id, has_governance, royalty_rate")
+      .eq("system_id", systemId)
+      .maybeSingle() as { data: { steward_id: string; has_governance: boolean; royalty_rate: number } | null };
+
+    if (!stewardRow || stewardRow.royalty_rate <= 0) return;
+
+    let governanceHolderId: string;
+    if (stewardRow.has_governance) {
+      governanceHolderId = stewardRow.steward_id;
+    } else {
+      const { data: majorityRow } = await admin
+        .from("system_majority_control")
+        .select("controller_id, is_confirmed")
+        .eq("system_id", systemId)
+        .maybeSingle() as { data: { controller_id: string; is_confirmed: boolean } | null };
+      if (!majorityRow?.is_confirmed) return;
+      governanceHolderId = majorityRow.controller_id;
+    }
+
+    // No royalty when colony owner IS the governance holder
+    if (governanceHolderId === colonyOwnerId) return;
+
+    // Compute credit value using EUX floor prices as a benchmark
+    const floorPrices = BALANCE.emergencyExchange.floorPricePerUnit as Record<string, number>;
+    const DEFAULT_CREDIT_VALUE = 2; // credits/unit for unlisted resources
+    let totalCreditValue = 0;
+    for (const item of extracted) {
+      const pricePerUnit = floorPrices[item.resource_type] ?? DEFAULT_CREDIT_VALUE;
+      totalCreditValue += item.quantity * pricePerUnit;
+    }
+
+    const royaltyCredits = Math.floor(totalCreditValue * stewardRow.royalty_rate / 100);
+    if (royaltyCredits <= 0) return;
+
+    // Credit the governance holder's wallet
+    const { data: govPlayer } = await admin
+      .from("players")
+      .select("credits")
+      .eq("id", governanceHolderId)
+      .maybeSingle() as { data: { credits: number } | null };
+    if (!govPlayer) return;
+
+    await admin
+      .from("players")
+      .update({ credits: govPlayer.credits + royaltyCredits })
+      .eq("id", governanceHolderId);
+  } catch {
+    // Fire-and-forget — never fail the main extraction
+  }
 }

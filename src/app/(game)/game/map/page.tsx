@@ -98,6 +98,22 @@ export default async function GalaxyMapPage() {
   await runEngineTick(admin, player.id, requestTime);
   await runTravelResolution(admin, player.id, requestTime);
 
+  // ── Sol safety stipend (GAME_RULES.md §22) ───────────────────────────────
+  // Lazy: grant small daily credit to players at or below the threshold.
+  if (player.credits <= BALANCE.solStipend.creditThreshold) {
+    const lastStipend = player.sol_stipend_last_at ? new Date(player.sol_stipend_last_at) : null;
+    const msPerDay = 24 * 60 * 60 * 1000;
+    if (!lastStipend || requestTime.getTime() - lastStipend.getTime() >= msPerDay) {
+      await admin
+        .from("players")
+        .update({
+          credits: player.credits + BALANCE.solStipend.dailyCredits,
+          sol_stipend_last_at: requestTime.toISOString(),
+        })
+        .eq("id", player.id);
+    }
+  }
+
   // ── Parallel data fetches ─────────────────────────────────────────────────
   const [
     shipsRes,
@@ -690,6 +706,9 @@ export default async function GalaxyMapPage() {
           )}
         </span>
         <div className="ml-auto flex items-center gap-3">
+          <Link href="/game/leaderboard" className="hover:text-zinc-400 transition-colors">
+            Leaderboard
+          </Link>
           <Link href="/game/station" className="hover:text-zinc-400 transition-colors">
             Station →
           </Link>
