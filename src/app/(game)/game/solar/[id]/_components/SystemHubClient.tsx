@@ -213,17 +213,19 @@ function PlanetPanel({
   canActOnBodies,
   canSurveyBodies,
   isFirstColony,
+  isSystemGovernor,
   onStartSupply,
   onClose,
 }: {
-  body:            BodyInfo;
-  bodyIndex:       number;
-  systemId:        string;
-  canActOnBodies:  boolean;
-  canSurveyBodies: boolean;
-  isFirstColony:   boolean;
-  onStartSupply:   () => void;
-  onClose:         () => void;
+  body:             BodyInfo;
+  bodyIndex:        number;
+  systemId:         string;
+  canActOnBodies:   boolean;
+  canSurveyBodies:  boolean;
+  isFirstColony:    boolean;
+  isSystemGovernor: boolean;
+  onStartSupply:    () => void;
+  onClose:          () => void;
 }) {
   const survey  = useApiAction();
   const found   = useApiAction();
@@ -281,11 +283,13 @@ function PlanetPanel({
         )}
 
         {/* Steward info */}
-        {body.stewardHandle && (
-          body.isPlayerSteward ? (
-            /* Steward: tax rate editor */
+        {(body.stewardHandle || isSystemGovernor) && (
+          (body.isPlayerSteward || (isSystemGovernor && !body.stewardHandle)) ? (
+            /* Steward / system governor: tax rate editor */
             <div className="rounded border border-yellow-800/40 bg-yellow-950/20 px-3 py-2 space-y-2">
-              <p className="text-xs font-medium text-yellow-500">You are the steward</p>
+              <p className="text-xs font-medium text-yellow-500">
+                {body.isPlayerSteward ? "You are the steward" : "Set default permit tax (system governor)"}
+              </p>
               <div className="flex items-center gap-2">
                 <label className="text-xs text-zinc-500 shrink-0">Permit tax:</label>
                 <input
@@ -1283,6 +1287,7 @@ export function SystemHubClient({
             canActOnBodies={canActOnBodies}
             canSurveyBodies={canSurveyBodies}
             isFirstColony={isFirstColony}
+            isSystemGovernor={isSystemGovernor}
             onStartSupply={() => {
               setSupplySourceIdx(selectedBodyIdx);
               setSelectedBodyIdx(null);
