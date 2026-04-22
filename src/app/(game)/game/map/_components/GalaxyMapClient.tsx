@@ -19,6 +19,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ColonyMapPanel } from "./ColonyMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -532,6 +533,9 @@ export function GalaxyMapClient({
   stationDragRef.current = stationDrag;
   const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
   const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
+  // ── Colony map panel ──────────────────────────────────────────────────────
+  const [colonyPanelSystemId, setColonyPanelSystemId] = useState<string | null>(null);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2957,6 +2961,14 @@ export function GalaxyMapClient({
                       </div>
                     );
                   })()}
+                  {selectedSystem.myColonyCount > 0 && (
+                    <button
+                      onClick={() => setColonyPanelSystemId(selectedSystem.id)}
+                      className="mt-2 w-full rounded border border-emerald-800/60 bg-emerald-950/30 px-2 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-900/40 hover:text-emerald-300 transition-colors"
+                    >
+                      Manage {selectedSystem.myColonyCount === 1 ? "Colony" : `${selectedSystem.myColonyCount} Colonies`} →
+                    </button>
+                  )}
                 </div>
               )}
 
