@@ -3667,6 +3667,14 @@ export function GalaxyMapClient({
           </div>
         )}
       </div>
+
+      {/* Colony management overlay */}
+      {colonyPanelSystemId && (
+        <ColonyMapPanel
+          systemId={colonyPanelSystemId}
+          onClose={() => setColonyPanelSystemId(null)}
+        />
+      )}
     </div>
   );
 }
