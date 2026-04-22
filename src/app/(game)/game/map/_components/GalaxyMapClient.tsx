@@ -20,6 +20,7 @@ import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
+import { MarketMapPanel } from "./MarketMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -536,6 +537,9 @@ export function GalaxyMapClient({
 
   // ── Colony map panel ──────────────────────────────────────────────────────
   const [colonyPanelSystemId, setColonyPanelSystemId] = useState<string | null>(null);
+
+  // ── Market panel ───────────────────────────────────────────────────────────
+  const [marketPanelOpen, setMarketPanelOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2618,6 +2622,14 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── Market button (top-left) ─────────────────────────────────────── */}
+        <button
+          onClick={() => setMarketPanelOpen(true)}
+          className="absolute left-4 top-4 rounded border border-amber-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-amber-400/80 hover:border-amber-700 hover:text-amber-300 transition-colors backdrop-blur-sm"
+        >
+          Market
+        </button>
+
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
           <button
@@ -3674,6 +3686,11 @@ export function GalaxyMapClient({
           systemId={colonyPanelSystemId}
           onClose={() => setColonyPanelSystemId(null)}
         />
+      )}
+
+      {/* Market overlay */}
+      {marketPanelOpen && (
+        <MarketMapPanel onClose={() => setMarketPanelOpen(false)} />
       )}
     </div>
   );
