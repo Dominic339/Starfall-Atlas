@@ -21,6 +21,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
 import { MarketMapPanel } from "./MarketMapPanel";
+import { ResearchMapPanel } from "./ResearchMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -540,6 +541,9 @@ export function GalaxyMapClient({
 
   // ── Market panel ───────────────────────────────────────────────────────────
   const [marketPanelOpen, setMarketPanelOpen] = useState(false);
+
+  // ── Research panel ─────────────────────────────────────────────────────────
+  const [researchPanelOpen, setResearchPanelOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2622,13 +2626,21 @@ export function GalaxyMapClient({
           </div>
         )}
 
-        {/* ── Market button (top-left) ─────────────────────────────────────── */}
-        <button
-          onClick={() => setMarketPanelOpen(true)}
-          className="absolute left-4 top-4 rounded border border-amber-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-amber-400/80 hover:border-amber-700 hover:text-amber-300 transition-colors backdrop-blur-sm"
-        >
-          Market
-        </button>
+        {/* ── Top-left quick-access buttons ────────────────────────────────── */}
+        <div className="absolute left-4 top-4 flex gap-2">
+          <button
+            onClick={() => setMarketPanelOpen(true)}
+            className="rounded border border-amber-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-amber-400/80 hover:border-amber-700 hover:text-amber-300 transition-colors backdrop-blur-sm"
+          >
+            Market
+          </button>
+          <button
+            onClick={() => setResearchPanelOpen(true)}
+            className="rounded border border-indigo-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-indigo-400/80 hover:border-indigo-700 hover:text-indigo-300 transition-colors backdrop-blur-sm"
+          >
+            Research
+          </button>
+        </div>
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
@@ -3691,6 +3703,11 @@ export function GalaxyMapClient({
       {/* Market overlay */}
       {marketPanelOpen && (
         <MarketMapPanel onClose={() => setMarketPanelOpen(false)} />
+      )}
+
+      {/* Research overlay */}
+      {researchPanelOpen && (
+        <ResearchMapPanel onClose={() => setResearchPanelOpen(false)} />
       )}
     </div>
   );
