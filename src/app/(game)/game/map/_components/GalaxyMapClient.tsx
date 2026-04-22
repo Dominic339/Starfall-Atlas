@@ -22,6 +22,7 @@ import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
 import { MarketMapPanel } from "./MarketMapPanel";
 import { ResearchMapPanel } from "./ResearchMapPanel";
+import { FeedMapPanel } from "./FeedMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -544,6 +545,9 @@ export function GalaxyMapClient({
 
   // ── Research panel ─────────────────────────────────────────────────────────
   const [researchPanelOpen, setResearchPanelOpen] = useState(false);
+
+  // ── Feed panel ─────────────────────────────────────────────────────────────
+  const [feedPanelOpen, setFeedPanelOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2640,6 +2644,12 @@ export function GalaxyMapClient({
           >
             Research
           </button>
+          <button
+            onClick={() => setFeedPanelOpen(true)}
+            className="rounded border border-zinc-700/60 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors backdrop-blur-sm"
+          >
+            Feed
+          </button>
         </div>
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
@@ -3708,6 +3718,11 @@ export function GalaxyMapClient({
       {/* Research overlay */}
       {researchPanelOpen && (
         <ResearchMapPanel onClose={() => setResearchPanelOpen(false)} />
+      )}
+
+      {/* Feed overlay */}
+      {feedPanelOpen && (
+        <FeedMapPanel onClose={() => setFeedPanelOpen(false)} />
       )}
     </div>
   );
