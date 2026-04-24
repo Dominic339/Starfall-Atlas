@@ -16,7 +16,7 @@
  *   - Reset view button
  */
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
@@ -93,6 +93,9 @@ export interface GalaxyFleet {
   id: string;
   name: string;
   systemId: string | null;
+  /** Populated while the fleet is traveling (status = 'traveling'). */
+  destinationSystemId: string | null;
+  arriveAt: string | null;
   /** True if this fleet currently has an active asteroid harvest job. */
   isHarvesting: boolean;
 }
@@ -229,6 +232,8 @@ interface GalaxyMapClientProps {
   viewboxH: number;
   /** Station 3D coordinates for distance-from-station computation. */
   stationCoords: { x: number; y: number; z: number } | null;
+  /** Station's system ID for "center on station" navigation. */
+  stationSystemId: string | null;
   /** Player's alliance ID, null if not in an alliance. */
   playerAllianceId: string | null;
   /** True if the player has officer/founder role (can place beacons). */
@@ -443,6 +448,7 @@ export function GalaxyMapClient({
   viewboxW,
   viewboxH,
   stationCoords,
+  stationSystemId,
   playerAllianceId,
   canPlaceBeacon,
   otherStations,
@@ -457,6 +463,11 @@ export function GalaxyMapClient({
   const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
+
+  // ── System search ─────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // ── Interaction state ─────────────────────────────────────────────────────
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -473,6 +484,8 @@ export function GalaxyMapClient({
   const [dispatchLoading, setDispatchLoading] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [recallLoading, setRecallLoading] = useState(false);
+  const [formFleetLoading, setFormFleetLoading] = useState(false);
+  const [formFleetError, setFormFleetError] = useState<string | null>(null);
 
   // ── Per-ship dispatch state ────────────────────────────────────────────────
   const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
@@ -582,6 +595,21 @@ export function GalaxyMapClient({
   const dockedShip = ships.find((s) => s.systemId != null) ?? null;
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
+
+  // Search results (top 8 by name prefix match, then substring)
+  const searchResults = searchOpen && searchQuery.trim().length > 0
+    ? (() => {
+        const q = searchQuery.trim().toLowerCase();
+        return systems
+          .filter((s) => s.name.toLowerCase().includes(q))
+          .sort((a, b) => {
+            const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+            const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+            return aStart - bStart || a.name.localeCompare(b.name);
+          })
+          .slice(0, 8);
+      })()
+    : [];
 
   // Travel range circle radius in SVG base coords
   const rangeRadius = baseRangeLy * pixelsPerLy;
@@ -1008,6 +1036,51 @@ export function GalaxyMapClient({
     setSelectedShipIds(new Set());
   }, [selectedId]);
 
+  // ── Escape / slash keys ───────────────────────────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const t = e.target as Element;
+      const inInput = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT";
+
+      if (e.key === "/" && !inInput) {
+        e.preventDefault();
+        setSearchOpen(true);
+        setSearchQuery("");
+        setTimeout(() => searchRef.current?.focus(), 0);
+        return;
+      }
+
+      if (e.key === "h" && !inInput) {
+        e.preventDefault();
+        const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
+        if (sys) {
+          const targetScale = Math.max(2.5, latestTransform.current.scale);
+          setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+          setSelectedId(sys.id);
+          setSelectedAsteroidId(null);
+        }
+        return;
+      }
+
+      if (e.key !== "Escape") return;
+      if (searchOpen) { setSearchOpen(false); setSearchQuery(""); return; }
+      if (inInput) return;
+      const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
+        messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
+        colonyPanelSystemId !== null;
+      if (anyOverlay) {
+        setProfilePanelOpen(false); setMarketPanelOpen(false); setEmpirePanelOpen(false);
+        setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false);
+        setShopPanelOpen(false); setColonyPanelSystemId(null);
+      } else {
+        setSelectedId(null); setSelectedAsteroidId(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [searchOpen, profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
+      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -1021,6 +1094,22 @@ export function GalaxyMapClient({
         scale: newScale,
       };
     });
+  }
+
+  function centerOnStation() {
+    const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
+    if (!sys) return;
+    const targetScale = Math.max(2.5, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+  }
+
+  function centerOnSystem(sys: GalaxySystem) {
+    const targetScale = Math.max(2.5, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+    setSelectedId(sys.id);
+    setSelectedAsteroidId(null);
+    setSearchOpen(false);
+    setSearchQuery("");
   }
 
   function resetView() {
@@ -1220,6 +1309,16 @@ export function GalaxyMapClient({
     setShipDispatchError(null);
   }
 
+  function handleStarDoubleClick(e: React.MouseEvent, systemId: string) {
+    e.stopPropagation();
+    const sys = systems.find((s) => s.id === systemId);
+    if (!sys) return;
+    const targetScale = Math.max(3, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+    setSelectedId(systemId);
+    setSelectedAsteroidId(null);
+  }
+
   function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
     e.stopPropagation();
     setSelectedAsteroidId((prev) => (prev === asteroidId ? null : asteroidId));
@@ -1262,6 +1361,23 @@ export function GalaxyMapClient({
     } finally {
       setTravelLoading(false);
     }
+  }
+
+  // ── Form fleet from docked ships at a system ─────────────────────────────
+  async function handleFormFleet(systemId: string) {
+    const shipIds = ships.filter((s) => s.systemId === systemId).map((s) => s.id);
+    if (shipIds.length < 2) { setFormFleetError("Need at least 2 docked ships to form a fleet."); return; }
+    setFormFleetLoading(true); setFormFleetError(null);
+    try {
+      const res = await fetch("/api/game/fleet/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipIds }),
+      });
+      const json = await res.json();
+      if (json.ok) { router.refresh(); }
+      else { setFormFleetError(json.error?.message ?? "Failed to form fleet."); }
+    } catch { setFormFleetError("Network error."); }
+    finally { setFormFleetLoading(false); }
   }
 
   // ── Asteroid dispatch / recall ────────────────────────────────────────────
@@ -1758,6 +1874,7 @@ export function GalaxyMapClient({
                   key={sys.id}
                   className="cursor-pointer"
                   onClick={(e) => handleStarClick(e, sys.id)}
+                  onDoubleClick={(e) => handleStarDoubleClick(e, sys.id)}
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
@@ -2163,12 +2280,24 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Diamond body */}
+                  {/* Diamond body — shadow layer */}
+                  <polygon
+                    points={diamondPoints(ast.svgX + 0.4 / scale, ast.svgY + 0.4 / scale, r + 0.5)}
+                    fill="#000"
+                    opacity={0.35}
+                  />
+                  {/* Diamond body — main fill */}
                   <polygon
                     points={diamondPoints(ast.svgX, ast.svgY, r)}
                     fill={color}
                     stroke="#06060a"
-                    strokeWidth={0.8 / scale}
+                    strokeWidth={0.6 / scale}
+                  />
+                  {/* Diamond highlight — inner crystalline face */}
+                  <polygon
+                    points={diamondPoints(ast.svgX - 0.5 / scale, ast.svgY - 0.5 / scale, r * 0.45)}
+                    fill="white"
+                    opacity={0.28}
                   />
 
                   {/* Label at high zoom or when selected/hovered */}
@@ -2644,6 +2773,62 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── System search overlay ────────────────────────────────────────── */}
+        {searchOpen && (
+          <div className="absolute left-1/2 top-4 z-50 -translate-x-1/2 w-72">
+            <div className="rounded-xl border border-zinc-700 bg-zinc-950/95 shadow-2xl shadow-black/60 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800">
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 text-zinc-500" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="6.5" cy="6.5" r="4.5"/>
+                  <path d="M10.5 10.5l3 3" strokeLinecap="round"/>
+                </svg>
+                <input
+                  ref={searchRef}
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && searchResults[0]) { centerOnSystem(searchResults[0]); }
+                    if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+                  }}
+                  placeholder="Find system…"
+                  className="flex-1 bg-transparent text-xs text-zinc-200 placeholder-zinc-600 outline-none"
+                />
+                <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className="text-zinc-700 hover:text-zinc-400 transition-colors text-xs leading-none">✕</button>
+              </div>
+              {searchResults.length > 0 && (
+                <div className="py-1 max-h-64 overflow-y-auto">
+                  {searchResults.map((sys) => (
+                    <button
+                      key={sys.id}
+                      onClick={() => centerOnSystem(sys)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-zinc-800/70 transition-colors group"
+                    >
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: spectralColor(sys.spectralClass) }}/>
+                      <span className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-zinc-200 group-hover:text-white">{sys.name}</span>
+                        <span className="ml-2 text-[10px] text-zinc-600">{sys.spectralClass}-class</span>
+                      </span>
+                      {sys.colonyCount > 0 && (
+                        <span className="text-[10px] text-emerald-600 shrink-0">{sys.colonyCount}c</span>
+                      )}
+                      {sys.isStationLocation && (
+                        <span className="text-[10px] text-amber-600 shrink-0">hub</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchQuery.trim().length > 0 && searchResults.length === 0 && (
+                <p className="px-3 py-3 text-xs text-zinc-700">No systems found</p>
+              )}
+              {searchQuery.trim().length === 0 && (
+                <p className="px-3 py-2.5 text-[10px] text-zinc-700">Type a system name · <kbd className="font-mono">Enter</kbd> to jump · <kbd className="font-mono">Esc</kbd> to close</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Top-left player card (clickable → profile) ───────────────────── */}
         <button
           onClick={() => setProfilePanelOpen(true)}
@@ -2663,19 +2848,73 @@ export function GalaxyMapClient({
         {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
           {([
-            { label: "Station", bg: "from-teal-900/70 to-teal-950/80",   border: "border-teal-700/40",   glow: "shadow-teal-900/40",   iconBg: "bg-teal-800/50",   icon: "◈", iconColor: "text-teal-300",   onClick: () => setStationPanelOpen(true) },
-            { label: "Fleet",   bg: "from-rose-900/70 to-rose-950/80",   border: "border-rose-800/40",   glow: "shadow-rose-900/40",   iconBg: "bg-rose-800/50",   icon: "▲", iconColor: "text-rose-300",   onClick: () => setCommandPanelOpen(true) },
-            { label: "Market",  bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40",  glow: "shadow-amber-900/40",  iconBg: "bg-amber-800/50",  icon: "◇", iconColor: "text-amber-300",  onClick: () => setMarketPanelOpen(true) },
-            { label: "Comms",   bg: "from-violet-900/70 to-violet-950/80",border: "border-violet-700/40",glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", icon: "◉", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true) },
-            { label: "Empire",  bg: "from-indigo-900/70 to-indigo-950/80",border: "border-indigo-700/40",glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", icon: "✦", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true) },
-          ] as const).map((btn) => (
+            {
+              label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-950/60", onClick: () => setStationPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <rect x="10.5" y="3" width="3" height="18" rx="1.5" fill="#64748b"/>
+                <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="#64748b"/>
+                <circle cx="12" cy="3" r="2.5" fill="#2dd4bf"/><circle cx="12" cy="21" r="2.5" fill="#2dd4bf"/>
+                <circle cx="3" cy="12" r="2.5" fill="#2dd4bf"/><circle cx="21" cy="12" r="2.5" fill="#2dd4bf"/>
+                <circle cx="12" cy="12" r="4" fill="#0d9488"/>
+                <circle cx="12" cy="12" r="2" fill="#5eead4"/>
+                <circle cx="12" cy="12" r="0.8" fill="#ccfbf1"/>
+              </svg>,
+            },
+            {
+              label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-950/60", onClick: () => setCommandPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <path d="M12 2L15.5 10L15.5 17L14 20L12 18L10 20L8.5 17L8.5 10Z" fill="#9f1239" opacity="0.5"/>
+                <path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z" fill="#f43f5e"/>
+                <path d="M12 3L13 8L13 15L12 16.5L11 15L11 8Z" fill="#fda4af" opacity="0.45"/>
+                <path d="M9 13L4 21L9 18Z" fill="#be123c"/>
+                <path d="M15 13L20 21L15 18Z" fill="#be123c"/>
+                <ellipse cx="12" cy="18.8" rx="3" ry="1.2" fill="#fbbf24" opacity="0.9"/>
+                <ellipse cx="12" cy="18.8" rx="1.4" ry="0.6" fill="#fef9c3" opacity="0.9"/>
+              </svg>,
+            },
+            {
+              label: "Market", bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40", glow: "shadow-amber-900/40", iconBg: "bg-amber-950/60", onClick: () => setMarketPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                <path d="M7 5v13" stroke="#fbbf24" strokeWidth="2.5"/>
+                <path d="M4 8l3-3 3 3" stroke="#fbbf24" strokeWidth="2"/>
+                <path d="M17 19V6" stroke="#f59e0b" strokeWidth="2.5"/>
+                <path d="M14 16l3 3 3-3" stroke="#f59e0b" strokeWidth="2"/>
+                <line x1="4" y1="12" x2="20" y2="12" stroke="#78350f" strokeWidth="1" strokeDasharray="2 2"/>
+              </svg>,
+            },
+            {
+              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" className="w-6 h-6">
+                <polygon points="9,21 12,13 15,21" fill="#3b0764" opacity="0.7"/>
+                <line x1="12" y1="22" x2="12" y2="13" stroke="#a78bfa" strokeWidth="2"/>
+                <path d="M9.5 12.5Q12 9.5 14.5 12.5" stroke="#ddd6fe" strokeWidth="2"/>
+                <path d="M7 10Q12 6 17 10" stroke="#a78bfa" strokeWidth="1.75"/>
+                <path d="M4.5 7.5Q12 1.5 19.5 7.5" stroke="#6d28d9" strokeWidth="1.5"/>
+              </svg>,
+            },
+            {
+              label: "Empire", bg: "from-indigo-900/70 to-indigo-950/80", border: "border-indigo-700/40", glow: "shadow-indigo-900/40", iconBg: "bg-indigo-950/60", onClick: () => setEmpirePanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <path d="M4 18L4 9L8 13L12 5L16 13L20 9L20 18Z" fill="#1e1b4b" opacity="0.5" transform="translate(0.5,0.5)"/>
+                <path d="M4 18L4 9L8 13L12 5L16 13L20 9L20 18Z" fill="#4f46e5"/>
+                <path d="M12 6L13.5 11L12 14L10.5 11Z" fill="#818cf8" opacity="0.55"/>
+                <rect x="4" y="18" width="16" height="3" rx="1" fill="#3730a3"/>
+                <circle cx="4" cy="9" r="2" fill="#6366f1"/>
+                <circle cx="4" cy="9" r="0.9" fill="#c7d2fe"/>
+                <circle cx="20" cy="9" r="2" fill="#6366f1"/>
+                <circle cx="20" cy="9" r="0.9" fill="#c7d2fe"/>
+                <circle cx="12" cy="5" r="2.5" fill="#818cf8"/>
+                <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
+              </svg>,
+            },
+          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
               className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
               <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
-                <span className={`text-lg leading-none ${btn.iconColor}`}>{btn.icon}</span>
+                {btn.icon}
               </div>
               <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
             </button>
@@ -2684,8 +2923,13 @@ export function GalaxyMapClient({
             onClick={() => setShopPanelOpen(true)}
             className="flex flex-col items-center gap-1.5 w-12 py-2.5 rounded-xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/80 border border-zinc-700/30 shadow-md hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm self-end mb-1"
           >
-            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center">
-              <span className="text-sm font-bold text-amber-600">$</span>
+            <div className="w-7 h-7 rounded-md bg-amber-950/50 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
+                <path d="M5 8h14l-1.5 13H6.5L5 8z" fill="#b45309"/>
+                <path d="M3 7L5.5 3h13L21 7H3z" fill="#d97706"/>
+                <path d="M9 11a3 3 0 006 0" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round"/>
+                <ellipse cx="8" cy="10.5" rx="1.5" ry="1" fill="#fde68a" opacity="0.35"/>
+              </svg>
             </div>
             <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-600">Shop</span>
           </button>
@@ -2693,26 +2937,25 @@ export function GalaxyMapClient({
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
-          <button
-            onClick={() => zoomBy(1.25)}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            title="Zoom in"
-          >
-            +
+          <button onClick={() => zoomBy(1.25)} title="Zoom in"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">+</button>
+          <button onClick={() => zoomBy(0.8)} title="Zoom out"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">−</button>
+          <div className="flex h-5 w-7 items-center justify-center text-[9px] font-mono text-zinc-700 tabular-nums">
+            {Math.round(transform.scale * 100)}%
+          </div>
+          <button onClick={centerOnStation} title="Center on station (H)"
+            className={`flex h-7 w-7 items-center justify-center rounded border transition-colors text-xs ${stationSystemId ? "border-amber-800/60 bg-amber-950/40 text-amber-500 hover:bg-amber-900/50 hover:text-amber-300" : "border-zinc-700 bg-zinc-900/80 text-zinc-700 cursor-not-allowed"}`}>
+            ⌂
           </button>
-          <button
-            onClick={() => zoomBy(0.8)}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            title="Zoom out"
-          >
-            −
-          </button>
-          <button
-            onClick={resetView}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
-            title="Reset view"
-          >
-            ⊙
+          <button onClick={resetView} title="Zoom to fit (⊙)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">⊙</button>
+          <button onClick={() => { setSearchOpen(true); setSearchQuery(""); setTimeout(() => searchRef.current?.focus(), 0); }} title="Find system (/)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="6.5" cy="6.5" r="4.5"/>
+              <path d="M10.5 10.5l3 3" strokeLinecap="round"/>
+            </svg>
           </button>
         </div>
 
@@ -2769,17 +3012,29 @@ export function GalaxyMapClient({
           (() => {
             const s = systemMap.get(hoveredId);
             if (!s) return null;
+            const dToHovered = currentSystem && s.id !== currentSystem.id ? dist3D(currentSystem, s) : null;
+            const inHoverRange = dToHovered !== null && dToHovered <= baseRangeLy + 0.01;
+            const hoverEta = dToHovered !== null && inHoverRange && dockedShip
+              ? dToHovered / dockedShip.speedLyPerHr : null;
             return (
-              <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-3 py-1.5 text-xs shadow-lg">
+              <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-3 py-1.5 text-xs shadow-lg whitespace-nowrap">
                 <span className="font-medium text-zinc-200">{s.name}</span>
                 <span className="ml-2 text-zinc-500">{s.spectralClass}-class</span>
-                <span className="ml-2 text-zinc-600">{formatDist(s.distanceFromSol)} from Sol</span>
-                {s.isDiscovered && <span className="ml-2 text-emerald-600">discovered</span>}
+                {dToHovered !== null ? (
+                  inHoverRange ? (
+                    <span className="ml-2 text-indigo-400">
+                      {formatDist(dToHovered)}{hoverEta !== null ? ` · ${formatEta(hoverEta)}` : ""}
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-zinc-700">{formatDist(dToHovered)} — out of range</span>
+                  )
+                ) : null}
                 {s.colonyCount > 0 && (
-                  <span className="ml-2 text-emerald-500">
-                    {s.colonyCount} {s.colonyCount === 1 ? "colony" : "colonies"}
+                  <span className="ml-2 text-emerald-600">
+                    {s.colonyCount}{s.colonyCount === 1 ? " colony" : " colonies"}
                   </span>
                 )}
+                {s.isStationLocation && <span className="ml-2 text-amber-500">your hub</span>}
               </div>
             );
           })()
@@ -2819,11 +3074,14 @@ export function GalaxyMapClient({
               <>
                 {/* Header */}
                 <div className="border-b border-zinc-800 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rotate-45 shrink-0" style={{ background: color }} />
-                    <h2 className="text-sm font-semibold text-zinc-200 truncate">
-                      {resourceLabel(a.resourceType)} Asteroid
-                    </h2>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="inline-block h-3 w-3 rotate-45 shrink-0" style={{ background: color }} />
+                      <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                        {resourceLabel(a.resourceType)} Asteroid
+                      </h2>
+                    </div>
+                    <button onClick={() => setSelectedAsteroidId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
                   </div>
                   <p className="mt-0.5 text-xs text-zinc-600">
                     Near {a.systemId} system
@@ -2904,13 +3162,34 @@ export function GalaxyMapClient({
                   )}
 
                   {/* No eligible fleets */}
-                  {!a.myHarvestId && eligibleFleets.length === 0 && (
-                    <p className="text-xs text-zinc-700 text-center">
-                      No fleets available in {a.systemId}.
-                      <br />
-                      Travel a fleet here first.
-                    </p>
-                  )}
+                  {!a.myHarvestId && eligibleFleets.length === 0 && (() => {
+                    const dockedHere = ships.filter((s) => s.systemId === a.systemId);
+                    return (
+                      <div className="space-y-2">
+                        {dockedHere.length >= 2 ? (
+                          <>
+                            <p className="text-xs text-zinc-600 text-center">
+                              No fleet here yet. Form one from your docked ships.
+                            </p>
+                            {formFleetError && <p className="text-xs text-red-400 text-center">{formFleetError}</p>}
+                            <button
+                              onClick={() => handleFormFleet(a.systemId)}
+                              disabled={formFleetLoading}
+                              className="w-full rounded border border-teal-700/50 bg-teal-950/30 px-3 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-900/40 disabled:opacity-50 transition-colors"
+                            >
+                              {formFleetLoading ? "Forming…" : `Form Fleet (${dockedHere.length} ships)`}
+                            </button>
+                          </>
+                        ) : (
+                          <p className="text-xs text-zinc-700 text-center">
+                            No fleets in this system.
+                            <br />
+                            <span className="text-zinc-600">Travel ships here first (need 2+).</span>
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             );
@@ -2919,14 +3198,17 @@ export function GalaxyMapClient({
           <>
             {/* Header */}
             <div className="border-b border-zinc-800 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-3 w-3 rounded-full shrink-0"
-                  style={{ background: spectralColor(selectedSystem.spectralClass) }}
-                />
-                <h2 className="text-sm font-semibold text-zinc-200 truncate">
-                  {selectedSystem.name}
-                </h2>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ background: spectralColor(selectedSystem.spectralClass) }}
+                  />
+                  <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                    {selectedSystem.name}
+                  </h2>
+                </div>
+                <button onClick={() => setSelectedId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
               </div>
               <p className="mt-0.5 text-xs text-zinc-500">
                 {spectralName(selectedSystem.spectralClass)}
@@ -3121,12 +3403,21 @@ export function GalaxyMapClient({
                     {fleetsInTransit.length > 0 && (
                       <div className="space-y-1">
                         <p className="text-xs text-zinc-700">In transit</p>
-                        {fleetsInTransit.map((fleet) => (
+                        {fleetsInTransit.map((fleet) => {
+                          const destSys = fleet.destinationSystemId ? systemMap.get(fleet.destinationSystemId) : null;
+                          const msLeft = fleet.arriveAt ? new Date(fleet.arriveAt).getTime() - Date.now() : null;
+                          return (
                           <div key={fleet.id} className="flex items-center justify-between gap-2">
-                            <p className="truncate text-xs text-zinc-600">{fleet.name}</p>
-                            <p className="text-xs text-violet-400/70 shrink-0">traveling</p>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs text-zinc-600">{fleet.name}</p>
+                              {destSys && <p className="text-[10px] text-violet-500/70 truncate">→ {destSys.name}</p>}
+                            </div>
+                            <p className="text-[10px] text-violet-400/60 shrink-0">
+                              {msLeft !== null ? (msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving") : "traveling"}
+                            </p>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -3706,37 +3997,94 @@ export function GalaxyMapClient({
           </>
         ) : (
           /* Empty state */
-          <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <p className="text-xs text-zinc-600">Click a star to see assets &amp; actions.</p>
-            <p className="mt-1 text-xs text-zinc-700">Shift+click a star to enter system view.</p>
-            {currentSystem && (
-              <p className="mt-3 text-xs text-zinc-700">
-                Ship at{" "}
-                <span className="text-emerald-600">{currentSystem.name}</span>.{" "}
-                Range: {baseRangeLy} ly.
-              </p>
-            )}
-            {stationSystem && !currentSystem && (
-              <p className="mt-3 text-xs text-zinc-700">
-                Station at{" "}
-                <span className="text-amber-600">{stationSystem.name}</span>.
-              </p>
-            )}
+          <div className="flex flex-1 flex-col overflow-y-auto">
+            {/* Ships summary */}
             {ships.length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                Drag ship <span className="text-indigo-500">●</span> markers to dispatch.
-              </p>
+              <div className="border-b border-zinc-800/50 px-4 py-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Your Ships</p>
+                <div className="space-y-2">
+                  {ships.map((ship) => {
+                    const loc = ship.systemId ? systemMap.get(ship.systemId) : null;
+                    const dest = ship.destinationSystemId ? systemMap.get(ship.destinationSystemId) : null;
+                    const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                    return (
+                      <div key={ship.id} className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-zinc-300">{ship.name}</p>
+                          {loc ? (
+                            <button
+                              onClick={() => { setSelectedId(loc.id); setSelectedAsteroidId(null); }}
+                              className="text-[10px] text-emerald-600 hover:text-emerald-400 transition-colors text-left truncate max-w-full"
+                            >
+                              {loc.name}
+                            </button>
+                          ) : dest ? (
+                            <p className="text-[10px] text-indigo-500 truncate">→ {dest.name}</p>
+                          ) : (
+                            <p className="text-[10px] text-zinc-700">Unknown</p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {ship.systemId ? (
+                            <span className="text-[10px] text-zinc-700">Docked</span>
+                          ) : msLeft !== null ? (
+                            <span className="text-[10px] text-indigo-400/80">
+                              {msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving"}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
-            {fleets.filter((f) => f.systemId).length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                Drag fleet <span className="text-violet-400">▲</span> markers to dispatch.
-              </p>
-            )}
-            {asteroids.length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                {asteroids.length} active asteroid{asteroids.length !== 1 ? "s" : ""} on map.
-              </p>
-            )}
+
+            {/* Nearby reachable systems from docked ship */}
+            {currentSystem && (() => {
+              const nearby = systems
+                .filter((s) => s.id !== currentSystem.id && dist3D(s, currentSystem) <= baseRangeLy + 0.01)
+                .sort((a, b) => dist3D(a, currentSystem) - dist3D(b, currentSystem))
+                .slice(0, 6);
+              if (nearby.length === 0) return null;
+              return (
+                <div className="border-b border-zinc-800/50 px-4 py-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">In Range from {currentSystem.name}</p>
+                  <div className="space-y-1.5">
+                    {nearby.map((sys) => {
+                      const d = dist3D(sys, currentSystem);
+                      return (
+                        <button
+                          key={sys.id}
+                          onClick={() => { setSelectedId(sys.id); setSelectedAsteroidId(null); }}
+                          className="w-full flex items-center gap-2 rounded border border-zinc-800/50 bg-zinc-900/30 px-2 py-1.5 text-left hover:bg-zinc-800/60 hover:border-zinc-700/60 transition-colors group"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: spectralColor(sys.spectralClass) }}/>
+                          <span className="flex-1 min-w-0">
+                            <span className="text-xs text-zinc-300 group-hover:text-white truncate block">{sys.name}</span>
+                          </span>
+                          <span className="text-[10px] text-zinc-600 shrink-0 font-mono">{formatDist(d)}</span>
+                          {sys.colonyCount > 0 && (
+                            <span className="text-[10px] text-emerald-700 shrink-0">{sys.colonyCount}c</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Hints */}
+            <div className="px-4 py-3 mt-auto">
+              <div className="space-y-1 text-[10px] text-zinc-700">
+                <p>Click a star to inspect &amp; act on it.</p>
+                <p>Shift+click to open the system detail page.</p>
+                {ships.length > 0 && <p>Drag ship <span className="text-indigo-500">●</span> or fleet <span className="text-violet-400">▲</span> markers to dispatch.</p>}
+                <p className="mt-2 text-zinc-800 font-mono">/  search &nbsp;·&nbsp; h  station &nbsp;·&nbsp; Esc  deselect</p>
+                <p className="text-zinc-800 font-mono">double-click  center &amp; zoom</p>
+              </div>
+            </div>
           </div>
         )}
       </div>
