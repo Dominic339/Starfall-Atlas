@@ -21,8 +21,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
 import { MarketMapPanel } from "./MarketMapPanel";
-import { ResearchMapPanel } from "./ResearchMapPanel";
-import { FeedMapPanel } from "./FeedMapPanel";
+import { EmpireMapPanel } from "./EmpireMapPanel";
 import { MessagesMapPanel } from "./MessagesMapPanel";
 import { StationMapPanel } from "./StationMapPanel";
 import { CommandMapPanel } from "./CommandMapPanel";
@@ -544,20 +543,11 @@ export function GalaxyMapClient({
   // ── Colony map panel ──────────────────────────────────────────────────────
   const [colonyPanelSystemId, setColonyPanelSystemId] = useState<string | null>(null);
 
-  // ── Market panel ───────────────────────────────────────────────────────────
-  const [marketPanelOpen, setMarketPanelOpen] = useState(false);
-
-  // ── Research panel ─────────────────────────────────────────────────────────
-  const [researchPanelOpen, setResearchPanelOpen] = useState(false);
-
-  // ── Feed panel ─────────────────────────────────────────────────────────────
-  const [feedPanelOpen, setFeedPanelOpen] = useState(false);
-
-  // ── Messages panel ─────────────────────────────────────────────────────────
+  // ── HUD panel states ───────────────────────────────────────────────────────
+  const [marketPanelOpen,   setMarketPanelOpen]   = useState(false);
+  const [empirePanelOpen,   setEmpirePanelOpen]   = useState(false);
   const [messagesPanelOpen, setMessagesPanelOpen] = useState(false);
-
-  // ── Station panel ──────────────────────────────────────────────────────────
-  const [stationPanelOpen, setStationPanelOpen] = useState(false);
+  const [stationPanelOpen,  setStationPanelOpen]  = useState(false);
 
   // ── Command panel ──────────────────────────────────────────────────────────
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
@@ -2646,49 +2636,31 @@ export function GalaxyMapClient({
           </div>
         )}
 
-        {/* ── Top-left quick-access buttons ────────────────────────────────── */}
-        <div className="absolute left-4 top-4 flex gap-2">
-          <button
-            onClick={() => setMarketPanelOpen(true)}
-            className="rounded border border-amber-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-amber-400/80 hover:border-amber-700 hover:text-amber-300 transition-colors backdrop-blur-sm"
-          >
-            Market
-          </button>
-          <button
-            onClick={() => setResearchPanelOpen(true)}
-            className="rounded border border-indigo-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-indigo-400/80 hover:border-indigo-700 hover:text-indigo-300 transition-colors backdrop-blur-sm"
-          >
-            Research
-          </button>
-          <button
-            onClick={() => setFeedPanelOpen(true)}
-            className="rounded border border-zinc-700/60 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-zinc-500 hover:border-zinc-500 hover:text-zinc-300 transition-colors backdrop-blur-sm"
-          >
-            Feed
-          </button>
-          <button
-            onClick={() => setMessagesPanelOpen(true)}
-            className="rounded border border-violet-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-violet-400/80 hover:border-violet-700 hover:text-violet-300 transition-colors backdrop-blur-sm"
-          >
-            Messages
-          </button>
-          <button
-            onClick={() => setStationPanelOpen(true)}
-            className="rounded border border-teal-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-teal-400/80 hover:border-teal-700 hover:text-teal-300 transition-colors backdrop-blur-sm"
-          >
-            Station
-          </button>
-          <button
-            onClick={() => setCommandPanelOpen(true)}
-            className="rounded border border-rose-900/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-rose-400/80 hover:border-rose-800 hover:text-rose-300 transition-colors backdrop-blur-sm"
-          >
-            Ships
-          </button>
+        {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-2xl border border-zinc-700/60 bg-zinc-950/95 backdrop-blur-md px-3 py-2 shadow-2xl shadow-black/50">
+          {([
+            { label: "Station", glyph: "◈", color: "text-teal-400",   border: "hover:border-teal-700/60",   onClick: () => setStationPanelOpen(true) },
+            { label: "Fleet",   glyph: "▲", color: "text-rose-400",   border: "hover:border-rose-800/60",   onClick: () => setCommandPanelOpen(true) },
+            { label: "Market",  glyph: "◇", color: "text-amber-400",  border: "hover:border-amber-800/60",  onClick: () => setMarketPanelOpen(true) },
+            { label: "Comms",   glyph: "◉", color: "text-violet-400", border: "hover:border-violet-800/60", onClick: () => setMessagesPanelOpen(true) },
+            { label: "Empire",  glyph: "✦", color: "text-indigo-400", border: "hover:border-indigo-800/60", onClick: () => setEmpirePanelOpen(true) },
+          ] as const).map((btn) => (
+            <button
+              key={btn.label}
+              onClick={btn.onClick}
+              className={`flex flex-col items-center gap-0.5 px-4 py-2 rounded-xl border border-transparent ${btn.border} hover:bg-zinc-800/60 transition-all group`}
+            >
+              <span className={`text-base leading-none ${btn.color} group-hover:brightness-125`}>{btn.glyph}</span>
+              <span className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400 transition-colors">{btn.label}</span>
+            </button>
+          ))}
+          <div className="w-px h-8 bg-zinc-800 mx-1" />
           <button
             onClick={() => setShopPanelOpen(true)}
-            className="rounded border border-amber-900/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-amber-500/70 hover:border-amber-800 hover:text-amber-400 transition-colors backdrop-blur-sm"
+            className="flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl border border-transparent hover:border-amber-900/50 hover:bg-zinc-800/60 transition-all group"
           >
-            Shop
+            <span className="text-base leading-none text-amber-600/70 group-hover:text-amber-500 transition-colors">$</span>
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-zinc-700 group-hover:text-zinc-500 transition-colors">Shop</span>
           </button>
         </div>
 
@@ -3750,35 +3722,13 @@ export function GalaxyMapClient({
         />
       )}
 
-      {/* Market overlay */}
-      {marketPanelOpen && (
-        <MarketMapPanel onClose={() => setMarketPanelOpen(false)} />
-      )}
-
-      {/* Research overlay */}
-      {researchPanelOpen && (
-        <ResearchMapPanel onClose={() => setResearchPanelOpen(false)} />
-      )}
-
-      {/* Feed overlay */}
-      {feedPanelOpen && (
-        <FeedMapPanel onClose={() => setFeedPanelOpen(false)} />
-      )}
-
-      {/* Messages overlay */}
-      {messagesPanelOpen && (
-        <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />
-      )}
-
-      {/* Station overlay */}
-      {stationPanelOpen && (
-        <StationMapPanel onClose={() => setStationPanelOpen(false)} />
-      )}
-
-      {/* Command overlay */}
-      {commandPanelOpen && (
-        <CommandMapPanel onClose={() => setCommandPanelOpen(false)} />
-      )}
+      {/* HUD overlays */}
+      {marketPanelOpen   && <MarketMapPanel   onClose={() => setMarketPanelOpen(false)} />}
+      {empirePanelOpen   && <EmpireMapPanel   onClose={() => setEmpirePanelOpen(false)} />}
+      {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}
+      {stationPanelOpen  && <StationMapPanel  onClose={() => setStationPanelOpen(false)} />}
+      {commandPanelOpen  && <CommandMapPanel  onClose={() => setCommandPanelOpen(false)} />}
+      {shopPanelOpen     && <ShopMapPanel     onClose={() => setShopPanelOpen(false)} />}
 
       {/* Shop overlay */}
       {shopPanelOpen && (
