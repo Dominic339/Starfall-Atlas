@@ -43,6 +43,10 @@ interface PanelData {
 
 interface StationMapPanelProps { onClose: () => void; }
 
+interface ColonyOption { id: string; systemId: string; systemName: string; bodyIndex: string; populationTier: number; label: string; }
+interface RouteItem { id: string; fromColonyId: string; toColonyId: string; fromLabel: string; toLabel: string; resourceType: string; mode: string; fixedAmount: number | null; intervalMinutes: number; lastRunAt: string | null; }
+interface RoutePanelData { colonies: ColonyOption[]; routes: RouteItem[]; }
+
 // ---------------------------------------------------------------------------
 // Visual config
 // ---------------------------------------------------------------------------
@@ -533,15 +537,174 @@ function ColoniesTab({ data }: { data: PanelData }) {
 }
 
 // ---------------------------------------------------------------------------
+// Routes tab
+// ---------------------------------------------------------------------------
+
+const ROUTE_RESOURCES = ["iron", "carbon", "silica", "biomass", "water", "steel", "glass", "food"];
+
+function RoutesTab({ routeData, onRefresh }: { routeData: RoutePanelData | null; onRefresh: () => void }) {
+  const [fromColony, setFromColony] = useState("");
+  const [toColony, setToColony] = useState("");
+  const [resource, setResource] = useState("");
+  const [mode, setMode] = useState<"surplus" | "fixed">("surplus");
+  const [fixedAmt, setFixedAmt] = useState("10");
+  const [intervalMin, setIntervalMin] = useState("60");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createMsg, setCreateMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState<string | null>(null);
+
+  async function handleCreate() {
+    if (!fromColony || !toColony || !resource) return;
+    setCreateLoading(true); setCreateMsg(null);
+    try {
+      const res = await fetch("/api/game/routes/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fromColonyId: fromColony, toColonyId: toColony, resourceType: resource, mode, fixedAmount: mode === "fixed" ? parseInt(fixedAmt, 10) : null, intervalMinutes: parseInt(intervalMin, 10) }),
+      });
+      const json = await res.json();
+      if (json.ok) { setCreateMsg({ type: "ok", text: "Route created!" }); setFromColony(""); setToColony(""); setResource(""); onRefresh(); }
+      else setCreateMsg({ type: "err", text: json.error?.message ?? "Failed." });
+    } catch { setCreateMsg({ type: "err", text: "Network error." }); }
+    finally { setCreateLoading(false); }
+  }
+
+  async function handleDelete(routeId: string) {
+    setDeleteLoading(routeId);
+    try {
+      const res = await fetch("/api/game/routes/delete", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ routeId }),
+      });
+      const json = await res.json();
+      if (json.ok) onRefresh();
+    } finally { setDeleteLoading(null); }
+  }
+
+  if (!routeData) return null;
+
+  return (
+    <div className="space-y-5">
+      {/* Route list */}
+      {routeData.routes.length === 0 ? (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 py-10 text-center">
+          <p className="text-sm text-zinc-600">No supply routes configured.</p>
+          <p className="text-xs text-zinc-700 mt-1">Routes automatically move resources between colonies.</p>
+        </div>
+      ) : (
+        <div>
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-500">Active Routes ({routeData.routes.length})</p>
+          <div className="space-y-2">
+            {routeData.routes.map((r) => (
+              <div key={r.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 text-xs flex-wrap">
+                      <span className="font-semibold text-teal-400 truncate">{r.fromLabel}</span>
+                      <span className="text-zinc-600 shrink-0">→</span>
+                      <span className="font-semibold text-indigo-400 truncate">{r.toLabel}</span>
+                    </div>
+                    <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+                      <span className={`text-[10px] font-bold uppercase tracking-wide ${resColor(r.resourceType)}`}>{resLabel(r.resourceType)}</span>
+                      <span className="rounded border border-zinc-700/50 bg-zinc-800/50 px-1.5 py-0.5 text-[9px] font-semibold text-zinc-400 capitalize">{r.mode === "surplus" ? "Surplus" : `Fixed (${r.fixedAmount})`}</span>
+                      <span className="text-[10px] text-zinc-600">every {r.intervalMinutes}m</span>
+                      {r.lastRunAt && <span className="text-[10px] text-zinc-700">{timeAgo(r.lastRunAt)}</span>}
+                    </div>
+                  </div>
+                  <button onClick={() => handleDelete(r.id)} disabled={deleteLoading === r.id}
+                    className="shrink-0 rounded px-2 py-1 text-[10px] font-semibold border border-red-900/40 bg-red-950/20 text-red-500 hover:bg-red-900/30 disabled:opacity-50 transition-colors">
+                    {deleteLoading === r.id ? "…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Create form */}
+      {routeData.colonies.length >= 2 && (
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Create Route</p>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="text-[10px] text-zinc-600 mb-1">From Colony</p>
+              <select value={fromColony} onChange={(e) => setFromColony(e.target.value)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500">
+                <option value="">Select…</option>
+                {routeData.colonies.filter((c) => c.id !== toColony).map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <p className="text-[10px] text-zinc-600 mb-1">To Colony</p>
+              <select value={toColony} onChange={(e) => setToColony(e.target.value)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500">
+                <option value="">Select…</option>
+                {routeData.colonies.filter((c) => c.id !== fromColony).map((c) => (
+                  <option key={c.id} value={c.id}>{c.label}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="text-[10px] text-zinc-600 mb-1">Resource</p>
+              <select value={resource} onChange={(e) => setResource(e.target.value)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500">
+                <option value="">Select…</option>
+                {ROUTE_RESOURCES.map((r) => <option key={r} value={r}>{resLabel(r)}</option>)}
+              </select>
+            </div>
+            <div>
+              <p className="text-[10px] text-zinc-600 mb-1">Interval (min)</p>
+              <input type="number" min="10" value={intervalMin} onChange={(e) => setIntervalMin(e.target.value)}
+                className="w-full rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-500" />
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="flex gap-1">
+              {(["surplus", "fixed"] as const).map((m) => (
+                <button key={m} onClick={() => setMode(m)}
+                  className={`rounded px-2.5 py-1 text-xs font-medium transition-colors ${mode === m ? "bg-indigo-800/60 text-indigo-300 border border-indigo-700/40" : "text-zinc-600 border border-zinc-800 hover:text-zinc-400"}`}>
+                  {m.charAt(0).toUpperCase() + m.slice(1)}
+                </button>
+              ))}
+            </div>
+            {mode === "fixed" && (
+              <input type="number" min="1" placeholder="Amount" value={fixedAmt} onChange={(e) => setFixedAmt(e.target.value)}
+                className="w-20 rounded border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs font-mono text-zinc-200 text-center focus:outline-none focus:border-zinc-500" />
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={handleCreate} disabled={createLoading || !fromColony || !toColony || !resource}
+              className="px-4 py-1.5 text-xs font-semibold rounded border border-teal-700/50 bg-teal-950/20 text-teal-400 hover:bg-teal-900/30 disabled:opacity-50 transition-colors">
+              {createLoading ? "Creating…" : "Create Route"}
+            </button>
+            {createMsg && <span className={`text-xs ${createMsg.type === "ok" ? "text-emerald-400" : "text-red-400"}`}>{createMsg.text}</span>}
+          </div>
+        </div>
+      )}
+      {routeData.colonies.length < 2 && (
+        <p className="text-xs text-zinc-600 text-center py-2">You need at least 2 colonies to create a route.</p>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main panel
 // ---------------------------------------------------------------------------
 
 export function StationMapPanel({ onClose }: StationMapPanelProps) {
-  const [tab, setTab] = useState<"stores" | "fleet" | "colonies">("stores");
+  const [tab, setTab] = useState<"stores" | "fleet" | "colonies" | "routes">("stores");
   const [data, setData] = useState<PanelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [routeData, setRouteData] = useState<RoutePanelData | null>(null);
+  const [routesLoaded, setRoutesLoaded] = useState(false);
+  const [routesLoading, setRoutesLoading] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true); setError(null);
@@ -556,6 +719,16 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
 
   useEffect(() => { void load(); }, [load, refreshKey]);
 
+  useEffect(() => {
+    if (tab !== "routes" || routesLoaded) return;
+    setRoutesLoading(true);
+    fetch("/api/game/routes/panel")
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setRouteData(json.data as RoutePanelData); })
+      .catch(() => {})
+      .finally(() => { setRoutesLoading(false); setRoutesLoaded(true); });
+  }, [tab, routesLoaded]);
+
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
 
   const dockedCount   = data?.ships.filter((s) => s.isDocked).length ?? 0;
@@ -567,6 +740,7 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
     { id: "stores",   label: "Stores" },
     { id: "fleet",    label: `Fleet${data ? ` (${data.ships.length})` : ""}` },
     { id: "colonies", label: `Colonies${data ? ` (${colonyCount})` : ""}` },
+    { id: "routes",   label: `Routes${routeData ? ` (${routeData.routes.length})` : ""}` },
   ] as const;
 
   return (
@@ -656,6 +830,10 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
               {tab === "stores"   && <StoresTab   data={data} onRefresh={refresh} />}
               {tab === "fleet"    && <FleetTab    data={data} onRefresh={refresh} />}
               {tab === "colonies" && <ColoniesTab data={data} />}
+              {tab === "routes"   && (routesLoading
+                ? <div className="flex items-center justify-center py-16"><div className="text-xs text-zinc-600 tracking-widest uppercase animate-pulse">Loading…</div></div>
+                : <RoutesTab routeData={routeData} onRefresh={() => setRoutesLoaded(false)} />
+              )}
             </>
           )}
         </div>
