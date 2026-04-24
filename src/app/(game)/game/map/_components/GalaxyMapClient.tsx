@@ -16,7 +16,7 @@
  *   - Reset view button
  */
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ColonyMapPanel } from "./ColonyMapPanel";
@@ -473,6 +473,8 @@ export function GalaxyMapClient({
   const [dispatchLoading, setDispatchLoading] = useState(false);
   const [dispatchError, setDispatchError] = useState<string | null>(null);
   const [recallLoading, setRecallLoading] = useState(false);
+  const [formFleetLoading, setFormFleetLoading] = useState(false);
+  const [formFleetError, setFormFleetError] = useState<string | null>(null);
 
   // ── Per-ship dispatch state ────────────────────────────────────────────────
   const [shipDispatchLoading, setShipDispatchLoading] = useState<string | null>(null);
@@ -1262,6 +1264,23 @@ export function GalaxyMapClient({
     } finally {
       setTravelLoading(false);
     }
+  }
+
+  // ── Form fleet from docked ships at a system ─────────────────────────────
+  async function handleFormFleet(systemId: string) {
+    const shipIds = ships.filter((s) => s.systemId === systemId).map((s) => s.id);
+    if (shipIds.length < 2) { setFormFleetError("Need at least 2 docked ships to form a fleet."); return; }
+    setFormFleetLoading(true); setFormFleetError(null);
+    try {
+      const res = await fetch("/api/game/fleet/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipIds }),
+      });
+      const json = await res.json();
+      if (json.ok) { router.refresh(); }
+      else { setFormFleetError(json.error?.message ?? "Failed to form fleet."); }
+    } catch { setFormFleetError("Network error."); }
+    finally { setFormFleetLoading(false); }
   }
 
   // ── Asteroid dispatch / recall ────────────────────────────────────────────
@@ -2663,19 +2682,34 @@ export function GalaxyMapClient({
         {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
           {([
-            { label: "Station", bg: "from-teal-900/70 to-teal-950/80",   border: "border-teal-700/40",   glow: "shadow-teal-900/40",   iconBg: "bg-teal-800/50",   icon: "◈", iconColor: "text-teal-300",   onClick: () => setStationPanelOpen(true) },
-            { label: "Fleet",   bg: "from-rose-900/70 to-rose-950/80",   border: "border-rose-800/40",   glow: "shadow-rose-900/40",   iconBg: "bg-rose-800/50",   icon: "▲", iconColor: "text-rose-300",   onClick: () => setCommandPanelOpen(true) },
-            { label: "Market",  bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40",  glow: "shadow-amber-900/40",  iconBg: "bg-amber-800/50",  icon: "◇", iconColor: "text-amber-300",  onClick: () => setMarketPanelOpen(true) },
-            { label: "Comms",   bg: "from-violet-900/70 to-violet-950/80",border: "border-violet-700/40",glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", icon: "◉", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true) },
-            { label: "Empire",  bg: "from-indigo-900/70 to-indigo-950/80",border: "border-indigo-700/40",glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", icon: "✦", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true) },
-          ] as const).map((btn) => (
+            {
+              label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-800/50", iconColor: "text-teal-300", onClick: () => setStationPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><rect x="10.5" y="3" width="3" height="18" rx="1.5"/><rect x="3" y="10.5" width="18" height="3" rx="1.5"/><circle cx="12" cy="3" r="2.5"/><circle cx="12" cy="21" r="2.5"/><circle cx="3" cy="12" r="2.5"/><circle cx="21" cy="12" r="2.5"/><circle cx="12" cy="12" r="3"/></svg>,
+            },
+            {
+              label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-800/50", iconColor: "text-rose-300", onClick: () => setCommandPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z"/><path d="M9 13L4 21L9 18Z" opacity="0.75"/><path d="M15 13L20 21L15 18Z" opacity="0.75"/><ellipse cx="12" cy="18.5" rx="2.5" ry="1" opacity="0.5"/></svg>,
+            },
+            {
+              label: "Market", bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40", glow: "shadow-amber-900/40", iconBg: "bg-amber-800/50", iconColor: "text-amber-300", onClick: () => setMarketPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M7 4v14M7 4L4 7M7 4l3 3"/><path d="M17 20V6M17 20l-3-3M17 20l3-3"/><line x1="5" y1="12" x2="19" y2="12" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.4"/></svg>,
+            },
+            {
+              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-5 h-5"><line x1="12" y1="22" x2="12" y2="14"/><polygon points="9,20 12,14 15,20" fill="currentColor" stroke="none" opacity="0.5"/><path d="M9.5 12.5Q12 9 14.5 12.5"/><path d="M7 10Q12 5 17 10"/><path d="M4.5 7.5Q12 1 19.5 7.5"/></svg>,
+            },
+            {
+              label: "Empire", bg: "from-indigo-900/70 to-indigo-950/80", border: "border-indigo-700/40", glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M4 17L4 9L8 13L12 5L16 13L20 9L20 17Z"/><rect x="4" y="17" width="16" height="3" rx="1"/><circle cx="4" cy="9" r="1.5"/><circle cx="20" cy="9" r="1.5"/><circle cx="12" cy="5" r="1.5"/></svg>,
+            },
+          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; iconColor: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
               className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
-              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
-                <span className={`text-lg leading-none ${btn.iconColor}`}>{btn.icon}</span>
+              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center ${btn.iconColor}`}>
+                {btn.icon}
               </div>
               <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
             </button>
@@ -2684,8 +2718,8 @@ export function GalaxyMapClient({
             onClick={() => setShopPanelOpen(true)}
             className="flex flex-col items-center gap-1.5 w-12 py-2.5 rounded-xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/80 border border-zinc-700/30 shadow-md hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm self-end mb-1"
           >
-            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center">
-              <span className="text-sm font-bold text-amber-600">$</span>
+            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center text-amber-500">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M6 2L3 7v13a2 2 0 002 2h14a2 2 0 002-2V7L18 2H6z" opacity="0.85"/><path d="M3 7h18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5"/><path d="M9 10a3 3 0 006 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
             </div>
             <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-600">Shop</span>
           </button>
@@ -2904,13 +2938,34 @@ export function GalaxyMapClient({
                   )}
 
                   {/* No eligible fleets */}
-                  {!a.myHarvestId && eligibleFleets.length === 0 && (
-                    <p className="text-xs text-zinc-700 text-center">
-                      No fleets available in {a.systemId}.
-                      <br />
-                      Travel a fleet here first.
-                    </p>
-                  )}
+                  {!a.myHarvestId && eligibleFleets.length === 0 && (() => {
+                    const dockedHere = ships.filter((s) => s.systemId === a.systemId);
+                    return (
+                      <div className="space-y-2">
+                        {dockedHere.length >= 2 ? (
+                          <>
+                            <p className="text-xs text-zinc-600 text-center">
+                              No fleet here yet. Form one from your docked ships.
+                            </p>
+                            {formFleetError && <p className="text-xs text-red-400 text-center">{formFleetError}</p>}
+                            <button
+                              onClick={() => handleFormFleet(a.systemId)}
+                              disabled={formFleetLoading}
+                              className="w-full rounded border border-teal-700/50 bg-teal-950/30 px-3 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-900/40 disabled:opacity-50 transition-colors"
+                            >
+                              {formFleetLoading ? "Forming…" : `Form Fleet (${dockedHere.length} ships)`}
+                            </button>
+                          </>
+                        ) : (
+                          <p className="text-xs text-zinc-700 text-center">
+                            No fleets in this system.
+                            <br />
+                            <span className="text-zinc-600">Travel ships here first (need 2+).</span>
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </>
             );
