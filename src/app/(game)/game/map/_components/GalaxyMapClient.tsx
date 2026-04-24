@@ -24,6 +24,7 @@ import { MarketMapPanel } from "./MarketMapPanel";
 import { ResearchMapPanel } from "./ResearchMapPanel";
 import { FeedMapPanel } from "./FeedMapPanel";
 import { MessagesMapPanel } from "./MessagesMapPanel";
+import { StationMapPanel } from "./StationMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -552,6 +553,9 @@ export function GalaxyMapClient({
 
   // ── Messages panel ─────────────────────────────────────────────────────────
   const [messagesPanelOpen, setMessagesPanelOpen] = useState(false);
+
+  // ── Station panel ──────────────────────────────────────────────────────────
+  const [stationPanelOpen, setStationPanelOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2660,6 +2664,12 @@ export function GalaxyMapClient({
           >
             Messages
           </button>
+          <button
+            onClick={() => setStationPanelOpen(true)}
+            className="rounded border border-teal-800/50 bg-zinc-900/90 px-3 py-1.5 text-xs font-medium text-teal-400/80 hover:border-teal-700 hover:text-teal-300 transition-colors backdrop-blur-sm"
+          >
+            Station
+          </button>
         </div>
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
@@ -3738,6 +3748,11 @@ export function GalaxyMapClient({
       {/* Messages overlay */}
       {messagesPanelOpen && (
         <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />
+      )}
+
+      {/* Station overlay */}
+      {stationPanelOpen && (
+        <StationMapPanel onClose={() => setStationPanelOpen(false)} />
       )}
     </div>
   );
