@@ -238,6 +238,10 @@ interface GalaxyMapClientProps {
   otherStations: GalaxyOtherStation[];
   /** Body stewardships across all systems (for permit / tax panel). */
   bodyStewrds: GalaxyBodySteward[];
+  /** Player handle for the top-left HUD card. */
+  playerHandle: string;
+  /** Player credits balance for the top-left HUD card. */
+  playerCredits: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -442,6 +446,8 @@ export function GalaxyMapClient({
   canPlaceBeacon,
   otherStations,
   bodyStewrds,
+  playerHandle,
+  playerCredits,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -2636,31 +2642,47 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── Top-left player card ─────────────────────────────────────────── */}
+        <div className="absolute left-4 top-4 flex items-center gap-3 rounded-xl border border-zinc-700/50 bg-zinc-950/90 backdrop-blur-sm px-3 py-2 shadow-lg shadow-black/40">
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-800/80 to-indigo-950 border border-indigo-700/50 flex items-center justify-center shrink-0">
+            <span className="text-sm font-bold text-indigo-200">{playerHandle[0]?.toUpperCase() ?? "?"}</span>
+          </div>
+          <div>
+            <p className="text-xs font-bold text-zinc-200 leading-none">{playerHandle}</p>
+            <p className="mt-1 font-mono text-xs font-semibold text-amber-400 leading-none tabular-nums">
+              {playerCredits.toLocaleString()}<span className="text-amber-700 text-[10px]"> ¢</span>
+            </p>
+          </div>
+        </div>
+
         {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
-        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-1 rounded-2xl border border-zinc-700/60 bg-zinc-950/95 backdrop-blur-md px-3 py-2 shadow-2xl shadow-black/50">
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
           {([
-            { label: "Station", glyph: "◈", color: "text-teal-400",   border: "hover:border-teal-700/60",   onClick: () => setStationPanelOpen(true) },
-            { label: "Fleet",   glyph: "▲", color: "text-rose-400",   border: "hover:border-rose-800/60",   onClick: () => setCommandPanelOpen(true) },
-            { label: "Market",  glyph: "◇", color: "text-amber-400",  border: "hover:border-amber-800/60",  onClick: () => setMarketPanelOpen(true) },
-            { label: "Comms",   glyph: "◉", color: "text-violet-400", border: "hover:border-violet-800/60", onClick: () => setMessagesPanelOpen(true) },
-            { label: "Empire",  glyph: "✦", color: "text-indigo-400", border: "hover:border-indigo-800/60", onClick: () => setEmpirePanelOpen(true) },
+            { label: "Station", bg: "from-teal-900/70 to-teal-950/80",   border: "border-teal-700/40",   glow: "shadow-teal-900/40",   iconBg: "bg-teal-800/50",   icon: "◈", iconColor: "text-teal-300",   onClick: () => setStationPanelOpen(true) },
+            { label: "Fleet",   bg: "from-rose-900/70 to-rose-950/80",   border: "border-rose-800/40",   glow: "shadow-rose-900/40",   iconBg: "bg-rose-800/50",   icon: "▲", iconColor: "text-rose-300",   onClick: () => setCommandPanelOpen(true) },
+            { label: "Market",  bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40",  glow: "shadow-amber-900/40",  iconBg: "bg-amber-800/50",  icon: "◇", iconColor: "text-amber-300",  onClick: () => setMarketPanelOpen(true) },
+            { label: "Comms",   bg: "from-violet-900/70 to-violet-950/80",border: "border-violet-700/40",glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", icon: "◉", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true) },
+            { label: "Empire",  bg: "from-indigo-900/70 to-indigo-950/80",border: "border-indigo-700/40",glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", icon: "✦", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true) },
           ] as const).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
-              className={`flex flex-col items-center gap-0.5 px-4 py-2 rounded-xl border border-transparent ${btn.border} hover:bg-zinc-800/60 transition-all group`}
+              className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
-              <span className={`text-base leading-none ${btn.color} group-hover:brightness-125`}>{btn.glyph}</span>
-              <span className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600 group-hover:text-zinc-400 transition-colors">{btn.label}</span>
+              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
+                <span className={`text-lg leading-none ${btn.iconColor}`}>{btn.icon}</span>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
             </button>
           ))}
-          <div className="w-px h-8 bg-zinc-800 mx-1" />
           <button
             onClick={() => setShopPanelOpen(true)}
-            className="flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl border border-transparent hover:border-amber-900/50 hover:bg-zinc-800/60 transition-all group"
+            className="flex flex-col items-center gap-1.5 w-12 py-2.5 rounded-xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/80 border border-zinc-700/30 shadow-md hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm self-end mb-1"
           >
-            <span className="text-base leading-none text-amber-600/70 group-hover:text-amber-500 transition-colors">$</span>
-            <span className="text-[9px] font-semibold uppercase tracking-widest text-zinc-700 group-hover:text-zinc-500 transition-colors">Shop</span>
+            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center">
+              <span className="text-sm font-bold text-amber-600">$</span>
+            </div>
+            <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-600">Shop</span>
           </button>
         </div>
 

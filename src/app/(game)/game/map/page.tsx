@@ -740,6 +740,8 @@ export default async function GalaxyMapPage() {
         bodyStewrds={galaxyBodyStewrds}
         lanes={galaxyLanes}
         gateSystemIds={activeGateSystems}
+        playerHandle={player.handle}
+        playerCredits={player.credits}
       />
     </div>
   );
