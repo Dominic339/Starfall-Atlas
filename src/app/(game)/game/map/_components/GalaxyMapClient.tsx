@@ -3950,37 +3950,93 @@ export function GalaxyMapClient({
           </>
         ) : (
           /* Empty state */
-          <div className="flex flex-1 flex-col items-center justify-center px-4 text-center">
-            <p className="text-xs text-zinc-600">Click a star to see assets &amp; actions.</p>
-            <p className="mt-1 text-xs text-zinc-700">Shift+click a star to enter system view.</p>
-            {currentSystem && (
-              <p className="mt-3 text-xs text-zinc-700">
-                Ship at{" "}
-                <span className="text-emerald-600">{currentSystem.name}</span>.{" "}
-                Range: {baseRangeLy} ly.
-              </p>
-            )}
-            {stationSystem && !currentSystem && (
-              <p className="mt-3 text-xs text-zinc-700">
-                Station at{" "}
-                <span className="text-amber-600">{stationSystem.name}</span>.
-              </p>
-            )}
+          <div className="flex flex-1 flex-col overflow-y-auto">
+            {/* Ships summary */}
             {ships.length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                Drag ship <span className="text-indigo-500">●</span> markers to dispatch.
-              </p>
+              <div className="border-b border-zinc-800/50 px-4 py-3">
+                <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Your Ships</p>
+                <div className="space-y-2">
+                  {ships.map((ship) => {
+                    const loc = ship.systemId ? systemMap.get(ship.systemId) : null;
+                    const dest = ship.destinationSystemId ? systemMap.get(ship.destinationSystemId) : null;
+                    const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                    return (
+                      <div key={ship.id} className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-xs font-medium text-zinc-300">{ship.name}</p>
+                          {loc ? (
+                            <button
+                              onClick={() => { setSelectedId(loc.id); setSelectedAsteroidId(null); }}
+                              className="text-[10px] text-emerald-600 hover:text-emerald-400 transition-colors text-left truncate max-w-full"
+                            >
+                              {loc.name}
+                            </button>
+                          ) : dest ? (
+                            <p className="text-[10px] text-indigo-500 truncate">→ {dest.name}</p>
+                          ) : (
+                            <p className="text-[10px] text-zinc-700">Unknown</p>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          {ship.systemId ? (
+                            <span className="text-[10px] text-zinc-700">Docked</span>
+                          ) : msLeft !== null ? (
+                            <span className="text-[10px] text-indigo-400/80">
+                              {msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving"}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             )}
-            {fleets.filter((f) => f.systemId).length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                Drag fleet <span className="text-violet-400">▲</span> markers to dispatch.
-              </p>
-            )}
-            {asteroids.length > 0 && (
-              <p className="mt-1.5 text-xs text-zinc-700">
-                {asteroids.length} active asteroid{asteroids.length !== 1 ? "s" : ""} on map.
-              </p>
-            )}
+
+            {/* Nearby reachable systems from docked ship */}
+            {currentSystem && (() => {
+              const nearby = systems
+                .filter((s) => s.id !== currentSystem.id && dist3D(s, currentSystem) <= baseRangeLy + 0.01)
+                .sort((a, b) => dist3D(a, currentSystem) - dist3D(b, currentSystem))
+                .slice(0, 6);
+              if (nearby.length === 0) return null;
+              return (
+                <div className="border-b border-zinc-800/50 px-4 py-3">
+                  <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">In Range from {currentSystem.name}</p>
+                  <div className="space-y-1.5">
+                    {nearby.map((sys) => {
+                      const d = dist3D(sys, currentSystem);
+                      return (
+                        <button
+                          key={sys.id}
+                          onClick={() => { setSelectedId(sys.id); setSelectedAsteroidId(null); }}
+                          className="w-full flex items-center gap-2 rounded border border-zinc-800/50 bg-zinc-900/30 px-2 py-1.5 text-left hover:bg-zinc-800/60 hover:border-zinc-700/60 transition-colors group"
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full shrink-0" style={{ background: spectralColor(sys.spectralClass) }}/>
+                          <span className="flex-1 min-w-0">
+                            <span className="text-xs text-zinc-300 group-hover:text-white truncate block">{sys.name}</span>
+                          </span>
+                          <span className="text-[10px] text-zinc-600 shrink-0 font-mono">{formatDist(d)}</span>
+                          {sys.colonyCount > 0 && (
+                            <span className="text-[10px] text-emerald-700 shrink-0">{sys.colonyCount}c</span>
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Hints */}
+            <div className="px-4 py-3 mt-auto">
+              <div className="space-y-1 text-[10px] text-zinc-700">
+                <p>Click a star to inspect &amp; act on it.</p>
+                <p>Shift+click to open the system detail page.</p>
+                {ships.length > 0 && <p>Drag ship <span className="text-indigo-500">●</span> or fleet <span className="text-violet-400">▲</span> markers to dispatch.</p>}
+                <p className="mt-2 text-zinc-800 font-mono">/  search &nbsp;·&nbsp; Esc  deselect &nbsp;·&nbsp; ⌂  station</p>
+              </div>
+            </div>
           </div>
         )}
       </div>
