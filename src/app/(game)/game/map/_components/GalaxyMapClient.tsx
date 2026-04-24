@@ -93,6 +93,9 @@ export interface GalaxyFleet {
   id: string;
   name: string;
   systemId: string | null;
+  /** Populated while the fleet is traveling (status = 'traveling'). */
+  destinationSystemId: string | null;
+  arriveAt: string | null;
   /** True if this fleet currently has an active asteroid harvest job. */
   isHarvesting: boolean;
 }
@@ -3388,12 +3391,21 @@ export function GalaxyMapClient({
                     {fleetsInTransit.length > 0 && (
                       <div className="space-y-1">
                         <p className="text-xs text-zinc-700">In transit</p>
-                        {fleetsInTransit.map((fleet) => (
+                        {fleetsInTransit.map((fleet) => {
+                          const destSys = fleet.destinationSystemId ? systemMap.get(fleet.destinationSystemId) : null;
+                          const msLeft = fleet.arriveAt ? new Date(fleet.arriveAt).getTime() - Date.now() : null;
+                          return (
                           <div key={fleet.id} className="flex items-center justify-between gap-2">
-                            <p className="truncate text-xs text-zinc-600">{fleet.name}</p>
-                            <p className="text-xs text-violet-400/70 shrink-0">traveling</p>
+                            <div className="min-w-0">
+                              <p className="truncate text-xs text-zinc-600">{fleet.name}</p>
+                              {destSys && <p className="text-[10px] text-violet-500/70 truncate">→ {destSys.name}</p>}
+                            </div>
+                            <p className="text-[10px] text-violet-400/60 shrink-0">
+                              {msLeft !== null ? (msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving") : "traveling"}
+                            </p>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>

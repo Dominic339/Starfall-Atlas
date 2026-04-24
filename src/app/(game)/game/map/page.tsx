@@ -521,12 +521,25 @@ export default async function GalaxyMapPage() {
   });
 
   // ── Build fleet list for client (needed for dispatch UI) ─────────────────
-  const galaxyFleets: GalaxyFleet[] = fleets.map((f) => ({
-    id: f.id,
-    name: f.name,
-    systemId: f.current_system_id,
-    isHarvesting: harvestingFleetIds.has(f.id),
-  }));
+  // Index travel jobs by fleet_id for O(1) ETA lookups
+  const travelJobByFleet = new Map<string, TravelRow>();
+  for (const tj of travelJobs) {
+    if (tj.fleet_id && !travelJobByFleet.has(tj.fleet_id)) {
+      travelJobByFleet.set(tj.fleet_id, tj);
+    }
+  }
+
+  const galaxyFleets: GalaxyFleet[] = fleets.map((f) => {
+    const tj = travelJobByFleet.get(f.id);
+    return {
+      id: f.id,
+      name: f.name,
+      systemId: f.current_system_id,
+      destinationSystemId: tj?.to_system_id ?? null,
+      arriveAt: tj?.arrive_at ?? null,
+      isHarvesting: harvestingFleetIds.has(f.id),
+    };
+  });
 
   // ── Build travel lines for client ────────────────────────────────────────
   // Deduplicate by fleet_id so fleet members don't produce N identical lines.
