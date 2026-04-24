@@ -26,6 +26,7 @@ import { MessagesMapPanel } from "./MessagesMapPanel";
 import { StationMapPanel } from "./StationMapPanel";
 import { CommandMapPanel } from "./CommandMapPanel";
 import { ShopMapPanel } from "./ShopMapPanel";
+import { ProfileMapPanel } from "./ProfileMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -550,6 +551,7 @@ export function GalaxyMapClient({
   const [colonyPanelSystemId, setColonyPanelSystemId] = useState<string | null>(null);
 
   // ── HUD panel states ───────────────────────────────────────────────────────
+  const [profilePanelOpen,  setProfilePanelOpen]  = useState(false);
   const [marketPanelOpen,   setMarketPanelOpen]   = useState(false);
   const [empirePanelOpen,   setEmpirePanelOpen]   = useState(false);
   const [messagesPanelOpen, setMessagesPanelOpen] = useState(false);
@@ -2642,18 +2644,21 @@ export function GalaxyMapClient({
           </div>
         )}
 
-        {/* ── Top-left player card ─────────────────────────────────────────── */}
-        <div className="absolute left-4 top-4 flex items-center gap-3 rounded-xl border border-zinc-700/50 bg-zinc-950/90 backdrop-blur-sm px-3 py-2 shadow-lg shadow-black/40">
-          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-800/80 to-indigo-950 border border-indigo-700/50 flex items-center justify-center shrink-0">
+        {/* ── Top-left player card (clickable → profile) ───────────────────── */}
+        <button
+          onClick={() => setProfilePanelOpen(true)}
+          className="absolute left-4 top-4 flex items-center gap-3 rounded-xl border border-zinc-700/50 bg-zinc-950/90 backdrop-blur-sm px-3 py-2 shadow-lg shadow-black/40 hover:border-zinc-600/60 hover:bg-zinc-900/90 transition-all active:scale-95 group"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-800/80 to-indigo-950 border border-indigo-700/50 flex items-center justify-center shrink-0 group-hover:border-indigo-600/70 transition-colors">
             <span className="text-sm font-bold text-indigo-200">{playerHandle[0]?.toUpperCase() ?? "?"}</span>
           </div>
-          <div>
+          <div className="text-left">
             <p className="text-xs font-bold text-zinc-200 leading-none">{playerHandle}</p>
             <p className="mt-1 font-mono text-xs font-semibold text-amber-400 leading-none tabular-nums">
               {playerCredits.toLocaleString()}<span className="text-amber-700 text-[10px]"> ¢</span>
             </p>
           </div>
-        </div>
+        </button>
 
         {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
@@ -3745,6 +3750,7 @@ export function GalaxyMapClient({
       )}
 
       {/* HUD overlays */}
+      {profilePanelOpen  && <ProfileMapPanel  onClose={() => setProfilePanelOpen(false)} />}
       {marketPanelOpen   && <MarketMapPanel   onClose={() => setMarketPanelOpen(false)} />}
       {empirePanelOpen   && <EmpireMapPanel   onClose={() => setEmpirePanelOpen(false)} />}
       {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}
