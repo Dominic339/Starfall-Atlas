@@ -67,7 +67,29 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
   const [data, setData] = useState<PanelData | null>(null);
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"buy" | "sell">("buy");
+  const [tab, setTab] = useState<"buy" | "sell" | "auctions">("buy");
+
+  // Auction state (lazy loaded when tab first opened)
+  interface AuctionItem {
+    id: string; itemType: string; itemLabel: string;
+    minBid: number; currentHighBid: number;
+    isOwnAuction: boolean; isHighBidder: boolean;
+    sellerHandle: string; timeLeft: string; endsAt: string;
+  }
+  interface EligibleItem { id: string; type: "colony" | "stewardship"; label: string; }
+  interface AuctionData { auctions: AuctionItem[]; eligibleItems: EligibleItem[]; playerCredits: number; }
+  const [auctionData, setAuctionData] = useState<AuctionData | null>(null);
+  const [auctionLoading, setAuctionLoading] = useState(false);
+  const [auctionLoaded, setAuctionLoaded] = useState(false);
+  const [bidAmounts, setBidAmounts] = useState<Record<string, string>>({});
+  const [bidLoading, setBidLoading] = useState<string | null>(null);
+  const [bidMsg, setBidMsg] = useState<{ id: string; ok: boolean; text: string } | null>(null);
+  const [createItemId, setCreateItemId] = useState("");
+  const [createItemType, setCreateItemType] = useState<"colony" | "stewardship">("colony");
+  const [createMinBid, setCreateMinBid] = useState(0);
+  const [createDuration, setCreateDuration] = useState(24);
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createMsg, setCreateMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   // Create listing form state
@@ -116,6 +138,56 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
   }, [listRes]);
 
   useEffect(() => { void refetch(); }, [refetch, refreshKey]);
+
+  // Lazy-load auction data the first time the auctions tab is opened
+  useEffect(() => {
+    if (tab !== "auctions" || auctionLoaded) return;
+    setAuctionLoading(true);
+    fetch("/api/game/auction/panel")
+      .then((r) => r.json())
+      .then((json) => { if (json.ok) setAuctionData(json.data as AuctionData); })
+      .catch(() => {})
+      .finally(() => { setAuctionLoading(false); setAuctionLoaded(true); });
+  }, [tab, auctionLoaded]);
+
+  async function handleBid(auctionId: string) {
+    const amt = parseInt(bidAmounts[auctionId] ?? "0", 10);
+    if (!amt) return;
+    setBidLoading(auctionId); setBidMsg(null);
+    try {
+      const res = await fetch("/api/game/auction/bid", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auctionId, amount: amt }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setBidMsg({ id: auctionId, ok: true, text: "Bid placed!" });
+        setAuctionLoaded(false); // trigger reload
+      } else {
+        setBidMsg({ id: auctionId, ok: false, text: json.error?.message ?? "Bid failed." });
+      }
+    } catch { setBidMsg({ id: auctionId, ok: false, text: "Network error." }); }
+    finally { setBidLoading(null); }
+  }
+
+  async function handleCreateAuction() {
+    if (!createItemId) return;
+    setCreateLoading(true); setCreateMsg(null);
+    try {
+      const res = await fetch("/api/game/auction/create", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ itemType: createItemType, itemId: createItemId, minBid: createMinBid, durationHours: createDuration }),
+      });
+      const json = await res.json();
+      if (json.ok) {
+        setCreateMsg({ ok: true, text: "Auction created!" });
+        setAuctionLoaded(false);
+      } else {
+        setCreateMsg({ ok: false, text: json.error?.message ?? "Failed." });
+      }
+    } catch { setCreateMsg({ ok: false, text: "Network error." }); }
+    finally { setCreateLoading(false); }
+  }
 
   const afterAction = () => {
     setRefreshKey((k) => k + 1);
@@ -209,17 +281,15 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
         {/* Tabs */}
         <div className="flex gap-1 border-b border-zinc-800 px-4 pt-2 shrink-0">
-          {(["buy", "sell"] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-4 py-1.5 text-xs rounded-t transition-colors capitalize ${
-                tab === t ? "bg-zinc-800 text-zinc-200" : "text-zinc-600 hover:text-zinc-400"
-              }`}
-            >
-              {t === "buy" ? `Browse (${otherListings.length})` : `Sell${myListings.length > 0 ? ` · ${myListings.length} active` : ""}`}
-            </button>
-          ))}
+          <button onClick={() => setTab("buy")} className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${tab === "buy" ? "bg-zinc-800 text-zinc-200 border-b-2 border-amber-600" : "text-zinc-600 hover:text-zinc-400"}`}>
+            Browse{data ? ` (${otherListings.length})` : ""}
+          </button>
+          <button onClick={() => setTab("sell")} className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${tab === "sell" ? "bg-zinc-800 text-zinc-200 border-b-2 border-amber-600" : "text-zinc-600 hover:text-zinc-400"}`}>
+            Sell{data && myListings.length > 0 ? ` · ${myListings.length}` : ""}
+          </button>
+          <button onClick={() => setTab("auctions")} className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${tab === "auctions" ? "bg-zinc-800 text-zinc-200 border-b-2 border-amber-600" : "text-zinc-600 hover:text-zinc-400"}`}>
+            Auctions{auctionData ? ` (${auctionData.auctions.length})` : ""}
+          </button>
         </div>
 
         {/* Body */}
@@ -416,6 +486,114 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                     </table>
                   </div>
                 </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Auctions tab ──────────────────────────────────────────────── */}
+          {tab === "auctions" && (
+            <div className="space-y-4">
+              {auctionLoading && <p className="text-xs text-zinc-600 text-center py-8 animate-pulse">Loading auctions…</p>}
+
+              {auctionLoaded && auctionData && (
+                <>
+                  {/* Active auctions */}
+                  {auctionData.auctions.length === 0 ? (
+                    <p className="text-sm text-zinc-600 text-center py-6">No active auctions.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {auctionData.auctions.map((a) => {
+                        const minNext = Math.max(a.minBid, a.currentHighBid + 1);
+                        const msg = bidMsg?.id === a.id ? bidMsg : null;
+                        return (
+                          <div key={a.id} className={`rounded-xl border px-4 py-3 space-y-2 ${
+                            a.isOwnAuction ? "border-amber-900/40 bg-amber-950/10" :
+                            a.isHighBidder ? "border-emerald-900/40 bg-emerald-950/10" :
+                            "border-zinc-800 bg-zinc-900/40"
+                          }`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="text-sm font-semibold text-zinc-200 truncate">{a.itemLabel}</p>
+                                <p className="text-[10px] text-zinc-600 mt-0.5">
+                                  Seller: <span className="text-zinc-400">{a.sellerHandle}</span>
+                                  <span className="mx-1.5 text-zinc-700">·</span>
+                                  <span className={a.isHighBidder ? "text-emerald-400" : "text-zinc-500"}>
+                                    {a.isHighBidder ? "You're winning" : `High bid: ${a.currentHighBid.toLocaleString()} ¢`}
+                                  </span>
+                                </p>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className="font-mono text-sm font-bold text-amber-400">{a.currentHighBid.toLocaleString()}<span className="text-amber-700 text-[10px]"> ¢</span></p>
+                                <p className="text-[10px] text-zinc-600">{a.timeLeft} left</p>
+                              </div>
+                            </div>
+                            {!a.isOwnAuction && (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number" min={minNext}
+                                  value={bidAmounts[a.id] ?? minNext}
+                                  onChange={(e) => setBidAmounts((p) => ({ ...p, [a.id]: e.target.value }))}
+                                  className="w-28 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-500 text-center"
+                                />
+                                <span className="text-[10px] text-zinc-600">¢ min</span>
+                                <button
+                                  onClick={() => handleBid(a.id)}
+                                  disabled={bidLoading === a.id}
+                                  className="rounded-lg px-3 py-1 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                                >
+                                  {bidLoading === a.id ? "…" : "Bid"}
+                                </button>
+                                {msg && <span className={`text-xs ${msg.ok ? "text-emerald-400" : "text-red-400"}`}>{msg.text}</span>}
+                              </div>
+                            )}
+                            {a.isOwnAuction && <p className="text-[10px] text-amber-600/80">Your auction</p>}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Create auction */}
+                  {auctionData.eligibleItems.length > 0 && (
+                    <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 p-4 space-y-3">
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Create Auction</p>
+                      <select
+                        value={createItemId}
+                        onChange={(e) => {
+                          const id = e.target.value;
+                          setCreateItemId(id);
+                          const item = auctionData.eligibleItems.find((i) => i.id === id);
+                          if (item) setCreateItemType(item.type);
+                        }}
+                        className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-zinc-500"
+                      >
+                        <option value="">Select item…</option>
+                        {auctionData.eligibleItems.map((i) => (
+                          <option key={i.id} value={i.id}>{i.label}</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1">
+                          <label className="text-[10px] text-zinc-600 block mb-1">Min bid (¢)</label>
+                          <input type="number" min={0} value={createMinBid} onChange={(e) => setCreateMinBid(parseInt(e.target.value) || 0)}
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-500" />
+                        </div>
+                        <div className="flex-1">
+                          <label className="text-[10px] text-zinc-600 block mb-1">Duration (hrs)</label>
+                          <input type="number" min={1} max={168} value={createDuration} onChange={(e) => setCreateDuration(parseInt(e.target.value) || 24)}
+                            className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs font-mono text-zinc-200 focus:outline-none focus:border-zinc-500" />
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button onClick={handleCreateAuction} disabled={createLoading || !createItemId}
+                          className="rounded-lg px-4 py-1.5 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors">
+                          {createLoading ? "Creating…" : "List Auction"}
+                        </button>
+                        {createMsg && <span className={`text-xs ${createMsg.ok ? "text-emerald-400" : "text-red-400"}`}>{createMsg.text}</span>}
+                      </div>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}
