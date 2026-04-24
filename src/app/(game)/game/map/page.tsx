@@ -742,6 +742,7 @@ export default async function GalaxyMapPage() {
         gateSystemIds={activeGateSystems}
         playerHandle={player.handle}
         playerCredits={player.credits}
+        stationSystemId={stationSystemId}
       />
     </div>
   );

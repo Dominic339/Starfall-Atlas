@@ -229,6 +229,8 @@ interface GalaxyMapClientProps {
   viewboxH: number;
   /** Station 3D coordinates for distance-from-station computation. */
   stationCoords: { x: number; y: number; z: number } | null;
+  /** Station's system ID for "center on station" navigation. */
+  stationSystemId: string | null;
   /** Player's alliance ID, null if not in an alliance. */
   playerAllianceId: string | null;
   /** True if the player has officer/founder role (can place beacons). */
@@ -443,6 +445,7 @@ export function GalaxyMapClient({
   viewboxW,
   viewboxH,
   stationCoords,
+  stationSystemId,
   playerAllianceId,
   canPlaceBeacon,
   otherStations,
@@ -1010,6 +1013,28 @@ export function GalaxyMapClient({
     setSelectedShipIds(new Set());
   }, [selectedId]);
 
+  // ── Escape key: close overlays, then deselect ─────────────────────────────
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      const t = e.target as Element;
+      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
+      const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
+        messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
+        colonyPanelSystemId !== null;
+      if (anyOverlay) {
+        setProfilePanelOpen(false); setMarketPanelOpen(false); setEmpirePanelOpen(false);
+        setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false);
+        setShopPanelOpen(false); setColonyPanelSystemId(null);
+      } else {
+        setSelectedId(null); setSelectedAsteroidId(null);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
+      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId]);
+
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
     setTransform((prev) => {
@@ -1023,6 +1048,13 @@ export function GalaxyMapClient({
         scale: newScale,
       };
     });
+  }
+
+  function centerOnStation() {
+    const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
+    if (!sys) return;
+    const targetScale = Math.max(2.5, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
   }
 
   function resetView() {
@@ -2783,27 +2815,16 @@ export function GalaxyMapClient({
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
-          <button
-            onClick={() => zoomBy(1.25)}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            title="Zoom in"
-          >
-            +
+          <button onClick={() => zoomBy(1.25)} title="Zoom in (scroll)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">+</button>
+          <button onClick={() => zoomBy(0.8)} title="Zoom out (scroll)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">−</button>
+          <button onClick={centerOnStation} title="Center on my station"
+            className={`flex h-7 w-7 items-center justify-center rounded border transition-colors text-xs ${stationSystemId ? "border-amber-800/60 bg-amber-950/40 text-amber-500 hover:bg-amber-900/50 hover:text-amber-300" : "border-zinc-700 bg-zinc-900/80 text-zinc-700 cursor-not-allowed"}`}>
+            ⌂
           </button>
-          <button
-            onClick={() => zoomBy(0.8)}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors"
-            title="Zoom out"
-          >
-            −
-          </button>
-          <button
-            onClick={resetView}
-            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors"
-            title="Reset view"
-          >
-            ⊙
-          </button>
+          <button onClick={resetView} title="Zoom to fit galaxy (Esc deselects)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">⊙</button>
         </div>
 
         {/* ── Map legend (bottom-right) ─────────────────────────────────── */}
@@ -2909,11 +2930,14 @@ export function GalaxyMapClient({
               <>
                 {/* Header */}
                 <div className="border-b border-zinc-800 px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-block h-3 w-3 rotate-45 shrink-0" style={{ background: color }} />
-                    <h2 className="text-sm font-semibold text-zinc-200 truncate">
-                      {resourceLabel(a.resourceType)} Asteroid
-                    </h2>
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span className="inline-block h-3 w-3 rotate-45 shrink-0" style={{ background: color }} />
+                      <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                        {resourceLabel(a.resourceType)} Asteroid
+                      </h2>
+                    </div>
+                    <button onClick={() => setSelectedAsteroidId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
                   </div>
                   <p className="mt-0.5 text-xs text-zinc-600">
                     Near {a.systemId} system
@@ -3030,14 +3054,17 @@ export function GalaxyMapClient({
           <>
             {/* Header */}
             <div className="border-b border-zinc-800 px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span
-                  className="h-3 w-3 rounded-full shrink-0"
-                  style={{ background: spectralColor(selectedSystem.spectralClass) }}
-                />
-                <h2 className="text-sm font-semibold text-zinc-200 truncate">
-                  {selectedSystem.name}
-                </h2>
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span
+                    className="h-3 w-3 rounded-full shrink-0"
+                    style={{ background: spectralColor(selectedSystem.spectralClass) }}
+                  />
+                  <h2 className="text-sm font-semibold text-zinc-200 truncate">
+                    {selectedSystem.name}
+                  </h2>
+                </div>
+                <button onClick={() => setSelectedId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
               </div>
               <p className="mt-0.5 text-xs text-zinc-500">
                 {spectralName(selectedSystem.spectralClass)}
