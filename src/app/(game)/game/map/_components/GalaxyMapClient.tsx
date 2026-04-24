@@ -1047,6 +1047,18 @@ export function GalaxyMapClient({
         return;
       }
 
+      if (e.key === "h" && !inInput) {
+        e.preventDefault();
+        const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
+        if (sys) {
+          const targetScale = Math.max(2.5, latestTransform.current.scale);
+          setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+          setSelectedId(sys.id);
+          setSelectedAsteroidId(null);
+        }
+        return;
+      }
+
       if (e.key !== "Escape") return;
       if (searchOpen) { setSearchOpen(false); setSearchQuery(""); return; }
       if (inInput) return;
@@ -1292,6 +1304,16 @@ export function GalaxyMapClient({
     setTravelError(null);
     setDispatchError(null);
     setShipDispatchError(null);
+  }
+
+  function handleStarDoubleClick(e: React.MouseEvent, systemId: string) {
+    e.stopPropagation();
+    const sys = systems.find((s) => s.id === systemId);
+    if (!sys) return;
+    const targetScale = Math.max(3, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+    setSelectedId(systemId);
+    setSelectedAsteroidId(null);
   }
 
   function handleAsteroidClick(e: React.MouseEvent, asteroidId: string) {
@@ -1849,6 +1871,7 @@ export function GalaxyMapClient({
                   key={sys.id}
                   className="cursor-pointer"
                   onClick={(e) => handleStarClick(e, sys.id)}
+                  onDoubleClick={(e) => handleStarDoubleClick(e, sys.id)}
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
@@ -2918,7 +2941,7 @@ export function GalaxyMapClient({
           <div className="flex h-5 w-7 items-center justify-center text-[9px] font-mono text-zinc-700 tabular-nums">
             {Math.round(transform.scale * 100)}%
           </div>
-          <button onClick={centerOnStation} title="Center on my station (⌂)"
+          <button onClick={centerOnStation} title="Center on station (H)"
             className={`flex h-7 w-7 items-center justify-center rounded border transition-colors text-xs ${stationSystemId ? "border-amber-800/60 bg-amber-950/40 text-amber-500 hover:bg-amber-900/50 hover:text-amber-300" : "border-zinc-700 bg-zinc-900/80 text-zinc-700 cursor-not-allowed"}`}>
             ⌂
           </button>
@@ -4034,7 +4057,8 @@ export function GalaxyMapClient({
                 <p>Click a star to inspect &amp; act on it.</p>
                 <p>Shift+click to open the system detail page.</p>
                 {ships.length > 0 && <p>Drag ship <span className="text-indigo-500">●</span> or fleet <span className="text-violet-400">▲</span> markers to dispatch.</p>}
-                <p className="mt-2 text-zinc-800 font-mono">/  search &nbsp;·&nbsp; Esc  deselect &nbsp;·&nbsp; ⌂  station</p>
+                <p className="mt-2 text-zinc-800 font-mono">/  search &nbsp;·&nbsp; h  station &nbsp;·&nbsp; Esc  deselect</p>
+                <p className="text-zinc-800 font-mono">double-click  center &amp; zoom</p>
               </div>
             </div>
           </div>
