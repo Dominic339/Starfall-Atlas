@@ -2182,12 +2182,24 @@ export function GalaxyMapClient({
                     />
                   )}
 
-                  {/* Diamond body */}
+                  {/* Diamond body — shadow layer */}
+                  <polygon
+                    points={diamondPoints(ast.svgX + 0.4 / scale, ast.svgY + 0.4 / scale, r + 0.5)}
+                    fill="#000"
+                    opacity={0.35}
+                  />
+                  {/* Diamond body — main fill */}
                   <polygon
                     points={diamondPoints(ast.svgX, ast.svgY, r)}
                     fill={color}
                     stroke="#06060a"
-                    strokeWidth={0.8 / scale}
+                    strokeWidth={0.6 / scale}
+                  />
+                  {/* Diamond highlight — inner crystalline face */}
+                  <polygon
+                    points={diamondPoints(ast.svgX - 0.5 / scale, ast.svgY - 0.5 / scale, r * 0.45)}
+                    fill="white"
+                    opacity={0.28}
                   />
 
                   {/* Label at high zoom or when selected/hovered */}
@@ -2683,32 +2695,71 @@ export function GalaxyMapClient({
         <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
           {([
             {
-              label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-800/50", iconColor: "text-teal-300", onClick: () => setStationPanelOpen(true),
-              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><rect x="10.5" y="3" width="3" height="18" rx="1.5"/><rect x="3" y="10.5" width="18" height="3" rx="1.5"/><circle cx="12" cy="3" r="2.5"/><circle cx="12" cy="21" r="2.5"/><circle cx="3" cy="12" r="2.5"/><circle cx="21" cy="12" r="2.5"/><circle cx="12" cy="12" r="3"/></svg>,
+              label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-950/60", onClick: () => setStationPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <rect x="10.5" y="3" width="3" height="18" rx="1.5" fill="#64748b"/>
+                <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="#64748b"/>
+                <circle cx="12" cy="3" r="2.5" fill="#2dd4bf"/><circle cx="12" cy="21" r="2.5" fill="#2dd4bf"/>
+                <circle cx="3" cy="12" r="2.5" fill="#2dd4bf"/><circle cx="21" cy="12" r="2.5" fill="#2dd4bf"/>
+                <circle cx="12" cy="12" r="4" fill="#0d9488"/>
+                <circle cx="12" cy="12" r="2" fill="#5eead4"/>
+                <circle cx="12" cy="12" r="0.8" fill="#ccfbf1"/>
+              </svg>,
             },
             {
-              label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-800/50", iconColor: "text-rose-300", onClick: () => setCommandPanelOpen(true),
-              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z"/><path d="M9 13L4 21L9 18Z" opacity="0.75"/><path d="M15 13L20 21L15 18Z" opacity="0.75"/><ellipse cx="12" cy="18.5" rx="2.5" ry="1" opacity="0.5"/></svg>,
+              label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-950/60", onClick: () => setCommandPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <path d="M12 2L15.5 10L15.5 17L14 20L12 18L10 20L8.5 17L8.5 10Z" fill="#9f1239" opacity="0.5"/>
+                <path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z" fill="#f43f5e"/>
+                <path d="M12 3L13 8L13 15L12 16.5L11 15L11 8Z" fill="#fda4af" opacity="0.45"/>
+                <path d="M9 13L4 21L9 18Z" fill="#be123c"/>
+                <path d="M15 13L20 21L15 18Z" fill="#be123c"/>
+                <ellipse cx="12" cy="18.8" rx="3" ry="1.2" fill="#fbbf24" opacity="0.9"/>
+                <ellipse cx="12" cy="18.8" rx="1.4" ry="0.6" fill="#fef9c3" opacity="0.9"/>
+              </svg>,
             },
             {
-              label: "Market", bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40", glow: "shadow-amber-900/40", iconBg: "bg-amber-800/50", iconColor: "text-amber-300", onClick: () => setMarketPanelOpen(true),
-              icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5"><path d="M7 4v14M7 4L4 7M7 4l3 3"/><path d="M17 20V6M17 20l-3-3M17 20l3-3"/><line x1="5" y1="12" x2="19" y2="12" strokeWidth="1" strokeDasharray="2 2" strokeOpacity="0.4"/></svg>,
+              label: "Market", bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40", glow: "shadow-amber-900/40", iconBg: "bg-amber-950/60", onClick: () => setMarketPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+                <path d="M7 5v13" stroke="#fbbf24" strokeWidth="2.5"/>
+                <path d="M4 8l3-3 3 3" stroke="#fbbf24" strokeWidth="2"/>
+                <path d="M17 19V6" stroke="#f59e0b" strokeWidth="2.5"/>
+                <path d="M14 16l3 3 3-3" stroke="#f59e0b" strokeWidth="2"/>
+                <line x1="4" y1="12" x2="20" y2="12" stroke="#78350f" strokeWidth="1" strokeDasharray="2 2"/>
+              </svg>,
             },
             {
-              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true),
-              icon: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" className="w-5 h-5"><line x1="12" y1="22" x2="12" y2="14"/><polygon points="9,20 12,14 15,20" fill="currentColor" stroke="none" opacity="0.5"/><path d="M9.5 12.5Q12 9 14.5 12.5"/><path d="M7 10Q12 5 17 10"/><path d="M4.5 7.5Q12 1 19.5 7.5"/></svg>,
+              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" className="w-6 h-6">
+                <polygon points="9,21 12,13 15,21" fill="#3b0764" opacity="0.7"/>
+                <line x1="12" y1="22" x2="12" y2="13" stroke="#a78bfa" strokeWidth="2"/>
+                <path d="M9.5 12.5Q12 9.5 14.5 12.5" stroke="#ddd6fe" strokeWidth="2"/>
+                <path d="M7 10Q12 6 17 10" stroke="#a78bfa" strokeWidth="1.75"/>
+                <path d="M4.5 7.5Q12 1.5 19.5 7.5" stroke="#6d28d9" strokeWidth="1.5"/>
+              </svg>,
             },
             {
-              label: "Empire", bg: "from-indigo-900/70 to-indigo-950/80", border: "border-indigo-700/40", glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true),
-              icon: <svg viewBox="0 0 24 24" fill="currentColor" className="w-5 h-5"><path d="M4 17L4 9L8 13L12 5L16 13L20 9L20 17Z"/><rect x="4" y="17" width="16" height="3" rx="1"/><circle cx="4" cy="9" r="1.5"/><circle cx="20" cy="9" r="1.5"/><circle cx="12" cy="5" r="1.5"/></svg>,
+              label: "Empire", bg: "from-indigo-900/70 to-indigo-950/80", border: "border-indigo-700/40", glow: "shadow-indigo-900/40", iconBg: "bg-indigo-950/60", onClick: () => setEmpirePanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <path d="M4 18L4 9L8 13L12 5L16 13L20 9L20 18Z" fill="#1e1b4b" opacity="0.5" transform="translate(0.5,0.5)"/>
+                <path d="M4 18L4 9L8 13L12 5L16 13L20 9L20 18Z" fill="#4f46e5"/>
+                <path d="M12 6L13.5 11L12 14L10.5 11Z" fill="#818cf8" opacity="0.55"/>
+                <rect x="4" y="18" width="16" height="3" rx="1" fill="#3730a3"/>
+                <circle cx="4" cy="9" r="2" fill="#6366f1"/>
+                <circle cx="4" cy="9" r="0.9" fill="#c7d2fe"/>
+                <circle cx="20" cy="9" r="2" fill="#6366f1"/>
+                <circle cx="20" cy="9" r="0.9" fill="#c7d2fe"/>
+                <circle cx="12" cy="5" r="2.5" fill="#818cf8"/>
+                <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
+              </svg>,
             },
-          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; iconColor: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
+          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
               className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
-              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center ${btn.iconColor}`}>
+              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
                 {btn.icon}
               </div>
               <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
@@ -2718,8 +2769,13 @@ export function GalaxyMapClient({
             onClick={() => setShopPanelOpen(true)}
             className="flex flex-col items-center gap-1.5 w-12 py-2.5 rounded-xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/80 border border-zinc-700/30 shadow-md hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm self-end mb-1"
           >
-            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center text-amber-500">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="w-4 h-4"><path d="M6 2L3 7v13a2 2 0 002 2h14a2 2 0 002-2V7L18 2H6z" opacity="0.85"/><path d="M3 7h18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5"/><path d="M9 10a3 3 0 006 0" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
+            <div className="w-7 h-7 rounded-md bg-amber-950/50 flex items-center justify-center">
+              <svg viewBox="0 0 24 24" fill="none" className="w-4 h-4">
+                <path d="M5 8h14l-1.5 13H6.5L5 8z" fill="#b45309"/>
+                <path d="M3 7L5.5 3h13L21 7H3z" fill="#d97706"/>
+                <path d="M9 11a3 3 0 006 0" stroke="#fbbf24" strokeWidth="2" strokeLinecap="round"/>
+                <ellipse cx="8" cy="10.5" rx="1.5" ry="1" fill="#fde68a" opacity="0.35"/>
+              </svg>
             </div>
             <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-600">Shop</span>
           </button>
