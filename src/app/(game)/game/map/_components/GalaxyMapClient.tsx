@@ -3012,17 +3012,29 @@ export function GalaxyMapClient({
           (() => {
             const s = systemMap.get(hoveredId);
             if (!s) return null;
+            const dToHovered = currentSystem && s.id !== currentSystem.id ? dist3D(currentSystem, s) : null;
+            const inHoverRange = dToHovered !== null && dToHovered <= baseRangeLy + 0.01;
+            const hoverEta = dToHovered !== null && inHoverRange && dockedShip
+              ? dToHovered / dockedShip.speedLyPerHr : null;
             return (
-              <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-3 py-1.5 text-xs shadow-lg">
+              <div className="pointer-events-none absolute left-1/2 top-4 -translate-x-1/2 rounded border border-zinc-700 bg-zinc-900/95 px-3 py-1.5 text-xs shadow-lg whitespace-nowrap">
                 <span className="font-medium text-zinc-200">{s.name}</span>
                 <span className="ml-2 text-zinc-500">{s.spectralClass}-class</span>
-                <span className="ml-2 text-zinc-600">{formatDist(s.distanceFromSol)} from Sol</span>
-                {s.isDiscovered && <span className="ml-2 text-emerald-600">discovered</span>}
+                {dToHovered !== null ? (
+                  inHoverRange ? (
+                    <span className="ml-2 text-indigo-400">
+                      {formatDist(dToHovered)}{hoverEta !== null ? ` · ${formatEta(hoverEta)}` : ""}
+                    </span>
+                  ) : (
+                    <span className="ml-2 text-zinc-700">{formatDist(dToHovered)} — out of range</span>
+                  )
+                ) : null}
                 {s.colonyCount > 0 && (
-                  <span className="ml-2 text-emerald-500">
-                    {s.colonyCount} {s.colonyCount === 1 ? "colony" : "colonies"}
+                  <span className="ml-2 text-emerald-600">
+                    {s.colonyCount}{s.colonyCount === 1 ? " colony" : " colonies"}
                   </span>
                 )}
+                {s.isStationLocation && <span className="ml-2 text-amber-500">your hub</span>}
               </div>
             );
           })()
