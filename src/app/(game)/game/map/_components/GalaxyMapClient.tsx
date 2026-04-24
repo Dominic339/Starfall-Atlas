@@ -461,6 +461,11 @@ export function GalaxyMapClient({
   const isPanning = useRef(false);
   const panStart = useRef({ x: 0, y: 0, tx: 0, ty: 0 });
 
+  // ── System search ─────────────────────────────────────────────────────────
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+
   // ── Interaction state ─────────────────────────────────────────────────────
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(
@@ -587,6 +592,21 @@ export function GalaxyMapClient({
   const dockedShip = ships.find((s) => s.systemId != null) ?? null;
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
+
+  // Search results (top 8 by name prefix match, then substring)
+  const searchResults = searchOpen && searchQuery.trim().length > 0
+    ? (() => {
+        const q = searchQuery.trim().toLowerCase();
+        return systems
+          .filter((s) => s.name.toLowerCase().includes(q))
+          .sort((a, b) => {
+            const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+            const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+            return aStart - bStart || a.name.localeCompare(b.name);
+          })
+          .slice(0, 8);
+      })()
+    : [];
 
   // Travel range circle radius in SVG base coords
   const rangeRadius = baseRangeLy * pixelsPerLy;
@@ -1013,12 +1033,23 @@ export function GalaxyMapClient({
     setSelectedShipIds(new Set());
   }, [selectedId]);
 
-  // ── Escape key: close overlays, then deselect ─────────────────────────────
+  // ── Escape / slash keys ───────────────────────────────────────────────────
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key !== "Escape") return;
       const t = e.target as Element;
-      if (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT") return;
+      const inInput = t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT";
+
+      if (e.key === "/" && !inInput) {
+        e.preventDefault();
+        setSearchOpen(true);
+        setSearchQuery("");
+        setTimeout(() => searchRef.current?.focus(), 0);
+        return;
+      }
+
+      if (e.key !== "Escape") return;
+      if (searchOpen) { setSearchOpen(false); setSearchQuery(""); return; }
+      if (inInput) return;
       const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
         messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
         colonyPanelSystemId !== null;
@@ -1032,7 +1063,7 @@ export function GalaxyMapClient({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
+  }, [searchOpen, profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
       stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId]);
 
   // ── Zoom button helpers ───────────────────────────────────────────────────
@@ -1055,6 +1086,15 @@ export function GalaxyMapClient({
     if (!sys) return;
     const targetScale = Math.max(2.5, transform.scale);
     setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+  }
+
+  function centerOnSystem(sys: GalaxySystem) {
+    const targetScale = Math.max(2.5, transform.scale);
+    setTransform({ tx: viewboxW / 2 - sys.svgX * targetScale, ty: viewboxH / 2 - sys.svgY * targetScale, scale: targetScale });
+    setSelectedId(sys.id);
+    setSelectedAsteroidId(null);
+    setSearchOpen(false);
+    setSearchQuery("");
   }
 
   function resetView() {
@@ -2707,6 +2747,62 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── System search overlay ────────────────────────────────────────── */}
+        {searchOpen && (
+          <div className="absolute left-1/2 top-4 z-50 -translate-x-1/2 w-72">
+            <div className="rounded-xl border border-zinc-700 bg-zinc-950/95 shadow-2xl shadow-black/60 overflow-hidden">
+              <div className="flex items-center gap-2 px-3 py-2.5 border-b border-zinc-800">
+                <svg viewBox="0 0 16 16" className="h-3.5 w-3.5 shrink-0 text-zinc-500" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <circle cx="6.5" cy="6.5" r="4.5"/>
+                  <path d="M10.5 10.5l3 3" strokeLinecap="round"/>
+                </svg>
+                <input
+                  ref={searchRef}
+                  autoFocus
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && searchResults[0]) { centerOnSystem(searchResults[0]); }
+                    if (e.key === "Escape") { setSearchOpen(false); setSearchQuery(""); }
+                  }}
+                  placeholder="Find system…"
+                  className="flex-1 bg-transparent text-xs text-zinc-200 placeholder-zinc-600 outline-none"
+                />
+                <button onClick={() => { setSearchOpen(false); setSearchQuery(""); }} className="text-zinc-700 hover:text-zinc-400 transition-colors text-xs leading-none">✕</button>
+              </div>
+              {searchResults.length > 0 && (
+                <div className="py-1 max-h-64 overflow-y-auto">
+                  {searchResults.map((sys) => (
+                    <button
+                      key={sys.id}
+                      onClick={() => centerOnSystem(sys)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-zinc-800/70 transition-colors group"
+                    >
+                      <span className="h-2 w-2 rounded-full shrink-0" style={{ background: spectralColor(sys.spectralClass) }}/>
+                      <span className="flex-1 min-w-0">
+                        <span className="text-xs font-medium text-zinc-200 group-hover:text-white">{sys.name}</span>
+                        <span className="ml-2 text-[10px] text-zinc-600">{sys.spectralClass}-class</span>
+                      </span>
+                      {sys.colonyCount > 0 && (
+                        <span className="text-[10px] text-emerald-600 shrink-0">{sys.colonyCount}c</span>
+                      )}
+                      {sys.isStationLocation && (
+                        <span className="text-[10px] text-amber-600 shrink-0">hub</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {searchQuery.trim().length > 0 && searchResults.length === 0 && (
+                <p className="px-3 py-3 text-xs text-zinc-700">No systems found</p>
+              )}
+              {searchQuery.trim().length === 0 && (
+                <p className="px-3 py-2.5 text-[10px] text-zinc-700">Type a system name · <kbd className="font-mono">Enter</kbd> to jump · <kbd className="font-mono">Esc</kbd> to close</p>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* ── Top-left player card (clickable → profile) ───────────────────── */}
         <button
           onClick={() => setProfilePanelOpen(true)}
@@ -2815,16 +2911,26 @@ export function GalaxyMapClient({
 
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
-          <button onClick={() => zoomBy(1.25)} title="Zoom in (scroll)"
+          <button onClick={() => zoomBy(1.25)} title="Zoom in"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">+</button>
-          <button onClick={() => zoomBy(0.8)} title="Zoom out (scroll)"
+          <button onClick={() => zoomBy(0.8)} title="Zoom out"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-sm text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200 transition-colors">−</button>
-          <button onClick={centerOnStation} title="Center on my station"
+          <div className="flex h-5 w-7 items-center justify-center text-[9px] font-mono text-zinc-700 tabular-nums">
+            {Math.round(transform.scale * 100)}%
+          </div>
+          <button onClick={centerOnStation} title="Center on my station (⌂)"
             className={`flex h-7 w-7 items-center justify-center rounded border transition-colors text-xs ${stationSystemId ? "border-amber-800/60 bg-amber-950/40 text-amber-500 hover:bg-amber-900/50 hover:text-amber-300" : "border-zinc-700 bg-zinc-900/80 text-zinc-700 cursor-not-allowed"}`}>
             ⌂
           </button>
-          <button onClick={resetView} title="Zoom to fit galaxy (Esc deselects)"
+          <button onClick={resetView} title="Zoom to fit (⊙)"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">⊙</button>
+          <button onClick={() => { setSearchOpen(true); setSearchQuery(""); setTimeout(() => searchRef.current?.focus(), 0); }} title="Find system (/)"
+            className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
+            <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
+              <circle cx="6.5" cy="6.5" r="4.5"/>
+              <path d="M10.5 10.5l3 3" strokeLinecap="round"/>
+            </svg>
+          </button>
         </div>
 
         {/* ── Map legend (bottom-right) ─────────────────────────────────── */}
