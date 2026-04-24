@@ -19,6 +19,14 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { ColonyMapPanel } from "./ColonyMapPanel";
+import { MarketMapPanel } from "./MarketMapPanel";
+import { EmpireMapPanel } from "./EmpireMapPanel";
+import { MessagesMapPanel } from "./MessagesMapPanel";
+import { StationMapPanel } from "./StationMapPanel";
+import { CommandMapPanel } from "./CommandMapPanel";
+import { ShopMapPanel } from "./ShopMapPanel";
+import { ProfileMapPanel } from "./ProfileMapPanel";
 
 // ---------------------------------------------------------------------------
 // Types (exported so page.tsx can import them)
@@ -231,6 +239,10 @@ interface GalaxyMapClientProps {
   otherStations: GalaxyOtherStation[];
   /** Body stewardships across all systems (for permit / tax panel). */
   bodyStewrds: GalaxyBodySteward[];
+  /** Player handle for the top-left HUD card. */
+  playerHandle: string;
+  /** Player credits balance for the top-left HUD card. */
+  playerCredits: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -435,6 +447,8 @@ export function GalaxyMapClient({
   canPlaceBeacon,
   otherStations,
   bodyStewrds,
+  playerHandle,
+  playerCredits,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -532,6 +546,22 @@ export function GalaxyMapClient({
   stationDragRef.current = stationDrag;
   const [stationRelocateError, setStationRelocateError] = useState<string | null>(null);
   const [stationRelocateLoading, setStationRelocateLoading] = useState(false);
+
+  // ── Colony map panel ──────────────────────────────────────────────────────
+  const [colonyPanelSystemId, setColonyPanelSystemId] = useState<string | null>(null);
+
+  // ── HUD panel states ───────────────────────────────────────────────────────
+  const [profilePanelOpen,  setProfilePanelOpen]  = useState(false);
+  const [marketPanelOpen,   setMarketPanelOpen]   = useState(false);
+  const [empirePanelOpen,   setEmpirePanelOpen]   = useState(false);
+  const [messagesPanelOpen, setMessagesPanelOpen] = useState(false);
+  const [stationPanelOpen,  setStationPanelOpen]  = useState(false);
+
+  // ── Command panel ──────────────────────────────────────────────────────────
+  const [commandPanelOpen, setCommandPanelOpen] = useState(false);
+
+  // ── Shop panel ─────────────────────────────────────────────────────────────
+  const [shopPanelOpen, setShopPanelOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -2614,6 +2644,53 @@ export function GalaxyMapClient({
           </div>
         )}
 
+        {/* ── Top-left player card (clickable → profile) ───────────────────── */}
+        <button
+          onClick={() => setProfilePanelOpen(true)}
+          className="absolute left-4 top-4 flex items-center gap-3 rounded-xl border border-zinc-700/50 bg-zinc-950/90 backdrop-blur-sm px-3 py-2 shadow-lg shadow-black/40 hover:border-zinc-600/60 hover:bg-zinc-900/90 transition-all active:scale-95 group"
+        >
+          <div className="w-9 h-9 rounded-lg bg-gradient-to-br from-indigo-800/80 to-indigo-950 border border-indigo-700/50 flex items-center justify-center shrink-0 group-hover:border-indigo-600/70 transition-colors">
+            <span className="text-sm font-bold text-indigo-200">{playerHandle[0]?.toUpperCase() ?? "?"}</span>
+          </div>
+          <div className="text-left">
+            <p className="text-xs font-bold text-zinc-200 leading-none">{playerHandle}</p>
+            <p className="mt-1 font-mono text-xs font-semibold text-amber-400 leading-none tabular-nums">
+              {playerCredits.toLocaleString()}<span className="text-amber-700 text-[10px]"> ¢</span>
+            </p>
+          </div>
+        </button>
+
+        {/* ── Bottom HUD ───────────────────────────────────────────────────── */}
+        <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-end gap-2 select-none">
+          {([
+            { label: "Station", bg: "from-teal-900/70 to-teal-950/80",   border: "border-teal-700/40",   glow: "shadow-teal-900/40",   iconBg: "bg-teal-800/50",   icon: "◈", iconColor: "text-teal-300",   onClick: () => setStationPanelOpen(true) },
+            { label: "Fleet",   bg: "from-rose-900/70 to-rose-950/80",   border: "border-rose-800/40",   glow: "shadow-rose-900/40",   iconBg: "bg-rose-800/50",   icon: "▲", iconColor: "text-rose-300",   onClick: () => setCommandPanelOpen(true) },
+            { label: "Market",  bg: "from-amber-900/70 to-amber-950/80", border: "border-amber-800/40",  glow: "shadow-amber-900/40",  iconBg: "bg-amber-800/50",  icon: "◇", iconColor: "text-amber-300",  onClick: () => setMarketPanelOpen(true) },
+            { label: "Comms",   bg: "from-violet-900/70 to-violet-950/80",border: "border-violet-700/40",glow: "shadow-violet-900/40", iconBg: "bg-violet-800/50", icon: "◉", iconColor: "text-violet-300", onClick: () => setMessagesPanelOpen(true) },
+            { label: "Empire",  bg: "from-indigo-900/70 to-indigo-950/80",border: "border-indigo-700/40",glow: "shadow-indigo-900/40", iconBg: "bg-indigo-800/50", icon: "✦", iconColor: "text-indigo-300", onClick: () => setEmpirePanelOpen(true) },
+          ] as const).map((btn) => (
+            <button
+              key={btn.label}
+              onClick={btn.onClick}
+              className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
+            >
+              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
+                <span className={`text-lg leading-none ${btn.iconColor}`}>{btn.icon}</span>
+              </div>
+              <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
+            </button>
+          ))}
+          <button
+            onClick={() => setShopPanelOpen(true)}
+            className="flex flex-col items-center gap-1.5 w-12 py-2.5 rounded-xl bg-gradient-to-b from-zinc-800/60 to-zinc-900/80 border border-zinc-700/30 shadow-md hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm self-end mb-1"
+          >
+            <div className="w-7 h-7 rounded-md bg-amber-900/40 flex items-center justify-center">
+              <span className="text-sm font-bold text-amber-600">$</span>
+            </div>
+            <span className="text-[8px] font-bold uppercase tracking-wider text-zinc-600">Shop</span>
+          </button>
+        </div>
+
         {/* ── Floating controls (bottom-left) ─────────────────────────────── */}
         <div className="absolute bottom-4 left-4 flex flex-col gap-1.5">
           <button
@@ -2957,6 +3034,14 @@ export function GalaxyMapClient({
                       </div>
                     );
                   })()}
+                  {selectedSystem.myColonyCount > 0 && (
+                    <button
+                      onClick={() => setColonyPanelSystemId(selectedSystem.id)}
+                      className="mt-2 w-full rounded border border-emerald-800/60 bg-emerald-950/30 px-2 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-900/40 hover:text-emerald-300 transition-colors"
+                    >
+                      Manage {selectedSystem.myColonyCount === 1 ? "Colony" : `${selectedSystem.myColonyCount} Colonies`} →
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -3655,6 +3740,28 @@ export function GalaxyMapClient({
           </div>
         )}
       </div>
+
+      {/* Colony management overlay */}
+      {colonyPanelSystemId && (
+        <ColonyMapPanel
+          systemId={colonyPanelSystemId}
+          onClose={() => setColonyPanelSystemId(null)}
+        />
+      )}
+
+      {/* HUD overlays */}
+      {profilePanelOpen  && <ProfileMapPanel  onClose={() => setProfilePanelOpen(false)} />}
+      {marketPanelOpen   && <MarketMapPanel   onClose={() => setMarketPanelOpen(false)} />}
+      {empirePanelOpen   && <EmpireMapPanel   onClose={() => setEmpirePanelOpen(false)} />}
+      {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}
+      {stationPanelOpen  && <StationMapPanel  onClose={() => setStationPanelOpen(false)} />}
+      {commandPanelOpen  && <CommandMapPanel  onClose={() => setCommandPanelOpen(false)} />}
+      {shopPanelOpen     && <ShopMapPanel     onClose={() => setShopPanelOpen(false)} />}
+
+      {/* Shop overlay */}
+      {shopPanelOpen && (
+        <ShopMapPanel onClose={() => setShopPanelOpen(false)} />
+      )}
     </div>
   );
 }
