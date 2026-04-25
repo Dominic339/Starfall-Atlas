@@ -674,6 +674,10 @@ export function GalaxyMapClient({
   const systemsRef = useRef(systems);
   systemsRef.current = systems;
 
+  // Latest-value refs for derived travel state (used inside keyboard handler)
+  const canTravelRef = useRef(false);
+  const handleTravelRef = useRef<(() => void) | null>(null);
+
   // Ships grouped by system for drag marker positioning
   const shipsBySystem = new Map<string, GalaxyShip[]>();
   for (const ship of ships) {
@@ -1053,6 +1057,12 @@ export function GalaxyMapClient({
         return;
       }
 
+      if (e.key === "Enter" && !inInput) {
+        const doTravel = handleTravelRef.current;
+        if (doTravel) { e.preventDefault(); doTravel(); }
+        return;
+      }
+
       if (e.key === "h" && !inInput) {
         e.preventDefault();
         const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
@@ -1365,6 +1375,10 @@ export function GalaxyMapClient({
       setTravelLoading(false);
     }
   }
+
+  // Update latest-value refs so keydown handler can read current travel state
+  canTravelRef.current = canTravel;
+  handleTravelRef.current = canTravel && !travelLoading ? () => void handleTravel() : null;
 
   // ── Form fleet from docked ships at a system ─────────────────────────────
   async function handleFormFleet(systemId: string) {
