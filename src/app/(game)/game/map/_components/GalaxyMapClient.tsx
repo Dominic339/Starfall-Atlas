@@ -2033,22 +2033,27 @@ export function GalaxyMapClient({
                   {/* Selection ring */}
                   {isSelected && (
                     <>
+                      {/* Inner solid pulse ring */}
                       <circle
                         cx={sys.svgX} cy={sys.svgY}
                         r={r + 9}
                         fill="none"
                         stroke="#818cf8"
                         strokeWidth={1.5 / scale}
-                        opacity={0.85}
+                        className="galaxy-select-pulse"
+                        pointerEvents="none"
                       />
+                      {/* Outer slowly-spinning dashed ring */}
                       <circle
                         cx={sys.svgX} cy={sys.svgY}
-                        r={r + 13}
+                        r={r + 15}
                         fill="none"
                         stroke="#818cf8"
-                        strokeWidth={0.5 / scale}
-                        opacity={0.25}
-                        strokeDasharray={`${3 / scale} ${2 / scale}`}
+                        strokeWidth={1 / scale}
+                        strokeDasharray={`${5 / scale} ${3 / scale}`}
+                        opacity={0.50}
+                        className="galaxy-select-spin"
+                        pointerEvents="none"
                       />
                     </>
                   )}

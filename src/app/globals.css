@@ -146,3 +146,25 @@ body {
   transform-origin: center;
   animation: galaxy-gate-spin 12s linear infinite;
 }
+
+/* Galaxy map: selected system slowly spinning dashed ring */
+@keyframes galaxy-select-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.galaxy-select-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-select-spin 8s linear infinite;
+}
+
+/* Galaxy map: selection pulse — the inner solid ring fades in/out */
+@keyframes galaxy-select-pulse {
+  0%, 100% { opacity: 0.60; }
+  50%       { opacity: 0.95; }
+}
+
+.galaxy-select-pulse {
+  animation: galaxy-select-pulse 2s ease-in-out infinite;
+}
