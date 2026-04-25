@@ -3339,13 +3339,32 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* In transit */}
-              {selectedSystem.isInTransitTarget && (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Transit</span>
-                  <span className="text-xs text-indigo-400">Ship en route</span>
-                </div>
-              )}
+              {/* In transit to this system */}
+              {selectedSystem.isInTransitTarget && (() => {
+                const enRouteShips = ships.filter(
+                  (s) => s.destinationSystemId === selectedSystem.id && s.systemId === null
+                );
+                return (
+                  <div className="py-2">
+                    {enRouteShips.map((ship) => {
+                      const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                      return (
+                        <div key={ship.id} className="flex items-center justify-between">
+                          <span className="text-xs text-zinc-600">En route</span>
+                          <div className="text-right">
+                            <span className="text-xs text-indigo-400">{ship.name}</span>
+                            {msLeft !== null && (
+                              <span className="ml-2 text-xs text-indigo-600">
+                                {msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Colonies */}
               {selectedSystem.colonyCount > 0 && (
