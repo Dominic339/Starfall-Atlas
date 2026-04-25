@@ -134,6 +134,7 @@ export default async function GalaxyMapPage() {
     bodyStewrdshipsRes,
     lanesRes,
     gatesRes,
+    equippedSkinsRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -247,6 +248,13 @@ export default async function GalaxyMapPage() {
       .from("hyperspace_gates")
       .select("system_id, owner_id, status")
       .eq("status", "active"),
+
+    // Equipped skins (may not exist if player has never visited the shop)
+    admin
+      .from("player_equipped_skins")
+      .select("ship_skin_id, station_skin_id, fleet_skin_id")
+      .eq("player_id", player.id)
+      .maybeSingle(),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -700,6 +708,10 @@ export default async function GalaxyMapPage() {
     }),
   }));
 
+  // ── Equipped skins ────────────────────────────────────────────────────────
+  const equippedSkinsRow = equippedSkinsRes?.data as
+    { ship_skin_id: string | null; station_skin_id: string | null; fleet_skin_id: string | null } | null;
+
   // Discovery stats for map sub-bar
   const discoveredCount = systems.filter((s) => s.isDiscovered).length;
 
@@ -756,6 +768,9 @@ export default async function GalaxyMapPage() {
         playerHandle={player.handle}
         playerCredits={player.credits}
         stationSystemId={stationSystemId}
+        initialEquippedShipSkinId={equippedSkinsRow?.ship_skin_id ?? null}
+        initialEquippedStationSkinId={equippedSkinsRow?.station_skin_id ?? null}
+        initialEquippedFleetSkinId={equippedSkinsRow?.fleet_skin_id ?? null}
       />
     </div>
   );

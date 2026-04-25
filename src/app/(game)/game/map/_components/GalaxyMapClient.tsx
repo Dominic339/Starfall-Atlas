@@ -19,6 +19,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { getSkinById } from "@/skins";
 import { ColonyMapPanel } from "./ColonyMapPanel";
 import { MarketMapPanel } from "./MarketMapPanel";
 import { EmpireMapPanel } from "./EmpireMapPanel";
@@ -248,6 +249,10 @@ interface GalaxyMapClientProps {
   playerHandle: string;
   /** Player credits balance for the top-left HUD card. */
   playerCredits: number;
+  /** Initially-equipped skin IDs (refreshed via shop panel). */
+  initialEquippedShipSkinId:    string | null;
+  initialEquippedStationSkinId: string | null;
+  initialEquippedFleetSkinId:   string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +417,21 @@ function routeTotalLy(hops: string[], sysById: Map<string, GalaxySystem>): numbe
  * SVG polygon points for a top-down ship chevron centered at (cx,cy).
  * s = half-size in SVG units; angle = rotation in radians (0 = pointing toward -Y = "up").
  */
-function shipPolygon(cx: number, cy: number, s: number, angle: number): string {
-  const pts: [number, number][] = [
-    [0, -s * 1.4],        // nose
-    [s * 0.85, s * 0.9],  // right wing tip
-    [0, s * 0.35],        // rear centre notch
-    [-s * 0.85, s * 0.9], // left wing tip
-  ];
+function shipPolygon(cx: number, cy: number, s: number, angle: number, shape?: string): string {
+  let pts: [number, number][];
+  switch (shape) {
+    case "diamond":
+      pts = [[0, -s * 1.4], [s * 0.7, 0], [0, s * 1.2], [-s * 0.7, 0]];
+      break;
+    case "arrow":
+      pts = [[0, -s * 1.4], [s * 0.85, s * 0.9], [s * 0.3, s * 0.4], [-s * 0.3, s * 0.4], [-s * 0.85, s * 0.9]];
+      break;
+    case "delta":
+      pts = [[0, -s * 1.5], [s * 1.0, s * 1.0], [-s * 1.0, s * 1.0]];
+      break;
+    default: // chevron
+      pts = [[0, -s * 1.4], [s * 0.85, s * 0.9], [0, s * 0.35], [-s * 0.85, s * 0.9]];
+  }
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return pts.map(([px, py]) => {
@@ -455,9 +468,17 @@ export function GalaxyMapClient({
   bodyStewrds,
   playerHandle,
   playerCredits,
+  initialEquippedShipSkinId,
+  initialEquippedStationSkinId,
+  initialEquippedFleetSkinId,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // ── Equipped skins (updated when player equips via shop panel) ───────────
+  const [equippedShipSkinId,    setEquippedShipSkinId]    = useState(initialEquippedShipSkinId);
+  const [equippedStationSkinId, setEquippedStationSkinId] = useState(initialEquippedStationSkinId);
+  const [equippedFleetSkinId,   setEquippedFleetSkinId]   = useState(initialEquippedFleetSkinId);
 
   // ── Pan/zoom state ────────────────────────────────────────────────────────
   const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
@@ -2467,39 +2488,40 @@ export function GalaxyMapClient({
                     setShipDispatchError(null);
                   }}
                 >
-                  {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
-                  <circle cx={mx} cy={my} r={12 / scale} fill="none" />
-                  {/* Background disc */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={10 / scale}
-                    fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
-                    stroke="#6366f1"
-                    strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.35 : 0.90}
-                  />
-                  {/* Ship silhouette — top-down chevron pointing up */}
-                  <polygon
-                    points={shipPolygon(mx, my, 5.5 / scale, 0)}
-                    fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
-                    stroke="#06060a"
-                    strokeWidth={0.8 / scale}
-                    filter={isDraggingThis ? undefined : "url(#glow)"}
-                    opacity={isDraggingThis ? 0.35 : 1}
-                  />
-                  {/* Ship name label */}
-                  {scale >= 1.2 && (
-                    <text
-                      x={mx} y={my - 13 / scale}
-                      textAnchor="middle"
-                      fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
-                      fill="#a5b4fc"
-                      opacity={0.9}
-                      className="select-none pointer-events-none"
-                    >
-                      {ship.name}
-                    </text>
-                  )}
+                  {(() => {
+                    const shipSkin = getSkinById(equippedShipSkinId ?? "");
+                    const skinColor   = shipSkin?.visual.color   ?? "#a5b4fc";
+                    const skinAccent  = shipSkin?.visual.accentColor ?? "#6366f1";
+                    const skinShape   = shipSkin?.visual.shape;
+                    const discFill    = isDraggingThis ? "#312e81" : "#1e1b4b";
+                    const discAccent  = isDraggingThis ? "#312e81" : skinAccent;
+                    const polyFill    = isDraggingThis ? skinColor.replace("ff", "88") : skinColor;
+                    return (
+                      <>
+                        {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
+                        <circle cx={mx} cy={my} r={12 / scale} fill="none" />
+                        {/* Background disc */}
+                        <circle cx={mx} cy={my} r={10 / scale}
+                          fill={discFill} stroke={discAccent} strokeWidth={1.5 / scale}
+                          opacity={isDraggingThis ? 0.35 : 0.90} />
+                        {/* Ship silhouette */}
+                        <polygon
+                          points={shipPolygon(mx, my, 5.5 / scale, 0, skinShape)}
+                          fill={polyFill} stroke="#06060a" strokeWidth={0.8 / scale}
+                          filter={isDraggingThis ? undefined : "url(#glow)"}
+                          opacity={isDraggingThis ? 0.35 : 1} />
+                        {/* Ship name label */}
+                        {scale >= 1.2 && (
+                          <text x={mx} y={my - 13 / scale} textAnchor="middle"
+                            fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
+                            fill={skinColor} opacity={0.9}
+                            className="select-none pointer-events-none">
+                            {ship.name}
+                          </text>
+                        )}
+                      </>
+                    );
+                  })()}
                   {/* Loading spinner */}
                   {shipDispatchLoading === ship.id && (
                     <circle cx={mx} cy={my} r={12 / scale} fill="none"
@@ -2538,19 +2560,20 @@ export function GalaxyMapClient({
                   {/* Station cross icon — cross arms + end caps + centre hub */}
                   {(() => {
                     const s = 5.5 / scale;
+                    const stSkin   = getSkinById(equippedStationSkinId ?? "");
+                    const stColor  = stSkin?.visual.color      ?? "#fbbf24";
+                    const stAccent = stSkin?.visual.accentColor ?? "#f59e0b";
                     return (
                       <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
-                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill="#fbbf24" />
-                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill="#fbbf24" />
+                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill={stColor} />
+                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill={stColor} />
                         {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                           <circle key={i}
                             cx={mx + Math.cos(a) * s * 1.6}
                             cy={my + Math.sin(a) * s * 1.6}
-                            r={s * 0.45}
-                            fill="#f59e0b"
-                          />
+                            r={s * 0.45} fill={stAccent} />
                         ))}
-                        <circle cx={mx} cy={my} r={s * 0.6} fill="#f59e0b" />
+                        <circle cx={mx} cy={my} r={s * 0.6} fill={stAccent} />
                       </g>
                     );
                   })()}
@@ -2644,31 +2667,35 @@ export function GalaxyMapClient({
                     >
                       {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
                       <circle cx={mx} cy={my} r={12 / scale} fill="none" />
-                      {/* Background fill */}
-                      <circle
-                        cx={mx} cy={my}
-                        r={9 / scale}
-                        fill={isDraggingThis ? "#2e1065" : "#1a0a3d"}
-                        stroke="#a78bfa"
-                        strokeWidth={1.5 / scale}
-                        opacity={isDraggingThis ? 0.5 : 0.95}
-                      />
-                      {/* Fleet triangle symbol */}
-                      <polygon
-                        points={`${mx},${my - 5 / scale} ${mx + 4.5 / scale},${my + 3 / scale} ${mx - 4.5 / scale},${my + 3 / scale}`}
-                        fill={isDraggingThis ? "#ddd6fe" : "#c4b5fd"}
-                        stroke="#06060a"
-                        strokeWidth={0.8 / scale}
-                        filter={isDraggingThis ? undefined : "url(#glow)"}
-                        opacity={isDraggingThis ? 0.5 : 1}
-                      />
+                      {(() => {
+                        const flSkin   = getSkinById(equippedFleetSkinId ?? "");
+                        const flColor  = flSkin?.visual.color      ?? "#c4b5fd";
+                        const flAccent = flSkin?.visual.accentColor ?? "#7c3aed";
+                        return (
+                          <>
+                            {/* Background fill */}
+                            <circle cx={mx} cy={my} r={9 / scale}
+                              fill={isDraggingThis ? "#2e1065" : "#1a0a3d"}
+                              stroke={isDraggingThis ? "#2e1065" : flAccent}
+                              strokeWidth={1.5 / scale}
+                              opacity={isDraggingThis ? 0.5 : 0.95} />
+                            {/* Fleet triangle symbol */}
+                            <polygon
+                              points={`${mx},${my - 5 / scale} ${mx + 4.5 / scale},${my + 3 / scale} ${mx - 4.5 / scale},${my + 3 / scale}`}
+                              fill={isDraggingThis ? flColor : flColor}
+                              stroke="#06060a" strokeWidth={0.8 / scale}
+                              filter={isDraggingThis ? undefined : "url(#glow)"}
+                              opacity={isDraggingThis ? 0.5 : 1} />
+                          </>
+                        );
+                      })()}
                       {/* Fleet name label */}
                       {scale >= 1.2 && (
                         <text
                           x={mx} y={my + 15 / scale}
                           textAnchor="middle"
                           fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
-                          fill="#c4b5fd"
+                          fill={getSkinById(equippedFleetSkinId ?? "")?.visual.color ?? "#c4b5fd"}
                           opacity={0.9}
                           className="select-none pointer-events-none"
                         >
@@ -4182,11 +4209,15 @@ export function GalaxyMapClient({
       {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}
       {stationPanelOpen  && <StationMapPanel  onClose={() => setStationPanelOpen(false)} />}
       {commandPanelOpen  && <CommandMapPanel  onClose={() => setCommandPanelOpen(false)} />}
-      {shopPanelOpen     && <ShopMapPanel     onClose={() => setShopPanelOpen(false)} />}
-
-      {/* Shop overlay */}
       {shopPanelOpen && (
-        <ShopMapPanel onClose={() => setShopPanelOpen(false)} />
+        <ShopMapPanel
+          onClose={() => setShopPanelOpen(false)}
+          onEquippedChange={(eq) => {
+            setEquippedShipSkinId(eq.shipSkinId);
+            setEquippedStationSkinId(eq.stationSkinId);
+            setEquippedFleetSkinId(eq.fleetSkinId);
+          }}
+        />
       )}
     </div>
   );
