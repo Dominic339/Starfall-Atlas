@@ -3,6 +3,10 @@
 import { useState, useCallback } from "react";
 import type { SkinDefinition } from "@/skins";
 import { RARITY_COLOR, RARITY_LABEL } from "@/skins";
+import { ShipsTab, type ShipClassRow } from "./ShipsTab";
+import { BalanceTab } from "./BalanceTab";
+import { EventsTab, type LiveEventRow } from "./EventsTab";
+import { BattlePassTab, type BattlePassRow } from "./BattlePassTab";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -28,6 +32,10 @@ interface Props {
   dbSkins: DbSkinRow[];
   packages: DbPackageRow[];
   allSkinDefs: SkinDefinition[];
+  shipClasses: ShipClassRow[];
+  balanceOverrides: { key: string; value: unknown; description: string; updated_at: string }[];
+  liveEvents: LiveEventRow[];
+  battlePasses: BattlePassRow[];
 }
 
 // ---------------------------------------------------------------------------
@@ -376,8 +384,8 @@ function PackageEditor({ existing, allSkins, dbSkins, onSave, onClose }: Package
 // Main AdminDevClient
 // ---------------------------------------------------------------------------
 
-export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPackages, allSkinDefs }: Props) {
-  const [tab, setTab] = useState<"skins" | "packages">("skins");
+export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPackages, allSkinDefs, shipClasses, balanceOverrides, liveEvents, battlePasses }: Props) {
+  const [tab, setTab] = useState<"ships" | "balance" | "events" | "battlepass" | "skins" | "packages">("ships");
   const [dbSkins, setDbSkins] = useState<DbSkinRow[]>(initialDbSkins);
   const [packages, setPackages] = useState<DbPackageRow[]>(initialPackages);
   const [editingSkin, setEditingSkin] = useState<SkinDefinition | null>(null);
@@ -450,16 +458,35 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
       )}
 
       {/* Tabs */}
-      <div className="flex gap-1 border-b border-zinc-800 pb-0">
-        {(["skins", "packages"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-2 text-xs font-medium rounded-t transition-colors capitalize ${
-              tab === t ? "bg-zinc-800 text-zinc-200 border-b-2 border-red-500" : "text-zinc-600 hover:text-zinc-400"
+      <div className="flex flex-wrap gap-1 border-b border-zinc-800 pb-0">
+        {([
+          { id: "ships",      label: `Ships (${shipClasses.length})` },
+          { id: "balance",    label: `Balance${balanceOverrides.length > 0 ? ` (${balanceOverrides.length}⚠)` : ""}` },
+          { id: "events",     label: `Events (${liveEvents.length})` },
+          { id: "battlepass", label: `Battle Pass (${battlePasses.length})` },
+          { id: "skins",      label: `Skins (${dbSkins.length}/${allSkinDefs.length})` },
+          { id: "packages",   label: `Bundles (${packages.length})` },
+        ] as const).map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)}
+            className={`px-3 py-2 text-xs font-medium rounded-t transition-colors ${
+              tab === t.id ? "bg-zinc-800 text-zinc-200 border-b-2 border-red-500" : "text-zinc-600 hover:text-zinc-400"
             }`}>
-            {t === "skins" ? `Skin Catalog (${allSkinDefs.length} defs / ${dbSkins.length} in DB)` : `Bundles (${packages.length})`}
+            {t.label}
           </button>
         ))}
       </div>
+
+      {/* ── Ships tab ── */}
+      {tab === "ships" && <ShipsTab initial={shipClasses} />}
+
+      {/* ── Balance tab ── */}
+      {tab === "balance" && <BalanceTab initial={balanceOverrides} />}
+
+      {/* ── Events tab ── */}
+      {tab === "events" && <EventsTab initial={liveEvents} />}
+
+      {/* ── Battle pass tab ── */}
+      {tab === "battlepass" && <BattlePassTab initial={battlePasses} />}
 
       {/* ── Skins tab ── */}
       {tab === "skins" && (
