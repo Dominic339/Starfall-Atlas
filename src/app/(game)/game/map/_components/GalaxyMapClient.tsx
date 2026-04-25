@@ -1398,15 +1398,16 @@ export function GalaxyMapClient({
   }
 
   // ── Asteroid dispatch / recall ────────────────────────────────────────────
-  async function handleDispatch() {
-    if (!selectedAsteroid || !dispatchFleetId) return;
+  async function handleDispatch(overrideFleetId?: string) {
+    const fleetId = overrideFleetId ?? dispatchFleetId;
+    if (!selectedAsteroid || !fleetId) return;
     setDispatchLoading(true);
     setDispatchError(null);
     try {
       const res = await fetch("/api/game/asteroid/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asteroidId: selectedAsteroid.id, fleetId: dispatchFleetId }),
+        body: JSON.stringify({ asteroidId: selectedAsteroid.id, fleetId }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -3182,24 +3183,30 @@ export function GalaxyMapClient({
                   {/* Dispatch a fleet */}
                   {!a.myHarvestId && eligibleFleets.length > 0 && (
                     <div className="space-y-1.5">
-                      <select
-                        value={dispatchFleetId}
-                        onChange={(e) => setDispatchFleetId(e.target.value)}
-                        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
-                      >
-                        <option value="">Select fleet…</option>
-                        {eligibleFleets.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
-                      </select>
+                      {eligibleFleets.length === 1 ? (
+                        /* Single fleet — no dropdown needed */
+                        <p className="text-xs text-zinc-500 text-center">{eligibleFleets[0].name}</p>
+                      ) : (
+                        <select
+                          value={dispatchFleetId}
+                          onChange={(e) => setDispatchFleetId(e.target.value)}
+                          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                        >
+                          <option value="">Select fleet…</option>
+                          {eligibleFleets.map((f) => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      )}
                       <button
-                        onClick={handleDispatch}
-                        disabled={dispatchLoading || !dispatchFleetId}
+                        onClick={() => {
+                          const fid = eligibleFleets.length === 1 ? eligibleFleets[0].id : dispatchFleetId;
+                          void handleDispatch(fid || undefined);
+                        }}
+                        disabled={dispatchLoading || (eligibleFleets.length > 1 && !dispatchFleetId)}
                         className="w-full rounded border border-yellow-700 bg-yellow-950/60 px-3 py-2 text-xs font-medium text-yellow-300 hover:bg-yellow-900/60 hover:text-yellow-200 transition-colors disabled:opacity-50"
                       >
-                        {dispatchLoading ? "Dispatching…" : "Dispatch Fleet"}
+                        {dispatchLoading ? "Dispatching…" : "Dispatch to Harvest"}
                       </button>
                     </div>
                   )}
