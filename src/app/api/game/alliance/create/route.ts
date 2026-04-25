@@ -8,7 +8,7 @@
  *   2. Input: name (3–40 chars), tag (2–5 alphanumeric chars)
  *   3. Player is not already in an alliance
  *   4. Alliance name and tag are not already taken
- *   5. Player has sufficient iron in station inventory (BALANCE.alliance.createCostIron)
+ *   5. Player has sufficient iron in station inventory (balance.alliance.createCostIron)
  *
  * Inserts:
  *   - alliances row (name, tag, founder_id, invite_code auto-generated)
@@ -25,7 +25,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult } from "@/lib/supabase/utils";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { Alliance, PlayerStation } from "@/lib/types/game";
 
 const CreateAllianceSchema = z.object({
@@ -48,6 +48,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Player must not already be in an alliance ─────────────────────────────
   const { data: existingMembership } = maybeSingleResult<{ id: string }>(
@@ -114,7 +115,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const cost = BALANCE.alliance.createCostIron;
+  const cost = balance.alliance.createCostIron;
   const { data: ironRow } = maybeSingleResult<{ quantity: number }>(
     await admin
       .from("resource_inventory")

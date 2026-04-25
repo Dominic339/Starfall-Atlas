@@ -8,6 +8,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { Colony } from "@/lib/types/game";
 
 // ---------------------------------------------------------------------------
@@ -18,8 +19,8 @@ import type { Colony } from "@/lib/types/game";
  * Get the credits-per-hour tax rate for a given population tier.
  * Returns 0 for invalid tiers.
  */
-export function taxRateForTier(populationTier: number): number {
-  return BALANCE.colony.taxPerHourByTier[populationTier] ?? 0;
+export function taxRateForTier(populationTier: number, balance: BalanceConfig = BALANCE): number {
+  return balance.colony.taxPerHourByTier[populationTier] ?? 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -38,15 +39,16 @@ export function calculateAccumulatedTax(
   lastCollectedAt: string,
   populationTier: number,
   now: Date = new Date(),
+  balance: BalanceConfig = BALANCE,
 ): number {
   const lastMs = new Date(lastCollectedAt).getTime();
   const elapsedMs = Math.max(0, now.getTime() - lastMs);
   const elapsedHours = elapsedMs / (1000 * 60 * 60);
 
-  const capHours = BALANCE.colony.taxAccumulationCapHours;
+  const capHours = balance.colony.taxAccumulationCapHours;
   const effectiveHours = Math.min(elapsedHours, capHours);
 
-  const ratePerHour = taxRateForTier(populationTier);
+  const ratePerHour = taxRateForTier(populationTier, balance);
   return Math.floor(effectiveHours * ratePerHour);
 }
 

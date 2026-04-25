@@ -26,6 +26,7 @@ import type { SolarSceneSystemData } from "./_components/SolarScene";
 import type { BodyInfo, ShipInfo, FleetInfo, OtherColonyInfo, GovernanceInfo } from "./_components/SystemHubClient";
 import { SystemHubClient } from "./_components/SystemHubClient";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import { refreshInfluenceCache, checkContestedRevert } from "@/lib/game/influence";
 
@@ -66,6 +67,7 @@ export default async function SolarSystemPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const { data: player } = maybeSingleResult<Player>(
     await admin
@@ -79,7 +81,7 @@ export default async function SolarSystemPage({
   // ── Engine tick + travel resolution + influence refresh (lazy) ───────────
   const requestTime = new Date();
   await Promise.all([
-    runEngineTick(admin, player.id, requestTime),
+    runEngineTick(admin, player.id, requestTime, balance),
     runTravelResolution(admin, player.id, requestTime),
     refreshInfluenceCache(admin, systemId).catch(() => undefined),
     checkContestedRevert(admin, systemId).catch(() => undefined),

@@ -12,6 +12,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
@@ -24,10 +25,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * Formula: base + totalTurretLevel × ratePerLevel
  */
-export function computeHarvestPower(totalTurretLevel: number): number {
+export function computeHarvestPower(totalTurretLevel: number, balance: BalanceConfig = BALANCE): number {
   return (
-    BALANCE.asteroids.baseHarvestUnitsPerHr +
-    totalTurretLevel * BALANCE.asteroids.harvestUnitsPerHrPerTurretLevel
+    balance.asteroids.baseHarvestUnitsPerHr +
+    totalTurretLevel * balance.asteroids.harvestUnitsPerHrPerTurretLevel
   );
 }
 
@@ -60,6 +61,7 @@ export async function resolveAsteroidHarvests(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: SupabaseClient<any>,
   asteroidId: string,
+  balance: BalanceConfig = BALANCE,
 ): Promise<number> {
   const now = new Date();
 
@@ -86,7 +88,7 @@ export async function resolveAsteroidHarvests(
   }
 
   // ── Compute each harvest's contribution ───────────────────────────────────
-  const cap = BALANCE.asteroids.maxHarvestAccumulationHours;
+  const cap = balance.asteroids.maxHarvestAccumulationHours;
 
   type HarvestEntry = {
     id: string;

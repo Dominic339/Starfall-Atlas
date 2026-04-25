@@ -22,6 +22,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { singleResult } from "@/lib/supabase/utils";
 import { calculateAccumulatedTax } from "@/lib/game/taxes";
 import { taxMultiplier } from "@/lib/game/colonyUpkeep";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { Colony, Player } from "@/lib/types/game";
 
 const CollectSchema = z.object({
@@ -41,6 +42,8 @@ export async function POST(request: NextRequest) {
   const { colonyId } = input.data;
 
   const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const balance = await getBalanceWithOverrides(admin as any);
 
   // ── Fetch colony ─────────────────────────────────────────────────────────
   const { data: colony } = singleResult<Colony>(
@@ -76,6 +79,7 @@ export async function POST(request: NextRequest) {
     colony.last_tax_collected_at,
     colony.population_tier,
     now,
+    balance,
   );
   // Apply health multiplier (struggling = 75%, neglected = 50%).
   const credits = Math.floor(rawCredits * taxMultiplier(colony.upkeep_missed_periods));

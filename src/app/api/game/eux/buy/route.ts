@@ -17,7 +17,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult } from "@/lib/supabase/utils";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 
 const EUX_RESOURCE_TYPES = ["iron", "carbon", "ice"] as const;
 
@@ -39,6 +39,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Verify colony ownership ───────────────────────────────────────────────
   const { data: colony } = maybeSingleResult<{ id: string; owner_id: string }>(
@@ -64,7 +65,7 @@ export async function POST(request: NextRequest) {
     (sum: number, r: { quantity: number }) => sum + r.quantity,
     0,
   );
-  const { dailyLimitUnits } = BALANCE.emergencyExchange;
+  const { dailyLimitUnits } = balance.emergencyExchange;
   if (dailyUsed + quantity > dailyLimitUnits) {
     const remaining = Math.max(0, dailyLimitUnits - dailyUsed);
     return toErrorResponse(
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Compute price ─────────────────────────────────────────────────────────
-  const { markupMultiplier, floorPricePerUnit, transactionFeePercent } = BALANCE.emergencyExchange;
+  const { markupMultiplier, floorPricePerUnit, transactionFeePercent } = balance.emergencyExchange;
   const basePrice = (floorPricePerUnit[resourceType] ?? 5) * markupMultiplier;
   const pricePerUnit = Math.ceil(basePrice * (1 + transactionFeePercent / 100));
   const totalCost = pricePerUnit * quantity;

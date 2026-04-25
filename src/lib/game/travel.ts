@@ -10,6 +10,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 
 // ---------------------------------------------------------------------------
 // Duration calculation
@@ -38,8 +39,10 @@ export function travelDurationMs(
 export function computeArrivalTime(
   departAt: Date,
   distanceLy: number,
-  speedLyPerHr: number = BALANCE.travel.baseSpeedLyPerHr,
+  speedLyPerHr?: number,
+  balance: BalanceConfig = BALANCE,
 ): Date {
+  speedLyPerHr ??= balance.travel.baseSpeedLyPerHr;
   const durationMs = travelDurationMs(distanceLy, speedLyPerHr);
   return new Date(departAt.getTime() + durationMs);
 }
@@ -60,11 +63,12 @@ export function calculateTransitTax(
   laneOwnerTaxRate: number,
   declaredCargoValue: number,
   isPreColony: boolean,
+  balance: BalanceConfig = BALANCE,
 ): number {
   if (isPreColony) return 0;
   const cappedRate = Math.min(
     laneOwnerTaxRate,
-    BALANCE.lanes.maxTransitTaxPercent,
+    balance.lanes.maxTransitTaxPercent,
   );
   return Math.floor((declaredCargoValue * cappedRate) / 100);
 }
@@ -97,11 +101,12 @@ export function isWithinLaneRange(
   distanceLy: number,
   relayTierA: number = 0,
   relayTierB: number = 0,
+  balance: BalanceConfig = BALANCE,
 ): boolean {
   const maxRange =
-    BALANCE.lanes.baseRangeLy +
-    relayTierA * BALANCE.lanes.relayExtensionPerTierLy +
-    relayTierB * BALANCE.lanes.relayExtensionPerTierLy;
+    balance.lanes.baseRangeLy +
+    relayTierA * balance.lanes.relayExtensionPerTierLy +
+    relayTierB * balance.lanes.relayExtensionPerTierLy;
 
   return distanceLy <= maxRange;
 }

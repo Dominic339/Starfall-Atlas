@@ -30,7 +30,7 @@ import { listResult, maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { findActiveLane } from "@/lib/game/gateResolution";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { Ship, TravelJob } from "@/lib/types/game";
 
 const CreateTravelSchema = z.object({
@@ -63,6 +63,8 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const balance = await getBalanceWithOverrides(admin as any);
 
   // ── Ship validation ──────────────────────────────────────────────────────
   // Fetch all player ships. Players start with 2 ships; pick the first one
@@ -144,7 +146,7 @@ export async function POST(request: NextRequest) {
   );
 
   // Phase 7: direct travel within base range; long-range via active lanes.
-  const maxRangeLy = BALANCE.lanes.baseRangeLy;
+  const maxRangeLy = balance.lanes.baseRangeLy;
   let laneId: string | null = null;
 
   if (distanceLy > maxRangeLy) {

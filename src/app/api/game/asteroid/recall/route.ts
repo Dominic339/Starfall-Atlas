@@ -18,6 +18,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 
 const RecallSchema = z.object({
   harvestId: z.string().uuid(),
@@ -37,6 +38,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Fetch harvest ────────────────────────────────────────────────────────
   const { data: harvest } = await admin
@@ -58,7 +60,7 @@ export async function POST(request: NextRequest) {
   // ── Lazy resolution: deposit pending yield ────────────────────────────────
   // resolveAsteroidHarvests handles all active fleets on the asteroid (not just this one)
   // but still correctly deposits only this player's share.
-  await resolveAsteroidHarvests(admin, harvest.asteroid_id);
+  await resolveAsteroidHarvests(admin, harvest.asteroid_id, balance);
 
   // ── Mark harvest cancelled ────────────────────────────────────────────────
   await admin

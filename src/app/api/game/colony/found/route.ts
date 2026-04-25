@@ -37,7 +37,7 @@ import { getCatalogEntry } from "@/lib/catalog";
 import { generateSystem } from "@/lib/game/generation";
 import { isHarshPlanetType } from "@/lib/game/habitability";
 import { nextGrowthAt } from "@/lib/game/taxes";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import type { Colony, Ship, SystemDiscovery, Player, PlayerStation } from "@/lib/types/game";
 
@@ -104,6 +104,8 @@ export async function POST(request: NextRequest) {
   }
 
   const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const balance = await getBalanceWithOverrides(admin as any);
 
   // ── Ship presence check ───────────────────────────────────────────────────
   // Either of the player's ships being present is sufficient.
@@ -257,8 +259,8 @@ export async function POST(request: NextRequest) {
 
   if (!isFirstColony) {
     const foundingCost =
-      BALANCE.colony.foundingCostIronByType[generatedBody.type] ??
-      BALANCE.colony.foundingCostIronDefault;
+      balance.colony.foundingCostIronByType[generatedBody.type] ??
+      balance.colony.foundingCostIronDefault;
 
     if (foundingCost > 0) {
       // Look up player station
@@ -337,7 +339,7 @@ export async function POST(request: NextRequest) {
     last_extract_at: now.toISOString(),
     last_upkeep_at: now.toISOString(),
     upkeep_missed_periods: 0,
-    storage_cap: BALANCE.colony.defaultStorageCap,
+    storage_cap: balance.colony.defaultStorageCap,
   };
 
   let colony: Colony | null = null;

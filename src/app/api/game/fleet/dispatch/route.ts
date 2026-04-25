@@ -29,7 +29,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { listResult, maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { Fleet, FleetShip, Ship } from "@/lib/types/game";
 
 const DispatchFleetSchema = z.object({
@@ -50,6 +50,8 @@ export async function POST(request: NextRequest) {
   const { fleetId, destinationSystemId } = input.data;
 
   const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const balance = await getBalanceWithOverrides(admin as any);
 
   // ── Fetch fleet ───────────────────────────────────────────────────────────
   const { data: fleet } = maybeSingleResult<Fleet>(
@@ -106,7 +108,7 @@ export async function POST(request: NextRequest) {
     { x: destEntry.x, y: destEntry.y, z: destEntry.z },
   );
 
-  const maxRangeLy = BALANCE.lanes.baseRangeLy;
+  const maxRangeLy = balance.lanes.baseRangeLy;
   if (distanceLy > maxRangeLy) {
     return toErrorResponse(
       fail(

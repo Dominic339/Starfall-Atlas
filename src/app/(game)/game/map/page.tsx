@@ -28,6 +28,7 @@ import { GalaxyMapClient } from "./_components/GalaxyMapClient";
 import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation, GalaxyBodySteward, GalaxyLane } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +85,7 @@ export default async function GalaxyMapPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   const { data: player } = maybeSingleResult<Player>(
@@ -95,7 +97,7 @@ export default async function GalaxyMapPage() {
   // Run before data fetches so the UI always reflects resolved arrivals and
   // updated upkeep/growth state without requiring a Command Centre visit.
   const requestTime = new Date();
-  await runEngineTick(admin, player.id, requestTime);
+  await runEngineTick(admin, player.id, requestTime, balance);
   await runTravelResolution(admin, player.id, requestTime);
 
   // ── Sol safety stipend (GAME_RULES.md §22) ───────────────────────────────

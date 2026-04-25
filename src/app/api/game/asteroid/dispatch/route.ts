@@ -25,6 +25,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeHarvestPower } from "@/lib/game/asteroids";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { AsteroidHarvest } from "@/lib/types/game";
 
 const DispatchSchema = z.object({
@@ -46,6 +47,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Fetch asteroid ───────────────────────────────────────────────────────
   const { data: asteroid } = await admin
@@ -125,7 +127,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const harvestPowerPerHr = computeHarvestPower(totalTurretLevel);
+  const harvestPowerPerHr = computeHarvestPower(totalTurretLevel, balance);
 
   // ── Insert harvest record ────────────────────────────────────────────────
   const now = new Date().toISOString();
