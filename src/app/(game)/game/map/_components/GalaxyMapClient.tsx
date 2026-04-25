@@ -1889,10 +1889,17 @@ export function GalaxyMapClient({
               const isDisc      = sys.isDiscovered;
               const isDim       = !isDisc && !sys.hasDockedShip;
 
+              // Dim out-of-range systems when something is selected and a ship is docked
+              const rangeOpacity = (selectedId && currentSystem && sys.id !== selectedId && sys.id !== currentSystem.id && !isHovered)
+                ? (dist3D(currentSystem, sys) <= baseRangeLy + 0.01 ? 1 : 0.45)
+                : 1;
+
               return (
                 <g
                   key={sys.id}
                   className="cursor-pointer"
+                  opacity={rangeOpacity}
+                  style={{ transition: "opacity 0.2s" }}
                   onClick={(e) => handleStarClick(e, sys.id)}
                   onDoubleClick={(e) => handleStarDoubleClick(e, sys.id)}
                   onMouseEnter={() => setHoveredId(sys.id)}
