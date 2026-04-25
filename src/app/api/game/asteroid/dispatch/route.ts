@@ -26,6 +26,7 @@ import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeHarvestPower } from "@/lib/game/asteroids";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { getActiveLiveEvents, harvestBoostMultiplier } from "@/lib/game/liveEvents";
 import type { AsteroidHarvest } from "@/lib/types/game";
 
 const DispatchSchema = z.object({
@@ -47,7 +48,10 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
+  const [balance, liveEvents] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    getActiveLiveEvents(admin),
+  ]);
 
   // ── Fetch asteroid ───────────────────────────────────────────────────────
   const { data: asteroid } = await admin
@@ -127,7 +131,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const harvestPowerPerHr = computeHarvestPower(totalTurretLevel, balance);
+  const basePower = computeHarvestPower(totalTurretLevel, balance);
+  const eventMult = harvestBoostMultiplier(liveEvents, asteroid.system_id);
+  const harvestPowerPerHr = basePower * eventMult;
 
   // ── Insert harvest record ────────────────────────────────────────────────
   const now = new Date().toISOString();

@@ -41,6 +41,8 @@ import {
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
 import { BALANCE } from "@/lib/config/balance";
 import type { BalanceConfig } from "@/lib/config/balanceOverrides";
+import type { LiveEventRow } from "@/lib/game/liveEvents";
+import { dropMultiplier, creditBonusMultiplier } from "@/lib/game/liveEvents";
 import type { BodyType } from "@/lib/types/enums";
 import type { Colony, Structure, ResourceNodeRecord } from "@/lib/types/game";
 
@@ -66,6 +68,7 @@ export async function runEngineTick(
   playerId: string,
   requestTime: Date = new Date(),
   balance: BalanceConfig = BALANCE,
+  liveEvents: LiveEventRow[] = [],
 ): Promise<EngineTickResult> {
   // ── 0. Inactivity resolution (lazy, before activity timestamp update) ────────
   await resolvePlayerInactivity(admin, playerId, requestTime).catch(() => undefined);
@@ -335,8 +338,9 @@ export async function runEngineTick(
       balance,
     );
 
+    const eventDropMult = dropMultiplier(liveEvents);
     const amounts = rawAmounts
-      .map((item) => ({ ...item, quantity: Math.floor(item.quantity * healthMult) }))
+      .map((item) => ({ ...item, quantity: Math.floor(item.quantity * healthMult * eventDropMult) }))
       .filter((item) => item.quantity > 0);
 
     if (amounts.length === 0) continue;
@@ -447,8 +451,9 @@ export async function runEngineTick(
   }
 
   // ── 10. Credit update + sol stipend ──────────────────────────────────────
+  const eventCreditMult = creditBonusMultiplier(liveEvents);
   const { creditsCollected, stipendGranted } = await applyCreditsTick(
-    admin, playerId, totalTaxCollected, requestTime, balance,
+    admin, playerId, Math.floor(totalTaxCollected * eventCreditMult), requestTime, balance,
   );
 
   // ── 11. Update last_active_at (after inactivity check, not before) ────────

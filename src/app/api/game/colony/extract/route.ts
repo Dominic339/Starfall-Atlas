@@ -35,6 +35,7 @@ import {
   extractionBonusMultiplier,
 } from "@/lib/game/colonyStructures";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { getActiveLiveEvents, dropMultiplier } from "@/lib/game/liveEvents";
 import type {
   Colony,
   Structure,
@@ -60,7 +61,11 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const balance = await getBalanceWithOverrides(admin as any);
+  const adminAny = admin as any;
+  const [balance, liveEvents] = await Promise.all([
+    getBalanceWithOverrides(adminAny),
+    getActiveLiveEvents(adminAny),
+  ]);
 
   // ── Fetch colony ─────────────────────────────────────────────────────────
   const { data: colony } = singleResult<Colony>(
@@ -146,10 +151,11 @@ export async function POST(request: NextRequest) {
     balance,
   );
 
-  // Apply health multiplier (struggling = 50%, neglected = 25% of base yield).
+  // Apply health multiplier and double_drop event bonus.
   const mult = extractionMultiplier(colony.upkeep_missed_periods);
+  const eventMult = dropMultiplier(liveEvents);
   const extracted = rawExtracted
-    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * mult) }))
+    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * mult * eventMult) }))
     .filter((item) => item.quantity > 0);
 
   if (extracted.length === 0) {
