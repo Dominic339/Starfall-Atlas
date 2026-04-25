@@ -771,6 +771,7 @@ export default async function GalaxyMapPage() {
         initialEquippedShipSkinId={equippedSkinsRow?.ship_skin_id ?? null}
         initialEquippedStationSkinId={equippedSkinsRow?.station_skin_id ?? null}
         initialEquippedFleetSkinId={equippedSkinsRow?.fleet_skin_id ?? null}
+        playerIsDev={player.is_dev}
       />
     </div>
   );

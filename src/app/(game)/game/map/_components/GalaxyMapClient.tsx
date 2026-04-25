@@ -253,6 +253,8 @@ interface GalaxyMapClientProps {
   initialEquippedShipSkinId:    string | null;
   initialEquippedStationSkinId: string | null;
   initialEquippedFleetSkinId:   string | null;
+  /** Whether this player has admin/dev tool access. */
+  playerIsDev: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +473,7 @@ export function GalaxyMapClient({
   initialEquippedShipSkinId,
   initialEquippedStationSkinId,
   initialEquippedFleetSkinId,
+  playerIsDev,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -3044,6 +3047,12 @@ export function GalaxyMapClient({
           </button>
           <button onClick={resetView} title="Zoom to fit (⊙)"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">⊙</button>
+          {playerIsDev && (
+            <Link href="/game/admin" title="Admin Dev Tool"
+              className="flex h-7 w-7 items-center justify-center rounded border border-red-900/60 bg-red-950/30 text-[9px] text-red-500 hover:bg-red-900/40 hover:text-red-300 transition-colors font-bold">
+              ⚙
+            </Link>
+          )}
           <button onClick={() => { setSearchOpen(true); setSearchQuery(""); setTimeout(() => searchRef.current?.focus(), 0); }} title="Find system (/)"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
