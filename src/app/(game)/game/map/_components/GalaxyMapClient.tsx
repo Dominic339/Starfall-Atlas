@@ -1693,16 +1693,29 @@ export function GalaxyMapClient({
 
             {/* ── Travel range circle ─────────────────────────────────────── */}
             {currentSystem && (
-              <circle
-                cx={currentSystem.svgX}
-                cy={currentSystem.svgY}
-                r={rangeRadius}
-                fill="none"
-                stroke="#3f3f5a"
-                strokeWidth={1 / scale}
-                strokeDasharray={`${6 / scale} ${4 / scale}`}
-                pointerEvents="none"
-              />
+              <g pointerEvents="none">
+                {/* Faint filled disc — marks reachable zone */}
+                <circle
+                  cx={currentSystem.svgX}
+                  cy={currentSystem.svgY}
+                  r={rangeRadius}
+                  fill="#6366f1"
+                  fillOpacity={selectedId ? 0.04 : 0.02}
+                  style={{ transition: "fill-opacity 0.3s" }}
+                />
+                {/* Dashed border */}
+                <circle
+                  cx={currentSystem.svgX}
+                  cy={currentSystem.svgY}
+                  r={rangeRadius}
+                  fill="none"
+                  stroke={selectedId ? "#6366f1" : "#3f3f5a"}
+                  strokeWidth={selectedId ? 1.2 / scale : 0.8 / scale}
+                  strokeDasharray={`${6 / scale} ${4 / scale}`}
+                  opacity={selectedId ? 0.55 : 0.35}
+                  style={{ transition: "stroke 0.3s, opacity 0.3s" }}
+                />
+              </g>
             )}
 
             {/* ── Travel lines (ship/fleet in-transit paths) ──────────────── */}
