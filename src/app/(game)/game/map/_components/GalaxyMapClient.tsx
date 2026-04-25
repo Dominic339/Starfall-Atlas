@@ -2467,8 +2467,8 @@ export function GalaxyMapClient({
                     setShipDispatchError(null);
                   }}
                 >
-                  {/* Hit area (invisible, large for easy clicking) */}
-                  <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
+                  {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
+                  <circle cx={mx} cy={my} r={12 / scale} fill="none" />
                   {/* Background disc */}
                   <circle
                     cx={mx} cy={my}
@@ -2642,8 +2642,8 @@ export function GalaxyMapClient({
                       style={{ cursor: fleetDispatchLoading === fleet.id ? "wait" : isDraggingThis ? "grabbing" : "grab" }}
                       onMouseDown={(e) => handleFleetMarkerMouseDown(e, fleet)}
                     >
-                      {/* Hit area */}
-                      <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
+                      {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
+                      <circle cx={mx} cy={my} r={12 / scale} fill="none" />
                       {/* Background fill */}
                       <circle
                         cx={mx} cy={my}
