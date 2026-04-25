@@ -576,6 +576,9 @@ export function GalaxyMapClient({
   // ── Shop panel ─────────────────────────────────────────────────────────────
   const [shopPanelOpen, setShopPanelOpen] = useState(false);
 
+  // ── Map legend ─────────────────────────────────────────────────────────────
+  const [legendOpen, setLegendOpen] = useState(false);
+
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
   const [beaconError, setBeaconError] = useState<string | null>(null);
@@ -2966,52 +2969,29 @@ export function GalaxyMapClient({
           </button>
         </div>
 
-        {/* ── Map legend (bottom-right) ─────────────────────────────────── */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 opacity-80" />
-            Current location
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Colony
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-violet-400" />
-            Fleet
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
-            Steward
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />
-            Station (drag to move)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
-            Asteroid
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
-            Beacon
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-0 w-0 border-4 border-transparent" style={{ borderBottomColor: "#a78bfa", borderBottomWidth: 6 }} />
-            Fleet (drag)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />
-            Territory
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />
-            Disputed
-          </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
-            <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
-            Travel range
-          </span>
+        {/* ── Map legend (bottom-right, collapsible) ───────────────────── */}
+        <div className="absolute bottom-4 right-4 flex flex-col items-end gap-1.5">
+          <button
+            onClick={() => setLegendOpen((v) => !v)}
+            className="rounded border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-[10px] text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors backdrop-blur-sm"
+          >
+            {legendOpen ? "Legend ▾" : "Legend ▸"}
+          </button>
+          {legendOpen && (
+            <div className="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm">
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400 opacity-80" />Current location</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" />Colony</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-400" />Fleet</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400" />Steward</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />Station (drag)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />Asteroid</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />Beacon</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-0 w-0 border-4 border-transparent" style={{ borderBottomColor: "#a78bfa", borderBottomWidth: 6 }} />Fleet (drag)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />Territory</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />Disputed</span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700"><span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />Travel range</span>
+            </div>
+          )}
         </div>
 
         {/* ── Hover tooltip (floating) ──────────────────────────────────── */}
