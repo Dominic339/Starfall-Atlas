@@ -2850,6 +2850,7 @@ export function GalaxyMapClient({
           {([
             {
               label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-950/60", onClick: () => setStationPanelOpen(true),
+              badge: fleets.filter((f) => f.isHarvesting).length || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
                 <rect x="10.5" y="3" width="3" height="18" rx="1.5" fill="#64748b"/>
                 <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="#64748b"/>
@@ -2862,6 +2863,7 @@ export function GalaxyMapClient({
             },
             {
               label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-950/60", onClick: () => setCommandPanelOpen(true),
+              badge: ships.filter((s) => s.systemId === null).length || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
                 <path d="M12 2L15.5 10L15.5 17L14 20L12 18L10 20L8.5 17L8.5 10Z" fill="#9f1239" opacity="0.5"/>
                 <path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z" fill="#f43f5e"/>
@@ -2907,14 +2909,19 @@ export function GalaxyMapClient({
                 <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
               </svg>,
             },
-          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
+          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode; badge?: number }[]).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
-              className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
+              className={`relative flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
-              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
+              <div className={`relative w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
                 {btn.icon}
+                {btn.badge !== undefined && btn.badge > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 rounded-full bg-rose-500 border border-zinc-950 flex items-center justify-center px-0.5 text-[9px] font-bold text-white leading-none tabular-nums">
+                    {btn.badge > 99 ? "99+" : btn.badge}
+                  </span>
+                )}
               </div>
               <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
             </button>
