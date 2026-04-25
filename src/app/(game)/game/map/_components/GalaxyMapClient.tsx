@@ -1581,6 +1581,23 @@ export function GalaxyMapClient({
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
 
+            {/* ── Faint coordinate grid ────────────────────────────────────── */}
+            {scale >= 0.6 && (() => {
+              const gridStep = pixelsPerLy * 50; // 50 ly grid squares
+              const x0 = Math.floor(-transform.tx / transform.scale / gridStep) * gridStep - gridStep;
+              const y0 = Math.floor(-transform.ty / transform.scale / gridStep) * gridStep - gridStep;
+              const x1 = x0 + (viewboxW / transform.scale) + gridStep * 3;
+              const y1 = y0 + (viewboxH / transform.scale) + gridStep * 3;
+              const lines = [];
+              for (let gx = x0; gx <= x1; gx += gridStep) {
+                lines.push(<line key={`gx${gx}`} x1={gx} y1={y0} x2={gx} y2={y1} stroke="#ffffff" strokeWidth={0.4/scale} opacity={0.04} pointerEvents="none"/>);
+              }
+              for (let gy = y0; gy <= y1; gy += gridStep) {
+                lines.push(<line key={`gy${gy}`} x1={x0} y1={gy} x2={x1} y2={gy} stroke="#ffffff" strokeWidth={0.4/scale} opacity={0.04} pointerEvents="none"/>);
+              }
+              return <g pointerEvents="none">{lines}</g>;
+            })()}
+
             {/* ── Alliance territory polygons (rendered first — under everything) ── */}
             {territories.map((t) => {
               if (t.svgPolygon.length < 3) return null;
