@@ -3217,11 +3217,20 @@ export function GalaxyMapClient({
                 </div>
                 <button onClick={() => setSelectedId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
               </div>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                {spectralName(selectedSystem.spectralClass)}
-              </p>
-              <p className="mt-0.5 text-xs text-zinc-700">
-                {formatDist(selectedSystem.distanceFromSol)} from Sol
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <p className="text-xs text-zinc-500">
+                  {spectralName(selectedSystem.spectralClass)}
+                </p>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(selectedSystem.id).catch(() => null)}
+                  title="Copy system ID"
+                  className="text-[10px] text-zinc-700 hover:text-zinc-400 transition-colors font-mono truncate max-w-[100px]"
+                >
+                  {selectedSystem.id}
+                </button>
+              </div>
+              <p className="mt-0.5 text-[10px] text-zinc-700 font-mono tabular-nums">
+                {selectedSystem.x.toFixed(1)}, {selectedSystem.y.toFixed(1)}, {selectedSystem.z.toFixed(1)} ly
               </p>
             </div>
 
@@ -3672,8 +3681,8 @@ export function GalaxyMapClient({
                     const inRange = distLy <= baseRangeLy + 0.01;
                     return [{ ship, sys, distLy, etaHr: distLy / ship.speedLyPerHr, inRange }];
                   });
-                const inRange = candidates.filter((c) => c.inRange);
-                const outOfRange = candidates.filter((c) => !c.inRange);
+                const inRange = candidates.filter((c) => c.inRange).sort((a, b) => a.etaHr - b.etaHr);
+                const outOfRange = candidates.filter((c) => !c.inRange).sort((a, b) => a.distLy - b.distLy);
 
                 // Multi-select helpers
                 const selectedInRange = inRange.filter((c) => selectedShipIds.has(c.ship.id));
