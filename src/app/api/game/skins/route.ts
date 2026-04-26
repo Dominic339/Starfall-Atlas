@@ -22,21 +22,24 @@ export async function GET() {
 
   const now = new Date().toISOString();
 
-  // Available shop skins (time-window checked server-side) — fetch full row so
-  // DB-only skins (no code definition) can provide their own name/visual.
+  // Available shop skins — fetch all is_available rows and filter date window in JS
+  // (PostgREST .or() with ISO timestamps is unreliable due to '.' in the value)
   const { data: shopRows } = listResult<{
     id: string; name: string; description: string; type: string;
     price_credits: number; price_premium_cents: number | null;
-    discount_pct: number | null; available_until: string | null;
+    discount_pct: number | null; available_from: string | null; available_until: string | null;
     rarity: string; visual: Record<string, string> | null;
     model_path: string | null;
   }>(
     await admin
       .from("skins")
-      .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_until, rarity, visual, model_path")
-      .eq("is_available", true)
-      .or(`available_from.is.null,available_from.lte.${now}`)
-      .or(`available_until.is.null,available_until.gte.${now}`),
+      .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity, visual, model_path")
+      .eq("is_available", true),
+  );
+
+  const filteredShopRows = (shopRows ?? []).filter(
+    (r) => (!r.available_from || r.available_from <= now) &&
+           (!r.available_until || r.available_until >= now),
   );
 
   // Player-owned skins
@@ -74,7 +77,7 @@ export async function GET() {
       )
     : { data: [] };
 
-  // Available shop packages
+  // Available shop packages — same pattern: fetch all, filter date window in JS
   const { data: pkgRows } = listResult<{
     id: string;
     name: string;
@@ -82,14 +85,18 @@ export async function GET() {
     price_credits: number | null;
     price_premium_cents: number | null;
     discount_pct: number | null;
+    available_from: string | null;
     available_until: string | null;
   }>(
     await admin
       .from("skin_packages")
-      .select("id, name, description, price_credits, price_premium_cents, discount_pct, available_until")
-      .eq("is_available", true)
-      .or(`available_from.is.null,available_from.lte.${now}`)
-      .or(`available_until.is.null,available_until.gte.${now}`),
+      .select("id, name, description, price_credits, price_premium_cents, discount_pct, available_from, available_until")
+      .eq("is_available", true),
+  );
+
+  const filteredPkgRows = (pkgRows ?? []).filter(
+    (p) => (!p.available_from || p.available_from <= now) &&
+           (!p.available_until || p.available_until >= now),
   );
 
   const { data: pkgItemRows } = listResult<{ package_id: string; skin_id: string }>(
@@ -105,7 +112,7 @@ export async function GET() {
     pkgSkinIds.set(row.package_id, list);
   }
 
-  const shopSkins = (shopRows ?? []).map((row) => {
+  const shopSkins = filteredShopRows.map((row) => {
     const def = getSkinById(row.id);
     const dbVisual = (row.visual && Object.keys(row.visual).length > 0) ? row.visual : null;
     const effectivePrice =
@@ -129,7 +136,7 @@ export async function GET() {
     };
   });
 
-  const shopPackages = (pkgRows ?? []).map((pkg) => {
+  const shopPackages = filteredPkgRows.map((pkg) => {
     const skinIds = pkgSkinIds.get(pkg.id) ?? [];
     const skins = skinIds.map((sid) => {
       const def = getSkinById(sid);
