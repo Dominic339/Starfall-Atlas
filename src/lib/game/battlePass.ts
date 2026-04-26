@@ -125,7 +125,7 @@ async function grantReward(admin: any, playerId: string, rewardType: string, rew
     case "skin": {
       const skinId = (rewardConfig.skin_id as string | undefined) ?? "";
       if (!skinId) return;
-      await admin.from("player_skins").upsert([{ player_id: playerId, skin_id: skinId, acquired_via: "battle_pass" }], { onConflict: "player_id,skin_id" });
+      await admin.from("player_skins").upsert([{ player_id: playerId, skin_id: skinId, source: "gift" }], { onConflict: "player_id,skin_id" });
       break;
     }
     // ship_class and title rewards are noted but not yet mechanically applied
