@@ -377,46 +377,54 @@ function SkinCard({ skin, onBuy, buying }: {
   const expiresIn = skin.availableUntil
     ? Math.ceil((new Date(skin.availableUntil).getTime() - Date.now()) / 86400000)
     : null;
+  const glow = RARITY_COLOR[skin.rarity as SkinRarity] ?? "#6b7280";
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border border-zinc-800 bg-zinc-900/60 p-3 hover:border-zinc-700 transition-all">
-      <div className="flex items-start gap-3">
-        <div className="shrink-0 rounded-lg border border-zinc-700/50 bg-zinc-950 p-1.5">
-          <SkinPreview visual={skin.visual} type={skin.type} size={36} />
+    <div className="relative flex flex-col gap-3 rounded-xl border bg-gradient-to-b from-zinc-900/80 to-zinc-950 p-3.5 transition-all hover:brightness-110"
+      style={{ borderColor: glow + "44", boxShadow: `0 0 14px ${glow}18, inset 0 0 20px ${glow}08` }}>
+
+      {/* Rarity accent strip */}
+      <div className="absolute top-0 left-4 right-4 h-px rounded-full" style={{ background: `linear-gradient(90deg, transparent, ${glow}88, transparent)` }} />
+
+      {/* Top row: preview + info */}
+      <div className="flex items-center gap-3">
+        <div className="shrink-0 w-14 h-14 rounded-xl flex items-center justify-center"
+          style={{ background: glow + "18", border: `1.5px solid ${glow}33`, boxShadow: `0 0 10px ${glow}22` }}>
+          <SkinPreview visual={skin.visual} type={skin.type} size={44} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <p className="text-xs font-bold text-zinc-100 truncate">{skin.name}</p>
-            <RarityBadge rarity={skin.rarity} />
+          <div className="flex items-center gap-1.5 flex-wrap mb-0.5">
+            <p className="text-xs font-bold text-zinc-100">{skin.name}</p>
           </div>
-          <p className="text-[10px] text-zinc-500 mt-0.5 line-clamp-2">{skin.description}</p>
+          <RarityBadge rarity={skin.rarity} />
+          <p className="text-[10px] text-zinc-500 mt-1.5 line-clamp-2 leading-relaxed">{skin.description}</p>
         </div>
       </div>
 
       {expiresIn != null && expiresIn <= 7 && (
-        <p className="text-[9px] text-amber-500 font-medium">⏰ Expires in {expiresIn}d</p>
+        <p className="text-[9px] text-amber-500 font-medium flex items-center gap-1">
+          <span>⏰</span> Expires in {expiresIn}d
+        </p>
       )}
 
-      <div className="flex items-center justify-between gap-2 pt-0.5">
+      <div className="flex items-center justify-between gap-2">
         {hasDiscount ? (
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] text-zinc-600 line-through">{fmtCr(skin.priceCredits)}</span>
-            <span className="text-xs font-bold text-emerald-400">{fmtCr(skin.effectivePrice)}</span>
-            <span className="rounded bg-emerald-900/40 border border-emerald-800/40 px-1 py-0.5 text-[9px] font-bold text-emerald-400">
+            <span className="text-sm font-bold text-emerald-400">{fmtCr(skin.effectivePrice)}</span>
+            <span className="rounded bg-emerald-900/40 border border-emerald-800/40 px-1.5 py-0.5 text-[9px] font-bold text-emerald-400">
               -{skin.discountPct}%
             </span>
           </div>
         ) : (
-          <span className="text-xs font-bold text-amber-400">{fmtCr(skin.effectivePrice)}</span>
+          <span className="text-sm font-bold text-amber-300">{fmtCr(skin.effectivePrice)}</span>
         )}
         {skin.owned ? (
-          <span className="rounded-full border border-emerald-800/50 bg-emerald-950/30 px-2 py-0.5 text-[10px] font-semibold text-emerald-400">Owned</span>
+          <span className="rounded-full border border-emerald-800/50 bg-emerald-950/30 px-2.5 py-1 text-[10px] font-bold text-emerald-400">✓ Owned</span>
         ) : (
-          <button
-            onClick={() => onBuy(skin.id)}
-            disabled={buying}
-            className="rounded-lg px-2.5 py-1 text-xs font-bold transition-all disabled:opacity-50 border border-amber-700/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40"
-          >
+          <button onClick={() => onBuy(skin.id)} disabled={buying}
+            className="rounded-lg px-3 py-1.5 text-xs font-bold transition-all disabled:opacity-50 active:scale-95"
+            style={{ background: `linear-gradient(135deg, ${glow}33, ${glow}22)`, border: `1px solid ${glow}55`, color: glow }}>
             {buying ? "…" : "Buy"}
           </button>
         )}
@@ -542,6 +550,82 @@ function PremiumItemCard({ item }: { item: PremiumItem }) {
 // Wardrobe tab — equip owned skins
 // ---------------------------------------------------------------------------
 
+const SLOT_ICON: Record<string, string> = { ship: "▲", station: "✦", fleet: "◉" };
+
+function WardrobeCard({
+  skin, isEquipped, equipping, onEquip, onUnequip,
+}: {
+  skin: SkinDefinition | null;
+  isEquipped: boolean;
+  equipping: boolean;
+  onEquip: () => void;
+  onUnequip: () => void;
+}) {
+  const isDefault = skin === null;
+  const glow = isDefault ? "#6366f1" : (RARITY_COLOR[skin.rarity as SkinRarity] ?? "#6b7280");
+
+  return (
+    <div className="relative flex flex-col gap-2.5 rounded-xl border transition-all"
+      style={{
+        borderColor: isEquipped ? glow + "70" : glow + "20",
+        background: isEquipped
+          ? `linear-gradient(145deg, ${glow}12, #09090b)`
+          : "linear-gradient(145deg, #111118, #09090b)",
+        boxShadow: isEquipped ? `0 0 18px ${glow}22, inset 0 0 24px ${glow}0a` : "none",
+      }}>
+
+      {/* Top accent line */}
+      <div className="absolute top-0 left-4 right-4 h-px rounded-full"
+        style={{ background: isEquipped ? `linear-gradient(90deg, transparent, ${glow}99, transparent)` : "transparent" }} />
+
+      {/* Equipped badge */}
+      {isEquipped && (
+        <div className="absolute top-2 right-2 rounded-full px-1.5 py-0.5 text-[8px] font-bold uppercase tracking-widest"
+          style={{ background: glow + "22", border: `1px solid ${glow}55`, color: glow }}>
+          ✓ On
+        </div>
+      )}
+
+      <div className="p-3 pb-0 flex flex-col items-center gap-2">
+        {/* Preview */}
+        <div className="w-14 h-14 rounded-xl flex items-center justify-center"
+          style={{ background: glow + "14", border: `1.5px solid ${glow}28`, boxShadow: `0 0 12px ${glow}18` }}>
+          <SkinPreview visual={isDefault ? {} : skin.visual} type={isDefault ? "ship" : skin.type} size={44} />
+        </div>
+
+        <div className="text-center min-w-0 w-full">
+          <p className="text-[11px] font-bold text-zinc-100 truncate">
+            {isDefault ? "Default" : skin.name}
+          </p>
+          {isDefault ? (
+            <p className="text-[9px] text-zinc-600 mt-0.5">Standard marker</p>
+          ) : (
+            <div className="mt-0.5 flex justify-center">
+              <RarityBadge rarity={skin.rarity} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="px-3 pb-3">
+        {isEquipped ? (
+          <button onClick={onUnequip} disabled={equipping}
+            className="w-full rounded-lg py-1.5 text-[10px] font-bold transition-all disabled:opacity-50 active:scale-95"
+            style={{ background: glow + "18", border: `1px solid ${glow}44`, color: glow }}>
+            {equipping ? "…" : "Unequip"}
+          </button>
+        ) : (
+          <button onClick={onEquip} disabled={equipping}
+            className="w-full rounded-lg py-1.5 text-[10px] font-bold transition-all disabled:opacity-50 active:scale-95 hover:brightness-125"
+            style={{ background: glow + "22", border: `1px solid ${glow}33`, color: glow + "cc" }}>
+            {equipping ? "…" : "Equip"}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WardrobeTab({ skinsData, onEquip }: {
   skinsData: SkinsData;
   onEquip: (slot: "ship" | "station" | "fleet", skinId: string | null) => Promise<void>;
@@ -555,7 +639,8 @@ function WardrobeTab({ skinsData, onEquip }: {
     : skinsData.equipped.fleetSkinId;
 
   async function doEquip(skinId: string | null) {
-    setEquipping(skinId ?? "none");
+    const key = skinId ?? "__default__";
+    setEquipping(key);
     await onEquip(activeSlot, skinId);
     setEquipping(null);
   }
@@ -563,69 +648,47 @@ function WardrobeTab({ skinsData, onEquip }: {
   return (
     <div className="space-y-4">
       {/* Slot selector */}
-      <div className="flex gap-1 rounded-lg border border-zinc-800 bg-zinc-900/40 p-1">
+      <div className="flex gap-1 rounded-xl border border-zinc-800 bg-zinc-900/40 p-1">
         {(["ship", "station", "fleet"] as const).map((slot) => (
           <button key={slot} onClick={() => setActiveSlot(slot)}
-            className={`flex-1 rounded-md py-1.5 text-xs font-medium transition-colors capitalize ${
-              activeSlot === slot ? "bg-zinc-700 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"
+            className={`flex-1 rounded-lg py-2 text-[11px] font-semibold transition-all capitalize flex items-center justify-center gap-1.5 ${
+              activeSlot === slot
+                ? "bg-zinc-800 text-zinc-100 shadow-sm"
+                : "text-zinc-500 hover:text-zinc-300"
             }`}>
+            <span className="text-[10px]">{SLOT_ICON[slot]}</span>
             {slot}
           </button>
         ))}
       </div>
 
       {slotSkins.length === 0 ? (
-        <div className="py-8 text-center">
-          <p className="text-sm text-zinc-600">No {activeSlot} skins owned.</p>
-          <p className="text-[10px] text-zinc-700 mt-1">Visit the Skins shop tab to purchase some.</p>
+        <div className="py-10 text-center space-y-2">
+          <div className="w-12 h-12 rounded-full border border-zinc-800 bg-zinc-900 flex items-center justify-center text-xl mx-auto opacity-40">
+            {SLOT_ICON[activeSlot]}
+          </div>
+          <p className="text-sm text-zinc-500">No {activeSlot} skins owned</p>
+          <p className="text-[10px] text-zinc-700">Visit the Skins tab to purchase some.</p>
         </div>
       ) : (
-        <div className="space-y-2">
-          {/* Default option */}
-          <div className={`flex items-center gap-3 rounded-lg border p-2.5 transition-all cursor-pointer ${
-            !equipped ? "border-indigo-700/60 bg-indigo-950/20" : "border-zinc-800 hover:border-zinc-700"
-          }`} onClick={() => doEquip(null)}>
-            <div className="w-9 h-9 rounded border border-zinc-700/50 bg-zinc-950 flex items-center justify-center">
-              <SkinPreview
-                visual={{}}
-                type={activeSlot}
-                size={32}
-              />
-            </div>
-            <div className="flex-1">
-              <p className="text-xs font-semibold text-zinc-200">Default</p>
-              <p className="text-[10px] text-zinc-600">Standard marker</p>
-            </div>
-            {!equipped && <span className="text-[10px] text-indigo-400 font-medium">Equipped</span>}
-          </div>
-
-          {slotSkins.map((skin) => {
-            const isEquipped = equipped === skin.id;
-            return (
-              <div key={skin.id}
-                className={`flex items-center gap-3 rounded-lg border p-2.5 transition-all cursor-pointer ${
-                  isEquipped ? "border-indigo-700/60 bg-indigo-950/20" : "border-zinc-800 hover:border-zinc-700"
-                }`}
-                onClick={() => !equipping && doEquip(isEquipped ? null : skin.id)}>
-                <div className="w-9 h-9 rounded border border-zinc-700/50 bg-zinc-950 flex items-center justify-center">
-                  <SkinPreview visual={skin.visual} type={skin.type} size={32} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <p className="text-xs font-semibold text-zinc-200 truncate">{skin.name}</p>
-                    <RarityBadge rarity={skin.rarity} />
-                  </div>
-                </div>
-                {equipping === skin.id ? (
-                  <span className="text-[10px] text-zinc-500 animate-pulse">…</span>
-                ) : isEquipped ? (
-                  <span className="text-[10px] text-indigo-400 font-medium">Equipped</span>
-                ) : (
-                  <span className="text-[10px] text-zinc-600 hover:text-zinc-400">Equip</span>
-                )}
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+          <WardrobeCard
+            skin={null}
+            isEquipped={!equipped}
+            equipping={equipping === "__default__"}
+            onEquip={() => doEquip(null)}
+            onUnequip={() => doEquip(null)}
+          />
+          {slotSkins.map((skin) => (
+            <WardrobeCard
+              key={skin.id}
+              skin={skin}
+              isEquipped={equipped === skin.id}
+              equipping={equipping === skin.id}
+              onEquip={() => doEquip(skin.id)}
+              onUnequip={() => doEquip(null)}
+            />
+          ))}
         </div>
       )}
     </div>
@@ -730,26 +793,31 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
       <div className="relative w-full max-w-lg max-h-[90vh] flex flex-col rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl overflow-hidden">
 
         {/* Header */}
-        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5">
-          <div className="flex items-start justify-between gap-3">
-            <div>
+        <div className="shrink-0 border-b border-zinc-800 px-5 py-3"
+          style={{ background: "linear-gradient(135deg, #0f0f1a 0%, #111827 100%)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
               <h2 className="text-sm font-bold text-zinc-100">Shop</h2>
-              <p className="mt-0.5 text-[10px] text-zinc-600">
-                {skinsData && `${skinsData.playerCredits.toLocaleString()} credits available`}
-              </p>
+              {skinsData && (
+                <div className="flex items-center gap-1.5 rounded-full border border-amber-900/40 bg-amber-950/20 px-2.5 py-1">
+                  <span className="text-amber-400 text-[10px]">◈</span>
+                  <span className="text-[11px] font-bold text-amber-300">{skinsData.playerCredits.toLocaleString()}</span>
+                  <span className="text-[9px] text-amber-700">CR</span>
+                </div>
+              )}
             </div>
-            <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none mt-0.5">✕</button>
+            <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none">✕</button>
           </div>
         </div>
 
         {/* Tabs */}
-        <div className="shrink-0 flex border-b border-zinc-800 px-4 pt-2 gap-1 overflow-x-auto">
+        <div className="shrink-0 flex border-b border-zinc-800/60 px-3 pt-1 gap-0.5 overflow-x-auto bg-zinc-950/80">
           {tabs.map((t) => (
             <button key={t.id} onClick={() => setTab(t.id)}
-              className={`shrink-0 px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
+              className={`shrink-0 px-3 py-2 text-[11px] font-semibold rounded-t-lg transition-all ${
                 tab === t.id
-                  ? "bg-zinc-800 text-zinc-200 border-b-2 border-amber-600"
-                  : "text-zinc-600 hover:text-zinc-400"
+                  ? "bg-zinc-800/80 text-zinc-100 border-b-2 border-amber-500 shadow-sm"
+                  : "text-zinc-600 hover:text-zinc-300"
               }`}>
               {t.label}
             </button>

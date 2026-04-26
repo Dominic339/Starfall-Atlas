@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import dynamic from "next/dynamic";
 import type { SkinDefinition } from "@/skins";
 import { RARITY_COLOR, RARITY_LABEL } from "@/skins";
+import { SkinPreview, RARITY_GLOW } from "@/components/SkinPreview";
 import { ShipsTab, type ShipClassRow } from "./ShipsTab";
 import { BalanceTab } from "./BalanceTab";
 import { EventsTab, type LiveEventRow } from "./EventsTab";
@@ -447,10 +448,12 @@ function LiveStatusTab({
   balanceOverrides,
   liveEvents,
   battlePasses,
+  onJump,
 }: {
   balanceOverrides: { key: string; value: unknown; description: string; updated_at: string }[];
   liveEvents: LiveEventRow[];
   battlePasses: BattlePassRow[];
+  onJump: (tab: "events" | "battlepass" | "balance" | "skins") => void;
 }) {
   const now = new Date();
   const activeEvents = liveEvents.filter(
@@ -489,13 +492,32 @@ function LiveStatusTab({
 
   return (
     <div className="space-y-5">
+      {/* Quick actions */}
+      <div className="grid grid-cols-4 gap-2">
+        {([
+          { label: "New Event",    tab: "events",     icon: "⚡", color: "#6366f1" },
+          { label: "New Pass",     tab: "battlepass", icon: "★",  color: "#f59e0b" },
+          { label: "Edit Balance", tab: "balance",    icon: "⚖",  color: "#22c55e" },
+          { label: "Manage Skins", tab: "skins",      icon: "✦",  color: "#a78bfa" },
+        ] as const).map((a) => (
+          <button key={a.tab} onClick={() => onJump(a.tab)}
+            className="rounded-xl border border-zinc-800 bg-zinc-900/40 hover:bg-zinc-800/60 p-3 flex flex-col items-center gap-1.5 transition-all active:scale-95 group">
+            <span className="text-xl group-hover:scale-110 transition-transform" style={{ color: a.color }}>{a.icon}</span>
+            <span className="text-[9px] font-semibold text-zinc-500 group-hover:text-zinc-300 transition-colors text-center">{a.label}</span>
+          </button>
+        ))}
+      </div>
+
       {/* Active events */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${activeEvents.length > 0 ? "bg-emerald-400 animate-pulse" : "bg-zinc-700"}`} />
-          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
-            Active Events ({activeEvents.length})
-          </p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className={`w-2 h-2 rounded-full ${activeEvents.length > 0 ? "bg-emerald-400 animate-pulse" : "bg-zinc-700"}`} />
+            <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+              Active Events ({activeEvents.length})
+            </p>
+          </div>
+          <button onClick={() => onJump("events")} className="text-[9px] text-zinc-600 hover:text-indigo-400 transition-colors">+ Create →</button>
         </div>
         {activeEvents.length === 0 ? (
           <p className="text-xs text-zinc-600 pl-4">No events running.</p>
@@ -661,21 +683,26 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
       )}
 
       {/* Tabs */}
-      <div className="flex flex-wrap gap-1 border-b border-zinc-800 pb-0">
+      <div className="flex flex-wrap gap-0.5 border-b border-zinc-800">
         {([
-          { id: "live",       label: "Live Status" },
-          { id: "ships",      label: `Ships (${shipClasses.length})` },
-          { id: "balance",    label: `Balance${balanceOverrides.length > 0 ? ` (${balanceOverrides.length}⚠)` : ""}` },
-          { id: "events",     label: `Events (${liveEvents.length})` },
-          { id: "battlepass", label: `Battle Pass (${battlePasses.length})` },
-          { id: "skins",      label: `Skins (${dbSkins.length}/${allSkinDefs.length})` },
-          { id: "packages",   label: `Bundles (${packages.length})` },
+          { id: "live",       label: "Live",        icon: "⬤",  dot: liveEvents.filter(e => e.is_active && new Date(e.starts_at) <= new Date() && new Date(e.ends_at) >= new Date()).length > 0 ? "emerald" : null },
+          { id: "ships",      label: "Ships",       icon: "▲",  dot: null },
+          { id: "balance",    label: "Balance",     icon: "⚖",  dot: balanceOverrides.length > 0 ? "amber" : null },
+          { id: "events",     label: "Events",      icon: "⚡", dot: null },
+          { id: "battlepass", label: "Pass",        icon: "★",  dot: battlePasses.some(p => p.is_active) ? "amber" : null },
+          { id: "skins",      label: "Skins",       icon: "✦",  dot: null },
+          { id: "packages",   label: "Bundles",     icon: "◈",  dot: null },
         ] as const).map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)}
-            className={`px-3 py-2 text-xs font-medium rounded-t transition-colors ${
-              tab === t.id ? "bg-zinc-800 text-zinc-200 border-b-2 border-red-500" : "text-zinc-600 hover:text-zinc-400"
+            className={`relative flex items-center gap-1.5 px-3 py-2 text-[11px] font-semibold rounded-t-lg transition-all ${
+              tab === t.id
+                ? "bg-zinc-800/80 text-zinc-100 border-b-2 border-indigo-500 shadow-sm"
+                : "text-zinc-600 hover:text-zinc-300 hover:bg-zinc-900/40"
             }`}>
+            <span className={`text-[9px] ${tab === t.id ? "text-indigo-400" : "text-zinc-700"}`}>{t.icon}</span>
             {t.label}
+            {t.dot === "emerald" && <span className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />}
+            {t.dot === "amber"   && <span className="absolute top-1.5 right-1 w-1.5 h-1.5 rounded-full bg-amber-400" />}
           </button>
         ))}
       </div>
@@ -685,6 +712,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
         balanceOverrides={balanceOverrides}
         liveEvents={liveEvents}
         battlePasses={battlePasses}
+        onJump={setTab}
       />}
 
       {/* ── Ships tab ── */}
@@ -702,71 +730,80 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
       {/* ── Skins tab ── */}
       {tab === "skins" && (
         <div className="space-y-3">
-          <p className="text-[10px] text-zinc-600">
-            Skin definitions come from <code className="text-zinc-500">src/skins/index.ts</code>.
-            Publishing a skin writes it to the DB and makes it available in the shop when toggled on.
-          </p>
+          <div className="flex items-center justify-between">
+            <p className="text-[10px] text-zinc-600">
+              {dbSkins.length} of {allSkinDefs.length} published ·{" "}
+              <span className="text-emerald-600">{dbSkins.filter(s => s.is_available).length} live in shop</span>
+            </p>
+          </div>
 
-          <div className="rounded-xl border border-zinc-800 overflow-hidden">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-zinc-800 bg-zinc-900/40">
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Skin</th>
-                  <th className="text-left px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Type</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Price</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Discount</th>
-                  <th className="text-center px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Shop</th>
-                  <th className="text-right px-4 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allSkinDefs.map((def) => {
-                  const row = dbSkinMap.get(def.id);
-                  const inDb = !!row;
-                  return (
-                    <tr key={def.id} className="border-b border-zinc-800/50 hover:bg-zinc-900/30 transition-colors">
-                      <td className="px-4 py-2.5">
-                        <div className="flex items-center gap-2">
-                          <RarityDot rarity={def.rarity} />
-                          <span className="font-medium text-zinc-200">{def.name}</span>
-                          {!inDb && <span className="rounded bg-zinc-800 px-1 py-0.5 text-[9px] text-zinc-600">not in DB</span>}
-                        </div>
-                      </td>
-                      <td className="px-4 py-2.5 text-zinc-500 capitalize">{def.type}</td>
-                      <td className="px-4 py-2.5 text-right text-amber-400 font-mono">
-                        {row ? `${row.price_credits.toLocaleString()} cr` : "—"}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        {row?.discount_pct != null ? (
-                          <span className="text-emerald-400">-{row.discount_pct}%</span>
-                        ) : <span className="text-zinc-700">—</span>}
-                      </td>
-                      <td className="px-4 py-2.5 text-center">
-                        {row?.is_available ? (
-                          <span className="rounded-full bg-emerald-900/40 border border-emerald-800/40 px-1.5 py-0.5 text-[9px] text-emerald-400 font-semibold">Live</span>
-                        ) : (
-                          <span className="rounded-full bg-zinc-800/60 border border-zinc-700/40 px-1.5 py-0.5 text-[9px] text-zinc-600">Hidden</span>
+          <div className="grid grid-cols-2 gap-2">
+            {allSkinDefs.map((def) => {
+              const row = dbSkinMap.get(def.id);
+              const inDb = !!row;
+              const glow = RARITY_GLOW[def.rarity] ?? "#6b7280";
+              const isLive = row?.is_available ?? false;
+
+              return (
+                <div key={def.id}
+                  className="relative rounded-xl border bg-zinc-950 p-3 flex flex-col gap-2.5 transition-all hover:brightness-110 cursor-pointer group"
+                  style={{ borderColor: inDb ? glow + "55" : "#27272a", boxShadow: isLive ? `0 0 10px ${glow}22` : "none" }}
+                  onClick={() => setEditingSkin(def)}>
+
+                  {/* Status pill */}
+                  <div className="absolute top-2 right-2">
+                    {isLive ? (
+                      <span className="rounded-full bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.5 text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Live</span>
+                    ) : inDb ? (
+                      <span className="rounded-full bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 text-[8px] font-bold text-zinc-600 uppercase tracking-widest">Hidden</span>
+                    ) : (
+                      <span className="rounded-full bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 text-[8px] font-bold text-zinc-700 uppercase tracking-widest">Draft</span>
+                    )}
+                  </div>
+
+                  {/* Preview + info row */}
+                  <div className="flex items-center gap-3">
+                    <div className="shrink-0 w-12 h-12 rounded-lg flex items-center justify-center"
+                      style={{ background: glow + "18", border: `1px solid ${glow}33` }}>
+                      <SkinPreview visual={def.visual} type={def.type} size={36} />
+                    </div>
+                    <div className="flex-1 min-w-0 pr-10">
+                      <p className="text-xs font-bold text-zinc-100 truncate">{def.name}</p>
+                      <p className="text-[9px] capitalize mt-0.5" style={{ color: glow }}>{def.rarity} · {def.type}</p>
+                      {row?.model_path && (
+                        <p className="text-[8px] text-indigo-500/70 mt-0.5 truncate">3D: {row.model_path.split("/").pop()}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Price row */}
+                  <div className="flex items-center justify-between text-[10px]">
+                    {inDb ? (
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-amber-400 font-mono font-bold">{row.price_credits.toLocaleString()} cr</span>
+                        {row.discount_pct != null && (
+                          <span className="rounded bg-emerald-900/40 border border-emerald-800/30 px-1 py-0.5 text-[8px] text-emerald-400 font-bold">-{row.discount_pct}%</span>
                         )}
-                      </td>
-                      <td className="px-4 py-2.5 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => setEditingSkin(def)}
-                            className="rounded px-2 py-1 text-[10px] font-medium border border-indigo-800/50 bg-indigo-950/30 text-indigo-400 hover:bg-indigo-900/40 transition-all">
-                            {inDb ? "Edit" : "Publish"}
-                          </button>
-                          {inDb && (
-                            <button onClick={() => deleteSkin(def.id)}
-                              className="rounded px-2 py-1 text-[10px] font-medium border border-red-900/40 bg-red-950/20 text-red-500 hover:bg-red-900/30 transition-all">
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      </div>
+                    ) : (
+                      <span className="text-zinc-700 italic text-[9px]">Not published</span>
+                    )}
+                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                      <button onClick={() => setEditingSkin(def)}
+                        className="rounded px-2 py-0.5 text-[9px] font-bold border border-indigo-800/60 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/50 transition-all">
+                        {inDb ? "Edit" : "Publish"}
+                      </button>
+                      {inDb && (
+                        <button onClick={() => deleteSkin(def.id)}
+                          className="rounded px-2 py-0.5 text-[9px] font-bold border border-red-900/40 bg-red-950/20 text-red-500 hover:bg-red-900/30 transition-all">
+                          ✕
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
