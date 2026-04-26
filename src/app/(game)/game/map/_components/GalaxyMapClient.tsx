@@ -525,6 +525,10 @@ export function GalaxyMapClient({
   const [taxError, setTaxError] = useState<string | null>(null);
 
   // ── Animation tick — re-renders at ~30 fps while ships are in transit ────
+  // Prevents SSR/client Date.now() mismatch for animated ship positions.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
   // smoothly instead of jumping once per second.
   const [, setAnimTick] = useState(0);
@@ -1755,7 +1759,7 @@ export function GalaxyMapClient({
               let shipX: number | null = null;
               let shipY: number | null = null;
               let currentT = 0;
-              if (tl.departAt && tl.arriveAt) {
+              if (mounted && tl.departAt && tl.arriveAt) {
                 const now = Date.now();
                 const depart = new Date(tl.departAt).getTime();
                 const arrive = new Date(tl.arriveAt).getTime();
@@ -1774,7 +1778,7 @@ export function GalaxyMapClient({
               const trail2T = Math.max(0, currentT - trailFrac);
 
               // ETA string for midpoint label
-              const etaStr = tl.arriveAt
+              const etaStr = mounted && tl.arriveAt
                 ? (() => {
                     const msLeft = new Date(tl.arriveAt).getTime() - Date.now();
                     return msLeft > 0 ? ` · ${formatEta(Math.max(0, msLeft / 3600000))}` : " · arriving";

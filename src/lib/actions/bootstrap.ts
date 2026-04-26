@@ -33,6 +33,7 @@ import {
   HANDLE_MIN_LENGTH,
   HANDLE_MAX_LENGTH,
 } from "@/lib/config/constants";
+import { randomShipName } from "@/lib/game/shipNames";
 import type { Player } from "@/lib/types/game";
 
 // ---------------------------------------------------------------------------
@@ -168,7 +169,7 @@ async function reconcileStarterAssets(
     const { error: insertErr } = await admin.from("ships").insert(
       STARTER_SHIPS.map((ship) => ({
         owner_id: playerId,
-        name: ship.name,
+        name: randomShipName(),
         speed_ly_per_hr: ship.speedLyPerHr,
         cargo_cap: ship.cargoCap,
         current_system_id: SOL_SYSTEM_ID,
