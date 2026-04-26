@@ -137,6 +137,7 @@ export default async function GalaxyMapPage() {
     lanesRes,
     gatesRes,
     equippedSkinsRes,
+    eventNodesRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -257,6 +258,12 @@ export default async function GalaxyMapPage() {
       .select("ship_skin_id, station_skin_id, fleet_skin_id")
       .eq("player_id", player.id)
       .maybeSingle(),
+
+    // Active live event nodes (world-visible — special event deposits)
+    admin
+      .from("live_event_nodes")
+      .select("id, event_id, system_id, display_offset_x, display_offset_y, resource_type, total_amount, remaining_amount, status, spawned_at, expires_at")
+      .eq("status", "active"),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -303,7 +310,18 @@ export default async function GalaxyMapPage() {
   const fleets             = listResult<FleetRow>(fleetsRes).data ?? [];
   const travelJobs         = listResult<TravelRow>(travelJobsRes).data ?? [];
   const stewardships       = listResult<StewardRow>(stewardshipsRes).data ?? [];
-  const asteroidRows       = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  // Merge regular asteroids and event nodes into a single array for display
+  const rawAsteroidRows = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  type EventNodeRow = { id: string; event_id: string; system_id: string; display_offset_x: number; display_offset_y: number; resource_type: string; total_amount: number; remaining_amount: number; status: string; spawned_at: string; expires_at: string | null };
+  const rawEventNodeRows = listResult<EventNodeRow>(eventNodesRes).data ?? [];
+  // Map event nodes to AsteroidRow shape (last_resolved_at defaults to spawned_at)
+  const eventNodeAsAsteroid: AsteroidRow[] = rawEventNodeRows.map((n) => ({
+    id: n.id, system_id: n.system_id,
+    display_offset_x: n.display_offset_x, display_offset_y: n.display_offset_y,
+    resource_type: n.resource_type, total_amount: n.total_amount, remaining_amount: n.remaining_amount,
+    status: n.status, last_resolved_at: n.spawned_at, spawned_at: n.spawned_at, expires_at: n.expires_at,
+  }));
+  const asteroidRows = [...rawAsteroidRows, ...eventNodeAsAsteroid];
   const myHarvests         = listResult<HarvestRow>(myHarvestsRes).data ?? [];
   const firstDiscoveries   = listResult<FirstDiscoveryRow>(firstDiscoveriesRes).data ?? [];
   const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];

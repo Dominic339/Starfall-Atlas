@@ -53,12 +53,25 @@ export async function POST(request: NextRequest) {
     getActiveLiveEvents(admin),
   ]);
 
-  // ── Fetch asteroid ───────────────────────────────────────────────────────
-  const { data: asteroid } = await admin
-    .from("asteroid_nodes")
-    .select("id, system_id, resource_type, remaining_amount, status")
-    .eq("id", asteroidId)
-    .maybeSingle();
+  // ── Fetch asteroid (checks regular nodes then event nodes) ─────────────────
+  let asteroid: { id: string; system_id: string; resource_type: string; remaining_amount: number; status: string } | null = null;
+  {
+    const { data: reg } = await admin
+      .from("asteroid_nodes")
+      .select("id, system_id, resource_type, remaining_amount, status")
+      .eq("id", asteroidId)
+      .maybeSingle();
+    if (reg) {
+      asteroid = reg;
+    } else {
+      const { data: ev } = await admin
+        .from("live_event_nodes")
+        .select("id, system_id, resource_type, remaining_amount, status")
+        .eq("id", asteroidId)
+        .maybeSingle();
+      asteroid = ev ?? null;
+    }
+  }
 
   if (!asteroid) {
     return toErrorResponse(fail("not_found", "Asteroid node not found.").error);
