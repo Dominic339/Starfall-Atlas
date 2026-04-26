@@ -20,6 +20,24 @@ interface BpPass {
 }
 interface BpProgress { current_tier: number; xp_points: number; is_premium: boolean; }
 
+function rewardLabel(type: string, cfg: Record<string, unknown>): string {
+  if (type === "credits") return `${(cfg.amount as number | undefined ?? 0).toLocaleString()} CR`;
+  if (type === "resource") return `${cfg.quantity ?? "?"} ${String(cfg.resource_type ?? "resource").replace("_", " ")}`;
+  if (type === "skin") return String(cfg.skin_id ?? "skin").replace(/_/g, " ");
+  if (type === "ship_class") return String(cfg.class_id ?? "ship class").replace(/_/g, " ");
+  if (type === "title") return `"${cfg.title ?? "title"}"`;
+  return type;
+}
+
+function rewardIcon(type: string): string {
+  if (type === "credits") return "◈";
+  if (type === "resource") return "⬡";
+  if (type === "skin") return "✦";
+  if (type === "ship_class") return "▲";
+  if (type === "title") return "❋";
+  return "•";
+}
+
 function BattlePassTab() {
   const [pass, setPass] = useState<BpPass | null>(null);
   const [progress, setProgress] = useState<BpProgress | null>(null);
@@ -55,92 +73,186 @@ function BattlePassTab() {
     setTimeout(() => setMsg(null), 3000);
   }
 
-  if (loading) return <p className="py-12 text-center text-xs text-zinc-600 animate-pulse uppercase tracking-widest">Loading…</p>;
+  if (loading) return (
+    <div className="flex flex-col items-center justify-center py-16 gap-3">
+      <div className="w-8 h-8 rounded-full border-2 border-amber-700/40 border-t-amber-400 animate-spin" />
+      <p className="text-[10px] text-zinc-600 uppercase tracking-widest">Loading pass…</p>
+    </div>
+  );
 
   if (!pass || !progress) {
     return (
-      <div className="py-12 text-center space-y-2">
-        <p className="text-sm font-medium text-zinc-400">No active battle pass</p>
-        <p className="text-xs text-zinc-600">Check back next season.</p>
+      <div className="py-16 text-center space-y-3">
+        <div className="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-2xl mx-auto">🌌</div>
+        <p className="text-sm font-semibold text-zinc-400">No Active Battle Pass</p>
+        <p className="text-xs text-zinc-600">Check back next season for new rewards.</p>
       </div>
     );
   }
 
   const xpPct = Math.min(100, Math.round((progress.xp_points / pass.xp_per_tier) * 100));
   const endsIn = Math.max(0, Math.round((new Date(pass.ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+  const isPrem = progress.is_premium;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-0">
       {msg && (
-        <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${msg.ok ? "border-emerald-900/40 bg-emerald-950/20 text-emerald-400" : "border-red-900/40 bg-red-950/20 text-red-400"}`}>
+        <div className={`mx-0 mb-3 rounded-lg border px-3 py-2 text-xs font-medium ${msg.ok ? "border-emerald-900/40 bg-emerald-950/20 text-emerald-400" : "border-red-900/40 bg-red-950/20 text-red-400"}`}>
           {msg.text}
         </div>
       )}
 
-      {/* Pass header */}
-      <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 p-4 space-y-3">
-        <div className="flex items-start justify-between gap-2">
-          <div>
-            <p className="text-xs font-bold text-amber-300">{pass.name}</p>
-            <p className="text-[10px] text-zinc-500 mt-0.5">Season {pass.season_number} · {endsIn} days left</p>
-          </div>
-          <div className="flex items-center gap-1.5">
-            {progress.is_premium ? (
-              <span className="rounded-full bg-amber-900/40 border border-amber-700/40 text-amber-400 text-[9px] font-bold px-2 py-0.5">PREMIUM</span>
+      {/* ── Season header banner ── */}
+      <div className="relative overflow-hidden rounded-xl mb-3"
+        style={{ background: "linear-gradient(135deg, #1c1440 0%, #0f172a 40%, #1a1a2e 70%, #1c1440 100%)" }}>
+        {/* Decorative stars */}
+        <div className="absolute inset-0 pointer-events-none">
+          {[...Array(12)].map((_, i) => (
+            <div key={i} className="absolute w-0.5 h-0.5 rounded-full bg-white opacity-40"
+              style={{ left: `${(i * 37 + 11) % 100}%`, top: `${(i * 53 + 7) % 100}%` }} />
+          ))}
+        </div>
+        <div className="relative p-4 space-y-3">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <div className="flex items-center gap-2 mb-0.5">
+                <span className="text-[9px] font-bold uppercase tracking-widest text-amber-500/80">Season {pass.season_number}</span>
+                <span className="text-[9px] text-zinc-600">·</span>
+                <span className="text-[9px] text-zinc-500">{endsIn}d left</span>
+              </div>
+              <p className="text-sm font-bold text-white leading-tight">{pass.name}</p>
+              {pass.description && <p className="text-[10px] text-zinc-400 mt-0.5">{pass.description}</p>}
+            </div>
+            {isPrem ? (
+              <div className="shrink-0 rounded-lg px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider"
+                style={{ background: "linear-gradient(135deg,#92400e,#b45309)", color: "#fde68a", border: "1px solid #f59e0b60" }}>
+                ⭐ PREMIUM
+              </div>
             ) : (
               <button onClick={handleUpgrade} disabled={upgrading}
-                className="rounded-full bg-amber-950/60 border border-amber-700/50 text-amber-300 text-[9px] font-bold px-2 py-0.5 hover:bg-amber-900/60 disabled:opacity-50 transition-colors">
-                {upgrading ? "…" : pass.premium_cost_credits ? `⬆ ${pass.premium_cost_credits.toLocaleString()} cr` : "⬆ Upgrade"}
+                className="shrink-0 rounded-lg px-2.5 py-1.5 text-[10px] font-bold disabled:opacity-50 transition-all active:scale-95"
+                style={{ background: "linear-gradient(135deg,#92400e,#d97706)", color: "#fef3c7", border: "1px solid #f59e0b70", boxShadow: "0 0 12px #f59e0b30" }}>
+                {upgrading ? "…" : `⬆ Upgrade${pass.premium_cost_credits ? ` · ${pass.premium_cost_credits.toLocaleString()} cr` : ""}`}
               </button>
             )}
           </div>
-        </div>
 
-        {/* Tier progress */}
-        <div className="space-y-1.5">
-          <div className="flex items-center justify-between text-[10px] text-zinc-500">
-            <span>Tier {progress.current_tier} / {pass.max_tier}</span>
-            <span>{progress.xp_points} / {pass.xp_per_tier} XP</span>
-          </div>
-          <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
-            <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all" style={{ width: `${xpPct}%` }} />
-          </div>
-        </div>
-      </div>
-
-      {/* Tier list */}
-      <div className="space-y-1.5">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Tiers</p>
-        {tiers.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">No tiers configured for this pass.</p>}
-        {tiers.map((t) => {
-          const unlocked = progress.current_tier >= t.tier;
-          const current  = progress.current_tier === t.tier - 1;
-          return (
-            <div key={t.id} className={`rounded-lg border px-3 py-2.5 flex items-start gap-3 transition-colors ${
-              unlocked ? "border-amber-900/40 bg-amber-950/10" : current ? "border-zinc-700 bg-zinc-900/40" : "border-zinc-800/60 bg-zinc-900/10"
-            }`}>
-              <div className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center text-[9px] font-bold mt-0.5 ${
-                unlocked ? "border-amber-700/60 bg-amber-950/40 text-amber-400" : "border-zinc-700 bg-zinc-900 text-zinc-500"
-              }`}>
-                {unlocked ? "✓" : t.tier}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className={`text-xs font-medium ${unlocked ? "text-zinc-300" : "text-zinc-500"}`}>{t.quest_label || `Tier ${t.tier}`}</p>
-                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
-                  <span className={`text-[10px] ${unlocked ? "text-emerald-500" : "text-zinc-600"}`}>
-                    Free: {t.free_reward_type === "credits" ? `${(t.free_reward_config.amount as number | undefined ?? 0).toLocaleString()} cr` : t.free_reward_type}
-                  </span>
-                  {t.premium_reward_type && (
-                    <span className={`text-[10px] ${progress.is_premium && unlocked ? "text-amber-500" : "text-zinc-700"}`}>
-                      ⭐ {t.premium_reward_type === "credits" ? `${(t.premium_reward_config.amount as number | undefined ?? 0).toLocaleString()} cr` : t.premium_reward_type}
-                    </span>
-                  )}
-                </div>
-              </div>
+          {/* XP bar */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between text-[9px]">
+              <span className="text-zinc-400 font-medium">Tier {progress.current_tier} <span className="text-zinc-600">/ {pass.max_tier}</span></span>
+              <span className="text-zinc-500">{progress.xp_points.toLocaleString()} <span className="text-zinc-700">/ {pass.xp_per_tier.toLocaleString()} XP</span></span>
             </div>
-          );
-        })}
+            <div className="h-3 rounded-full overflow-hidden relative" style={{ background: "#0f172a", border: "1px solid #334155" }}>
+              <div className="absolute inset-y-0 left-0 rounded-full transition-all duration-500"
+                style={{
+                  width: `${xpPct}%`,
+                  background: "linear-gradient(90deg, #d97706, #fbbf24, #fde68a)",
+                  boxShadow: xpPct > 0 ? "0 0 8px #f59e0b80" : "none",
+                }} />
+              {xpPct > 0 && (
+                <div className="absolute inset-y-0 rounded-full opacity-50"
+                  style={{ left: `${Math.max(0, xpPct - 8)}%`, width: "8%", background: "linear-gradient(90deg, transparent, #fff8)" }} />
+              )}
+            </div>
+          </div>
+        </div>
       </div>
+
+      {/* ── Horizontal tier track ── */}
+      {tiers.length === 0 ? (
+        <p className="py-8 text-center text-xs text-zinc-600">No tiers configured for this pass.</p>
+      ) : (
+        <div className="space-y-1.5">
+          <p className="text-[9px] font-bold uppercase tracking-widest text-zinc-600 px-0.5">Reward Track</p>
+
+          {/* Premium row header */}
+          {tiers.some((t) => t.premium_reward_type) && (
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <div className="h-px flex-1 bg-amber-900/30" />
+              <span className="text-[8px] font-bold text-amber-700/80 uppercase tracking-widest">⭐ Premium</span>
+              <div className="h-px flex-1 bg-amber-900/30" />
+            </div>
+          )}
+
+          {/* Scrollable tier cards */}
+          <div className="overflow-x-auto -mx-1 px-1 pb-2">
+            <div className="flex gap-2" style={{ width: "max-content" }}>
+              {tiers.map((t) => {
+                const unlocked = progress.current_tier >= t.tier;
+                const current  = progress.current_tier === t.tier - 1;
+                return (
+                  <div key={t.id} className="flex flex-col gap-1.5 items-center" style={{ width: 72 }}>
+
+                    {/* Premium reward card */}
+                    {t.premium_reward_type ? (
+                      <div className={`w-full rounded-lg p-1.5 text-center transition-all border ${
+                        isPrem && unlocked
+                          ? "border-amber-700/60 bg-gradient-to-b from-amber-950/60 to-amber-900/20"
+                          : "border-zinc-800/60 bg-zinc-900/20 opacity-50"
+                      }`}
+                        style={isPrem && unlocked ? { boxShadow: "0 0 8px #f59e0b20" } : {}}>
+                        <div className="text-base leading-none mb-0.5 text-amber-400">
+                          {rewardIcon(t.premium_reward_type)}
+                        </div>
+                        <p className="text-[8px] font-medium text-amber-300/80 leading-tight break-words">
+                          {rewardLabel(t.premium_reward_type, t.premium_reward_config)}
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="w-full rounded-lg border border-transparent bg-transparent" style={{ height: 52 }} />
+                    )}
+
+                    {/* Tier connector + number */}
+                    <div className="relative flex items-center justify-center w-full">
+                      {t.tier > 1 && (
+                        <div className="absolute right-full h-0.5 w-3"
+                          style={{ background: unlocked ? "#f59e0b50" : "#27272a" }} />
+                      )}
+                      <div className={`w-7 h-7 rounded-full border-2 flex items-center justify-center text-[9px] font-bold transition-all z-10 ${
+                        unlocked
+                          ? "border-amber-600 bg-amber-950 text-amber-300"
+                          : current
+                            ? "border-indigo-600 bg-indigo-950 text-indigo-300 ring-2 ring-indigo-500/30"
+                            : "border-zinc-700 bg-zinc-900 text-zinc-600"
+                      }`}
+                        style={unlocked ? { boxShadow: "0 0 6px #f59e0b50" } : current ? { boxShadow: "0 0 8px #6366f150" } : {}}>
+                        {unlocked ? "✓" : t.tier}
+                      </div>
+                      {t.tier < tiers.length && (
+                        <div className="absolute left-full h-0.5 w-3"
+                          style={{ background: unlocked ? "#f59e0b50" : "#27272a" }} />
+                      )}
+                    </div>
+
+                    {/* Free reward card */}
+                    <div className={`w-full rounded-lg p-1.5 text-center transition-all border ${
+                      unlocked
+                        ? "border-indigo-800/60 bg-gradient-to-b from-indigo-950/60 to-indigo-900/20"
+                        : current
+                          ? "border-zinc-700 bg-zinc-900/60"
+                          : "border-zinc-800/40 bg-zinc-900/10 opacity-60"
+                    }`}
+                      style={unlocked ? { boxShadow: "0 0 6px #6366f120" } : {}}>
+                      <div className={`text-base leading-none mb-0.5 ${unlocked ? "text-indigo-400" : "text-zinc-600"}`}>
+                        {rewardIcon(t.free_reward_type)}
+                      </div>
+                      <p className={`text-[8px] font-medium leading-tight break-words ${unlocked ? "text-zinc-300" : "text-zinc-600"}`}>
+                        {rewardLabel(t.free_reward_type, t.free_reward_config)}
+                      </p>
+                    </div>
+
+                    {/* Quest label */}
+                    <p className="text-[7px] text-zinc-700 text-center leading-tight w-full truncate px-0.5" title={t.quest_label}>
+                      {t.quest_label || `T${t.tier}`}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

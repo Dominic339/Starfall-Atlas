@@ -39,6 +39,8 @@ export interface SkinDefinition {
   type: SkinType;
   rarity: SkinRarity;
   visual: SkinVisual;
+  /** Path to a .glb 3D model file relative to /public, e.g. "/assets/planets/Basic Station.glb" */
+  modelPath?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +147,7 @@ export const STATION_SKINS: SkinDefinition[] = [
       accentColor: "#f59e0b",
       glowColor: "#f59e0b",
     },
+    modelPath: "/assets/planets/Basic Station.glb",
   },
   {
     id: "station_obsidian",

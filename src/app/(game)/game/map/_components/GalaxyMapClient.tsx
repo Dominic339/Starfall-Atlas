@@ -1530,6 +1530,7 @@ export function GalaxyMapClient({
           ref={svgRef}
           viewBox={`0 0 ${viewboxW} ${viewboxH}`}
           className="h-full w-full"
+          suppressHydrationWarning
           style={{ cursor: (dragInfo || stationDrag || fleetDragInfo) ? ((dragInfo?.targetId ?? stationDrag?.targetId ?? fleetDragInfo?.targetId) ? "copy" : "grabbing") : isPanning.current ? "grabbing" : "grab" }}
           onMouseDown={handleMouseDown}
           onMouseMove={handleMouseMove}
