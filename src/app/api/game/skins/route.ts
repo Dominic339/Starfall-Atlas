@@ -24,18 +24,30 @@ export async function GET() {
 
   // Available shop skins — fetch all is_available rows and filter date window in JS
   // (PostgREST .or() with ISO timestamps is unreliable due to '.' in the value)
+  const rawShopResult = await admin
+    .from("skins")
+    .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity, visual, model_path")
+    .eq("is_available", true);
+
+  // If the visual or model_path column doesn't exist yet (migration pending), fall back without them
+  const shopQueryResult = rawShopResult.error
+    ? await admin
+        .from("skins")
+        .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity")
+        .eq("is_available", true)
+    : rawShopResult;
+
+  if (shopQueryResult.error) {
+    console.error("[skins GET] shop query error:", shopQueryResult.error);
+  }
+
   const { data: shopRows } = listResult<{
     id: string; name: string; description: string; type: string;
     price_credits: number; price_premium_cents: number | null;
     discount_pct: number | null; available_from: string | null; available_until: string | null;
-    rarity: string; visual: Record<string, string> | null;
-    model_path: string | null;
-  }>(
-    await admin
-      .from("skins")
-      .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity, visual, model_path")
-      .eq("is_available", true),
-  );
+    rarity: string; visual?: Record<string, string> | null;
+    model_path?: string | null;
+  }>(shopQueryResult);
 
   const filteredShopRows = (shopRows ?? []).filter(
     (r) => (!r.available_from || r.available_from <= now) &&
@@ -72,8 +84,13 @@ export async function GET() {
 
   // Fetch full DB rows for all owned skins (handles DB-only skins without code definitions)
   const { data: ownedDbRows } = ownedIds.size > 0
-    ? listResult<{ id: string; name: string; description: string; type: string; rarity: string; visual: Record<string,string> | null; model_path: string | null; }>(
-        await admin.from("skins").select("id, name, description, type, rarity, visual, model_path").in("id", [...ownedIds])
+    ? listResult<{ id: string; name: string; description: string; type: string; rarity: string; visual?: Record<string,string> | null; model_path?: string | null; }>(
+        await (async () => {
+          const r = await admin.from("skins").select("id, name, description, type, rarity, visual, model_path").in("id", [...ownedIds]);
+          return r.error
+            ? admin.from("skins").select("id, name, description, type, rarity").in("id", [...ownedIds])
+            : r;
+        })()
       )
     : { data: [] };
 

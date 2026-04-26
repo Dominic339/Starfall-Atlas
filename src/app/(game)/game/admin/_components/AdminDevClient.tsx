@@ -112,7 +112,7 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
   const [priceCredits,  setPriceCredits]  = useState(existing?.price_credits      ?? 500);
   const [premiumCents,  setPremiumCents]  = useState(existing?.price_premium_cents ?? null as number | null);
   const [discountPct,   setDiscountPct]   = useState(existing?.discount_pct       ?? null as number | null);
-  const [isAvailable,   setIsAvailable]   = useState(existing?.is_available       ?? false);
+  const [isAvailable,   setIsAvailable]   = useState(existing?.is_available       ?? true);
   const [availableFrom, setAvailableFrom] = useState(toDateTimeLocal(existing?.available_from ?? null));
   const [availableUntil,setAvailableUntil]= useState(toDateTimeLocal(existing?.available_until ?? null));
   const [modelPath,     setModelPath]     = useState<string>(
