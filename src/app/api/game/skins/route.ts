@@ -22,18 +22,18 @@ export async function GET() {
 
   const now = new Date().toISOString();
 
-  // Available shop skins (time-window checked server-side)
+  // Available shop skins (time-window checked server-side) — fetch full row so
+  // DB-only skins (no code definition) can provide their own name/visual.
   const { data: shopRows } = listResult<{
-    id: string;
-    price_credits: number;
-    price_premium_cents: number | null;
-    discount_pct: number | null;
-    available_until: string | null;
-    rarity: string;
+    id: string; name: string; description: string; type: string;
+    price_credits: number; price_premium_cents: number | null;
+    discount_pct: number | null; available_until: string | null;
+    rarity: string; visual: Record<string, string> | null;
+    model_path: string | null;
   }>(
     await admin
       .from("skins")
-      .select("id, price_credits, price_premium_cents, discount_pct, available_until, rarity")
+      .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_until, rarity, visual, model_path")
       .eq("is_available", true)
       .or(`available_from.is.null,available_from.lte.${now}`)
       .or(`available_until.is.null,available_until.gte.${now}`),
@@ -66,6 +66,13 @@ export async function GET() {
   };
 
   const ownedIds = new Set((ownedRows ?? []).map((r) => r.skin_id));
+
+  // Fetch full DB rows for all owned skins (handles DB-only skins without code definitions)
+  const { data: ownedDbRows } = ownedIds.size > 0
+    ? listResult<{ id: string; name: string; description: string; type: string; rarity: string; visual: Record<string,string> | null; model_path: string | null; }>(
+        await admin.from("skins").select("id, name, description, type, rarity, visual, model_path").in("id", [...ownedIds])
+      )
+    : { data: [] };
 
   // Available shop packages
   const { data: pkgRows } = listResult<{
@@ -100,17 +107,19 @@ export async function GET() {
 
   const shopSkins = (shopRows ?? []).map((row) => {
     const def = getSkinById(row.id);
+    const dbVisual = (row.visual && Object.keys(row.visual).length > 0) ? row.visual : null;
     const effectivePrice =
       row.discount_pct != null
         ? Math.round(row.price_credits * (1 - row.discount_pct / 100))
         : row.price_credits;
     return {
       id: row.id,
-      name: def?.name ?? row.id,
-      description: def?.description ?? "",
-      type: def?.type ?? "ship",
+      name: def?.name ?? row.name,
+      description: def?.description ?? row.description,
+      type: def?.type ?? row.type,
       rarity: def?.rarity ?? row.rarity,
-      visual: def?.visual ?? {},
+      visual: def?.visual ?? dbVisual ?? {},
+      modelPath: def?.modelPath ?? row.model_path ?? undefined,
       priceCredits: row.price_credits,
       effectivePrice,
       premiumCents: row.price_premium_cents,
@@ -145,7 +154,23 @@ export async function GET() {
     };
   });
 
-  const ownedSkins = ALL_SKINS.filter((s) => ownedIds.has(s.id));
+  // Build owned skins list: merge DB rows with code definitions (handles DB-only skins too)
+  const ownedDbMap = new Map((ownedDbRows ?? []).map((r) => [r.id, r]));
+  const ownedSkins = [...ownedIds].map((sid) => {
+    const codeDef = getSkinById(sid);
+    const dbRow = ownedDbMap.get(sid);
+    if (!dbRow && !codeDef) return null;
+    const dbVisual = dbRow?.visual && Object.keys(dbRow.visual).length > 0 ? dbRow.visual : null;
+    return {
+      id: sid,
+      name: codeDef?.name ?? dbRow?.name ?? sid,
+      description: codeDef?.description ?? dbRow?.description ?? "",
+      type: (codeDef?.type ?? dbRow?.type ?? "ship") as import("@/skins").SkinType,
+      rarity: (codeDef?.rarity ?? dbRow?.rarity ?? "common") as import("@/skins").SkinRarity,
+      visual: codeDef?.visual ?? dbVisual ?? {},
+      modelPath: codeDef?.modelPath ?? dbRow?.model_path ?? undefined,
+    };
+  }).filter(Boolean) as import("@/skins").SkinDefinition[];
 
   return Response.json({
     ok: true,

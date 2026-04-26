@@ -25,6 +25,7 @@ export interface DbSkinRow {
   discount_pct: number | null; is_available: boolean;
   available_from: string | null; available_until: string | null;
   model_path: string | null;
+  visual: Record<string, string>;
   created_at: string; updated_at: string;
 }
 
@@ -66,21 +67,48 @@ function RarityDot({ rarity }: { rarity: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// SkinEditor — modal for editing a single skin's shop configuration
+// SkinEditor — unified modal for code-defined AND custom (DB-only) skins
 // ---------------------------------------------------------------------------
 
 interface GlbFile { name: string; path: string; }
 
+const SKIN_TYPES: import("@/skins").SkinType[] = ["ship", "station", "fleet"];
+const SKIN_RARITIES: import("@/skins").SkinRarity[] = ["common", "uncommon", "rare", "legendary"];
+const SHIP_SHAPES = ["chevron", "diamond", "arrow", "delta"] as const;
+
+function slugify(s: string) { return s.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/, ""); }
+
 interface SkinEditorProps {
-  def: SkinDefinition;
+  // null = creating a brand-new custom skin; non-null = code-defined skin
+  def: import("@/skins").SkinDefinition | null;
   existing: DbSkinRow | undefined;
   onSave: (data: Partial<DbSkinRow>) => Promise<void>;
   onClose: () => void;
 }
 
 function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
-  const [skinName,      setSkinName]      = useState(existing?.name         ?? def.name);
-  const [skinDesc,      setSkinDesc]      = useState(existing?.description  ?? def.description);
+  const isNew = !def && !existing;
+
+  // Identity (editable for custom skins)
+  const [skinId,     setSkinId]     = useState(existing?.id         ?? def?.id   ?? "");
+  const [idManual,   setIdManual]   = useState(!!existing?.id || !!def?.id);
+  const [skinType,   setSkinType]   = useState<import("@/skins").SkinType>(
+    (def?.type ?? existing?.type ?? "ship") as import("@/skins").SkinType
+  );
+  const [skinRarity, setSkinRarity] = useState<import("@/skins").SkinRarity>(
+    (def?.rarity ?? existing?.rarity ?? "common") as import("@/skins").SkinRarity
+  );
+
+  // Text
+  const [skinName, setSkinName] = useState(existing?.name ?? def?.name ?? "");
+  const [skinDesc, setSkinDesc] = useState(existing?.description ?? def?.description ?? "");
+
+  // Visual overrides
+  const [visualColor,  setVisualColor]  = useState(existing?.visual?.color  ?? def?.visual?.color  ?? "");
+  const [visualAccent, setVisualAccent] = useState(existing?.visual?.accentColor ?? def?.visual?.accentColor ?? "");
+  const [visualShape,  setVisualShape]  = useState(existing?.visual?.shape  ?? def?.visual?.shape  ?? "chevron");
+
+  // Shop
   const [priceCredits,  setPriceCredits]  = useState(existing?.price_credits      ?? 500);
   const [premiumCents,  setPremiumCents]  = useState(existing?.price_premium_cents ?? null as number | null);
   const [discountPct,   setDiscountPct]   = useState(existing?.discount_pct       ?? null as number | null);
@@ -88,11 +116,12 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
   const [availableFrom, setAvailableFrom] = useState(toDateTimeLocal(existing?.available_from ?? null));
   const [availableUntil,setAvailableUntil]= useState(toDateTimeLocal(existing?.available_until ?? null));
   const [modelPath,     setModelPath]     = useState<string>(
-    existing?.model_path ?? def.modelPath ?? "",
+    existing?.model_path ?? def?.modelPath ?? "",
   );
-  const [glbFiles,      setGlbFiles]      = useState<GlbFile[]>([]);
-  const [saving, setSaving] = useState(false);
-  const [error,  setError]  = useState<string | null>(null);
+
+  const [glbFiles, setGlbFiles] = useState<GlbFile[]>([]);
+  const [saving,   setSaving]   = useState(false);
+  const [error,    setError]    = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/admin/glb-assets")
@@ -101,12 +130,38 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
       .catch(() => {});
   }, []);
 
+  function handleNameChange(v: string) {
+    setSkinName(v);
+    if (!idManual) setSkinId(slugify(v));
+  }
+
+  const effectivePrice = discountPct != null
+    ? Math.round(priceCredits * (1 - discountPct / 100))
+    : priceCredits;
+
+  const previewVisual = {
+    color:       visualColor  || undefined,
+    accentColor: visualAccent || undefined,
+    shape:       (visualShape || undefined) as import("@/skins").SkinVisual["shape"],
+  };
+  const previewGlow = RARITY_GLOW[skinRarity] ?? "#6b7280";
+
   async function handleSave() {
+    if (!skinId.trim()) { setError("ID is required"); return; }
+    if (!skinName.trim()) { setError("Name is required"); return; }
     setSaving(true); setError(null);
+    const visual: Record<string, string> = {};
+    if (visualColor)  visual.color       = visualColor;
+    if (visualAccent) visual.accentColor = visualAccent;
+    if (visualShape && visualShape !== "chevron") visual.shape = visualShape;
     try {
       await onSave({
-        id: def.id, name: skinName.trim() || def.name, description: skinDesc.trim(),
-        type: def.type, rarity: def.rarity,
+        id: def?.id ?? skinId.trim(),
+        name: skinName.trim(),
+        description: skinDesc.trim(),
+        type: def?.type ?? skinType,
+        rarity: def?.rarity ?? skinRarity,
+        visual,
         price_credits: priceCredits,
         price_premium_cents: premiumCents,
         discount_pct: discountPct,
@@ -121,48 +176,42 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
     } finally { setSaving(false); }
   }
 
-  const effectivePrice = discountPct != null
-    ? Math.round(priceCredits * (1 - discountPct / 100))
-    : priceCredits;
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "rgba(0,0,0,0.82)" }}>
       <div className="w-full max-w-3xl rounded-xl border border-zinc-700 bg-zinc-950 shadow-2xl flex flex-col max-h-[92vh] overflow-hidden">
         <div className="shrink-0 border-b border-zinc-800 px-5 py-3.5 flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-bold text-zinc-100">{def.name}</h3>
+            <h3 className="text-sm font-bold text-zinc-100">{isNew ? "New Skin" : (skinName || def?.name || existing?.name)}</h3>
             <p className="text-[10px] text-zinc-500 mt-0.5">
-              <RarityDot rarity={def.rarity} />
-              {RARITY_LABEL[def.rarity as keyof typeof RARITY_LABEL]} · {def.type}
+              <RarityDot rarity={def?.rarity ?? skinRarity} />
+              {RARITY_LABEL[(def?.rarity ?? skinRarity) as keyof typeof RARITY_LABEL]} · {def?.type ?? skinType}
+              {!def && <span className="ml-1 text-indigo-500/70">(custom)</span>}
             </p>
           </div>
           <button onClick={onClose} className="text-zinc-600 hover:text-zinc-300 text-lg">✕</button>
         </div>
 
         <div className="flex flex-1 overflow-hidden">
-          {/* ── Left: 3D model preview ── */}
+          {/* ── Left: preview + model picker ── */}
           <div className="w-64 shrink-0 border-r border-zinc-800 bg-zinc-950 flex flex-col">
             <div className="flex-1 relative" style={{ minHeight: 220 }}>
               {modelPath ? (
                 <ModelViewer src={modelPath} className="absolute inset-0 w-full h-full" />
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-zinc-700">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1" className="w-10 h-10 opacity-30">
-                    <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-                    <polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
-                  </svg>
-                  <p className="text-[10px]">No model assigned</p>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3">
+                  <div className="w-24 h-24 rounded-xl flex items-center justify-center"
+                    style={{ background: previewGlow + "18", border: `2px solid ${previewGlow}44`, boxShadow: `0 0 20px ${previewGlow}18` }}>
+                    <SkinPreview visual={previewVisual} type={def?.type ?? skinType} size={72} />
+                  </div>
+                  <p className="text-[9px] text-zinc-700">SVG preview · assign .glb below for 3D</p>
                 </div>
               )}
             </div>
             <div className="shrink-0 border-t border-zinc-800 p-3 space-y-1.5">
               <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">3D Model (.glb)</label>
-              <select
-                value={modelPath}
-                onChange={(e) => setModelPath(e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-[10px] text-zinc-300 focus:border-indigo-600 focus:outline-none"
-              >
-                <option value="">— None —</option>
+              <select value={modelPath} onChange={(e) => setModelPath(e.target.value)}
+                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-[10px] text-zinc-300 focus:border-indigo-600 focus:outline-none">
+                <option value="">— None (SVG only) —</option>
                 {glbFiles.map((f) => (
                   <option key={f.path} value={f.path}>{f.name}</option>
                 ))}
@@ -175,13 +224,64 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
             </div>
           </div>
 
-          {/* ── Right: settings form ── */}
+          {/* ── Right: form ── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+
+            {/* ID — only for custom skins */}
+            {!def && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
+                  Skin ID <span className="text-zinc-700 normal-case">(slug, no spaces)</span>
+                </label>
+                <input value={skinId}
+                  onChange={(e) => { setSkinId(e.target.value); setIdManual(true); }}
+                  disabled={!!existing}
+                  placeholder="e.g. crimson_nova_ship"
+                  className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm font-mono text-zinc-100 focus:border-indigo-600 focus:outline-none disabled:opacity-40" />
+              </div>
+            )}
+
+            {/* Type — only for custom skins */}
+            {!def && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Skin Type</label>
+                <div className="flex gap-1.5">
+                  {SKIN_TYPES.map((t) => (
+                    <button key={t} onClick={() => setSkinType(t)}
+                      className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize border transition-all ${
+                        skinType === t ? "border-indigo-600 bg-indigo-950/40 text-indigo-300" : "border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                      }`}>
+                      {t}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Rarity — only for custom skins */}
+            {!def && (
+              <div className="space-y-1">
+                <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Rarity</label>
+                <div className="flex gap-1.5">
+                  {SKIN_RARITIES.map((r) => {
+                    const c = RARITY_COLOR[r as keyof typeof RARITY_COLOR] ?? "#9ca3af";
+                    return (
+                      <button key={r} onClick={() => setSkinRarity(r)}
+                        className={`flex-1 rounded-lg py-1.5 text-xs font-semibold capitalize border transition-all`}
+                        style={skinRarity === r ? { color: c, borderColor: c + "88", background: c + "14" } : { borderColor: "#3f3f46", color: "#71717a" }}>
+                        {r}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Name */}
             <div className="space-y-1">
               <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Display Name</label>
-              <input value={skinName} onChange={(e) => setSkinName(e.target.value)}
-                placeholder={def.name}
+              <input value={skinName} onChange={(e) => handleNameChange(e.target.value)}
+                placeholder={def?.name ?? "e.g. Crimson Nova"}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none" />
             </div>
 
@@ -190,6 +290,50 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
               <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Description</label>
               <textarea value={skinDesc} onChange={(e) => setSkinDesc(e.target.value)} rows={2}
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none resize-none" />
+            </div>
+
+            {/* Visual colors */}
+            <div className="space-y-2">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Visual Colors</label>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <p className="text-[9px] text-zinc-600">Primary Color</p>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={visualColor || "#a5b4fc"}
+                      onChange={(e) => setVisualColor(e.target.value)}
+                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent" />
+                    <input value={visualColor} onChange={(e) => setVisualColor(e.target.value)}
+                      placeholder={def?.visual?.color ?? "#a5b4fc"}
+                      className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-mono text-zinc-300 focus:border-indigo-600 focus:outline-none" />
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-[9px] text-zinc-600">Accent Color</p>
+                  <div className="flex items-center gap-2">
+                    <input type="color" value={visualAccent || "#6366f1"}
+                      onChange={(e) => setVisualAccent(e.target.value)}
+                      className="w-8 h-8 rounded cursor-pointer border-0 bg-transparent" />
+                    <input value={visualAccent} onChange={(e) => setVisualAccent(e.target.value)}
+                      placeholder={def?.visual?.accentColor ?? "#6366f1"}
+                      className="flex-1 rounded border border-zinc-700 bg-zinc-900 px-2 py-1 text-[10px] font-mono text-zinc-300 focus:border-indigo-600 focus:outline-none" />
+                  </div>
+                </div>
+              </div>
+              {(def?.type ?? skinType) === "ship" && (
+                <div className="space-y-1">
+                  <p className="text-[9px] text-zinc-600">Ship Shape</p>
+                  <div className="flex gap-1.5">
+                    {SHIP_SHAPES.map((s) => (
+                      <button key={s} onClick={() => setVisualShape(s)}
+                        className={`flex-1 rounded py-1 text-[9px] font-semibold capitalize border transition-all ${
+                          visualShape === s ? "border-indigo-600 bg-indigo-950/30 text-indigo-300" : "border-zinc-700 text-zinc-500 hover:border-zinc-600"
+                        }`}>
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Availability toggle */}
@@ -217,8 +361,7 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
                 Discount % <span className="text-zinc-700 normal-case">(leave blank = no discount)</span>
               </label>
               <div className="flex items-center gap-2">
-                <input type="number" min={0} max={100}
-                  value={discountPct ?? ""}
+                <input type="number" min={0} max={100} value={discountPct ?? ""}
                   onChange={(e) => setDiscountPct(e.target.value ? parseInt(e.target.value) : null)}
                   placeholder="e.g. 20"
                   className="w-32 rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none" />
@@ -236,8 +379,7 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
               <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
                 Premium Price (USD cents) <span className="text-zinc-700 normal-case">(optional)</span>
               </label>
-              <input type="number" min={0}
-                value={premiumCents ?? ""}
+              <input type="number" min={0} value={premiumCents ?? ""}
                 onChange={(e) => setPremiumCents(e.target.value ? parseInt(e.target.value) : null)}
                 placeholder="e.g. 299 = $2.99"
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none" />
@@ -265,14 +407,14 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
             </div>
 
             {error && <p className="text-xs text-red-400">{error}</p>}
-          </div>{/* end right column */}
-        </div>{/* end two-column flex */}
+          </div>
+        </div>
 
         <div className="shrink-0 border-t border-zinc-800 px-5 py-3 flex justify-end gap-2">
           <button onClick={onClose} className="px-3 py-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors">Cancel</button>
           <button onClick={handleSave} disabled={saving}
             className="px-4 py-1.5 text-xs font-bold rounded-lg border border-indigo-700/60 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 transition-all">
-            {saving ? "Saving…" : existing ? "Update" : "Publish"}
+            {saving ? "Saving…" : existing ? "Update" : isNew ? "Create" : "Publish"}
           </button>
         </div>
       </div>
@@ -372,7 +514,7 @@ function PackageEditor({ existing, allSkins, dbSkins, onSave, onClose }: Package
             <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">
               Skins in Bundle <span className="text-zinc-700 normal-case">({selectedSkins.size} selected)</span>
             </label>
-            <div className="grid grid-cols-2 gap-1.5 max-h-48 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
+            <div className="grid grid-cols-2 gap-1.5 max-h-56 overflow-y-auto rounded-lg border border-zinc-800 bg-zinc-900/40 p-2">
               {allSkins.map((skin) => {
                 const inDb = dbSkinIds.has(skin.id);
                 const selected = selectedSkins.has(skin.id);
@@ -387,6 +529,23 @@ function PackageEditor({ existing, allSkins, dbSkins, onSave, onClose }: Package
                       style={{ background: RARITY_COLOR[skin.rarity as keyof typeof RARITY_COLOR] ?? "#9ca3af" }} />
                     <span className="truncate">{skin.name}</span>
                     {!inDb && <span className="ml-auto text-[9px] text-zinc-600">not in DB</span>}
+                  </button>
+                );
+              })}
+              {/* DB-only custom skins */}
+              {dbSkins.filter((s) => !new Set(allSkins.map((a) => a.id)).has(s.id)).map((skin) => {
+                const selected = selectedSkins.has(skin.id);
+                return (
+                  <button key={skin.id} onClick={() => toggleSkin(skin.id)}
+                    className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-all text-xs ${
+                      selected
+                        ? "border border-indigo-700/60 bg-indigo-950/30 text-zinc-100"
+                        : "border border-transparent bg-zinc-800/40 text-zinc-400 hover:bg-zinc-800"
+                    }`}>
+                    <span className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ background: RARITY_COLOR[skin.rarity as keyof typeof RARITY_COLOR] ?? "#9ca3af" }} />
+                    <span className="truncate">{skin.name}</span>
+                    <span className="ml-auto text-[9px] text-indigo-600/70">custom</span>
                   </button>
                 );
               })}
@@ -631,10 +790,13 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
   const [dbSkins, setDbSkins] = useState<DbSkinRow[]>(initialDbSkins);
   const [packages, setPackages] = useState<DbPackageRow[]>(initialPackages);
   const [editingSkin, setEditingSkin] = useState<SkinDefinition | null>(null);
+  const [editingCustomSkin, setEditingCustomSkin] = useState<DbSkinRow | "new" | null>(null);
   const [editingPkg, setEditingPkg] = useState<DbPackageRow | "new" | null>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
 
   const dbSkinMap = new Map(dbSkins.map((s) => [s.id, s]));
+  const allSkinDefIds = new Set(allSkinDefs.map((d) => d.id));
+  const customDbSkins = dbSkins.filter((s) => !allSkinDefIds.has(s.id));
 
   function showMsg(text: string, ok: boolean) {
     setMsg({ text, ok });
@@ -749,11 +911,16 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-[10px] text-zinc-600">
-              {dbSkins.length} of {allSkinDefs.length} published ·{" "}
+              {dbSkins.length} published ·{" "}
               <span className="text-emerald-600">{dbSkins.filter(s => s.is_available).length} live in shop</span>
             </p>
+            <button onClick={() => setEditingCustomSkin("new")}
+              className="rounded-lg px-3 py-1.5 text-xs font-bold border border-indigo-700/50 bg-indigo-950/30 text-indigo-300 hover:bg-indigo-900/40 transition-all">
+              + New Skin
+            </button>
           </div>
 
+          {/* Code-defined skins (from src/skins/index.ts) */}
           <div className="grid grid-cols-2 gap-2">
             {allSkinDefs.map((def) => {
               const row = dbSkinMap.get(def.id);
@@ -767,7 +934,6 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
                   style={{ borderColor: inDb ? glow + "55" : "#27272a", boxShadow: isLive ? `0 0 10px ${glow}22` : "none" }}
                   onClick={() => setEditingSkin(def)}>
 
-                  {/* Status pill */}
                   <div className="absolute top-2 right-2">
                     {isLive ? (
                       <span className="rounded-full bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.5 text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Live</span>
@@ -778,14 +944,13 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
                     )}
                   </div>
 
-                  {/* Preview + info row */}
                   <div className="flex items-center gap-3">
                     <div className="shrink-0 w-12 h-12 rounded-lg flex items-center justify-center"
                       style={{ background: glow + "18", border: `1px solid ${glow}33` }}>
                       <SkinPreview visual={def.visual} type={def.type} size={36} />
                     </div>
                     <div className="flex-1 min-w-0 pr-10">
-                      <p className="text-xs font-bold text-zinc-100 truncate">{def.name}</p>
+                      <p className="text-xs font-bold text-zinc-100 truncate">{row?.name ?? def.name}</p>
                       <p className="text-[9px] capitalize mt-0.5" style={{ color: glow }}>{def.rarity} · {def.type}</p>
                       {row?.model_path && (
                         <p className="text-[8px] text-indigo-500/70 mt-0.5 truncate">3D: {row.model_path.split("/").pop()}</p>
@@ -793,7 +958,6 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
                     </div>
                   </div>
 
-                  {/* Price row */}
                   <div className="flex items-center justify-between text-[10px]">
                     {inDb ? (
                       <div className="flex items-center gap-1.5">
@@ -822,6 +986,66 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
               );
             })}
           </div>
+
+          {/* Custom (DB-only) skins */}
+          {customDbSkins.length > 0 && (
+            <>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500 pt-1">Custom Skins</p>
+              <div className="grid grid-cols-2 gap-2">
+                {customDbSkins.map((row) => {
+                  const glow = RARITY_GLOW[row.rarity] ?? "#6b7280";
+                  const isLive = row.is_available;
+                  const visual = row.visual && Object.keys(row.visual).length > 0 ? row.visual : {};
+                  return (
+                    <div key={row.id}
+                      className="relative rounded-xl border bg-zinc-950 p-3 flex flex-col gap-2.5 transition-all hover:brightness-110 cursor-pointer group"
+                      style={{ borderColor: glow + "55", boxShadow: isLive ? `0 0 10px ${glow}22` : "none" }}
+                      onClick={() => setEditingCustomSkin(row)}>
+
+                      <div className="absolute top-2 right-2">
+                        {isLive ? (
+                          <span className="rounded-full bg-emerald-950/80 border border-emerald-800/60 px-1.5 py-0.5 text-[8px] font-bold text-emerald-400 uppercase tracking-widest">Live</span>
+                        ) : (
+                          <span className="rounded-full bg-zinc-900 border border-zinc-700 px-1.5 py-0.5 text-[8px] font-bold text-zinc-600 uppercase tracking-widest">Hidden</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-3">
+                        <div className="shrink-0 w-12 h-12 rounded-lg flex items-center justify-center"
+                          style={{ background: glow + "18", border: `1px solid ${glow}33` }}>
+                          <SkinPreview visual={visual as import("@/skins").SkinVisual} type={row.type as import("@/skins").SkinType} size={36} />
+                        </div>
+                        <div className="flex-1 min-w-0 pr-10">
+                          <p className="text-xs font-bold text-zinc-100 truncate">{row.name}</p>
+                          <p className="text-[9px] capitalize mt-0.5" style={{ color: glow }}>{row.rarity} · {row.type}</p>
+                          <p className="text-[8px] text-indigo-500/70 mt-0.5">custom</p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[10px]">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-amber-400 font-mono font-bold">{row.price_credits.toLocaleString()} cr</span>
+                          {row.discount_pct != null && (
+                            <span className="rounded bg-emerald-900/40 border border-emerald-800/30 px-1 py-0.5 text-[8px] text-emerald-400 font-bold">-{row.discount_pct}%</span>
+                          )}
+                        </div>
+                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                          <button onClick={() => setEditingCustomSkin(row)}
+                            className="rounded px-2 py-0.5 text-[9px] font-bold border border-indigo-800/60 bg-indigo-950/40 text-indigo-300 hover:bg-indigo-900/50 transition-all">
+                            Edit
+                          </button>
+                          <button onClick={() => deleteSkin(row.id)}
+                            className="rounded px-2 py-0.5 text-[9px] font-bold border border-red-900/40 bg-red-950/20 text-red-500 hover:bg-red-900/30 transition-all">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
         </div>
       )}
 
@@ -911,6 +1135,14 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
           existing={dbSkinMap.get(editingSkin.id)}
           onSave={saveSkin}
           onClose={() => setEditingSkin(null)}
+        />
+      )}
+      {editingCustomSkin && (
+        <SkinEditor
+          def={null}
+          existing={editingCustomSkin === "new" ? undefined : editingCustomSkin}
+          onSave={saveSkin}
+          onClose={() => setEditingCustomSkin(null)}
         />
       )}
       {editingPkg && (

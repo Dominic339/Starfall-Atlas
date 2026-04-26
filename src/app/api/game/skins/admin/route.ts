@@ -73,19 +73,27 @@ export async function POST(req: Request) {
 
   if (entityType === "skin") {
     const { skinIds: _ignored, ...skinData } = data as { skinIds?: unknown; [k: string]: unknown };
-    await admin.from("skins").upsert(
+    const { error: upsertErr } = await admin.from("skins").upsert(
       { ...skinData, updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
+    if (upsertErr) {
+      console.error("[skin admin] upsert error:", upsertErr);
+      return Response.json({ ok: false, error: { message: upsertErr.message ?? "DB error saving skin" } }, { status: 500 });
+    }
     return Response.json({ ok: true, data: { message: "Skin saved" } });
   }
 
   if (entityType === "package") {
     const { skinIds, ...pkgData } = data as { skinIds?: string[]; [k: string]: unknown };
-    await admin.from("skin_packages").upsert(
+    const { error: pkgErr } = await admin.from("skin_packages").upsert(
       { ...pkgData, updated_at: new Date().toISOString() },
       { onConflict: "id" },
     );
+    if (pkgErr) {
+      console.error("[skin admin] package upsert error:", pkgErr);
+      return Response.json({ ok: false, error: { message: pkgErr.message ?? "DB error saving package" } }, { status: 500 });
+    }
 
     if (skinIds !== undefined && pkgData.id) {
       // Replace package items

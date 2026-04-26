@@ -258,9 +258,9 @@ function PassEditor({ existing, onSave, onClose, allSkinDefs }: {
   const [season,    setSeason]    = useState(existing?.season_number ?? 1);
   const [maxTier,   setMaxTier]   = useState(existing?.max_tier      ?? 30);
   const [xpPerTier, setXpPerTier] = useState(existing?.xp_per_tier   ?? 1000);
-  const [startsAt,  setStartsAt]  = useState(toLocal(existing?.starts_at));
-  const [endsAt,    setEndsAt]    = useState(toLocal(existing?.ends_at));
-  const [isActive,  setIsActive]  = useState(existing?.is_active     ?? false);
+  const [startsAt,  setStartsAt]  = useState(existing?.starts_at ? toLocal(existing.starts_at) : new Date().toISOString().slice(0, 16));
+  const [endsAt,    setEndsAt]    = useState(existing?.ends_at ? toLocal(existing.ends_at) : new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 16));
+  const [isActive,  setIsActive]  = useState(existing?.is_active     ?? true);
   const [premCr,    setPremCr]    = useState<string>(existing?.premium_cost_credits != null ? String(existing.premium_cost_credits) : "");
   const [tiers,     setTiers]     = useState<BattlePassTier[]>(existing?.tiers ?? []);
   const [saving,    setSaving]    = useState(false);

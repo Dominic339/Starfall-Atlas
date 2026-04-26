@@ -47,7 +47,7 @@ export default async function AdminDevPage() {
   ]);
 
   // ── Skins ─────────────────────────────────────────────────────────────────
-  type SkinRow = { id: string; name: string; description: string; type: string; rarity: string; price_credits: number; price_premium_cents: number | null; discount_pct: number | null; is_available: boolean; available_from: string | null; available_until: string | null; model_path: string | null; created_at: string; updated_at: string; };
+  type SkinRow = { id: string; name: string; description: string; type: string; rarity: string; price_credits: number; price_premium_cents: number | null; discount_pct: number | null; is_available: boolean; available_from: string | null; available_until: string | null; model_path: string | null; visual: Record<string, string>; created_at: string; updated_at: string; };
   const { data: dbSkins } = listResult<SkinRow>(skinsRes);
 
   const { data: pkgItems } = listResult<{ package_id: string; skin_id: string }>(pkgItemsRes);
