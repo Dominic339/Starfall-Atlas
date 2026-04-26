@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import type { SkinDefinition } from "@/skins";
 
 export interface BattlePassTier {
   id?: string; tier: number;
@@ -29,18 +30,149 @@ const QUEST_TYPES = [
 
 const REWARD_TYPES = ["credits", "resource", "skin", "ship_class", "title"];
 
+const RESOURCES = ["iron", "titanium", "carbon", "helium", "silica", "rare_earth"];
+
 function toLocal(iso: string | null | undefined) { return iso ? new Date(iso).toISOString().slice(0, 16) : ""; }
 function fromLocal(s: string): string | null { return s ? new Date(s).toISOString() : null; }
 
+// ── Quest Config Fields ────────────────────────────────────────────────────────
+
+function QuestConfigFields({ questType, config, onChange }: {
+  questType: string;
+  config: Record<string, unknown>;
+  onChange: (c: Record<string, unknown>) => void;
+}) {
+  function set(k: string, v: unknown) { onChange({ ...config, [k]: v }); }
+
+  if (questType === "manual" || questType === "alliance_activity") return null;
+
+  if (questType === "gather_resource") return (
+    <div className="grid grid-cols-2 gap-2">
+      <div className="space-y-1">
+        <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Resource</label>
+        <select value={(config.resource as string) ?? "iron"}
+          onChange={(e) => set("resource", e.target.value)}
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+          <option value="">Any resource</option>
+          {RESOURCES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Amount</label>
+        <input type="number" min={1} value={(config.amount as number) ?? 500}
+          onChange={(e) => set("amount", parseInt(e.target.value) || 1)}
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+      </div>
+    </div>
+  );
+
+  const countLabel = questType === "travel_jumps" ? "Jumps" : questType === "found_colonies" ? "Colonies" : questType === "market_trades" ? "Trades" : "Amount";
+  const countKey = questType === "harvest_asteroid" ? "amount" : "count";
+  return (
+    <div className="space-y-1">
+      <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">{countLabel} Required</label>
+      <input type="number" min={1} value={(config[countKey] as number) ?? 1}
+        onChange={(e) => onChange({ [countKey]: parseInt(e.target.value) || 1 })}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+    </div>
+  );
+}
+
+// ── Reward Config Fields ───────────────────────────────────────────────────────
+
+function RewardConfigFields({ rewardType, config, onChange, allSkinDefs }: {
+  rewardType: string;
+  config: Record<string, unknown>;
+  onChange: (c: Record<string, unknown>) => void;
+  allSkinDefs: SkinDefinition[];
+}) {
+  function set(k: string, v: unknown) { onChange({ ...config, [k]: v }); }
+
+  if (rewardType === "credits") return (
+    <div className="space-y-1">
+      <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Amount (cr)</label>
+      <input type="number" min={1} value={(config.amount as number) ?? 100}
+        onChange={(e) => onChange({ amount: parseInt(e.target.value) || 1 })}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+    </div>
+  );
+
+  if (rewardType === "resource") return (
+    <div className="grid grid-cols-2 gap-2">
+      <div className="space-y-1">
+        <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Resource</label>
+        <select value={(config.resource_type as string) ?? "iron"}
+          onChange={(e) => set("resource_type", e.target.value)}
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+          {RESOURCES.map((r) => <option key={r} value={r}>{r}</option>)}
+        </select>
+      </div>
+      <div className="space-y-1">
+        <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Quantity</label>
+        <input type="number" min={1} value={(config.quantity as number) ?? 100}
+          onChange={(e) => set("quantity", parseInt(e.target.value) || 1)}
+          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+      </div>
+    </div>
+  );
+
+  if (rewardType === "skin") return (
+    <div className="space-y-1">
+      <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Skin</label>
+      <select value={(config.skin_id as string) ?? ""}
+        onChange={(e) => onChange({ skin_id: e.target.value })}
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+        <option value="">— Pick a skin —</option>
+        {allSkinDefs.map((s) => (
+          <option key={s.id} value={s.id}>[{s.type}] {s.name} ({s.rarity})</option>
+        ))}
+      </select>
+      {!!config.skin_id && (
+        <p className="text-[9px] text-indigo-500 font-mono">{String(config.skin_id)}</p>
+      )}
+    </div>
+  );
+
+  if (rewardType === "ship_class") return (
+    <div className="space-y-1">
+      <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Class ID</label>
+      <input value={(config.class_id as string) ?? ""}
+        onChange={(e) => onChange({ class_id: e.target.value })}
+        placeholder="e.g. scout_mk1"
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs font-mono text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+    </div>
+  );
+
+  if (rewardType === "title") return (
+    <div className="space-y-1">
+      <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Title Text</label>
+      <input value={(config.title as string) ?? ""}
+        onChange={(e) => onChange({ title: e.target.value })}
+        placeholder="e.g. Pioneer"
+        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+    </div>
+  );
+
+  return null;
+}
+
 // ── Tier Row ──────────────────────────────────────────────────────────────────
 
-function TierRow({ tier, idx, onChange, onRemove }: {
+function TierRow({ tier, idx, onChange, onRemove, allSkinDefs }: {
   tier: BattlePassTier; idx: number;
   onChange: (t: BattlePassTier) => void;
   onRemove: () => void;
+  allSkinDefs: SkinDefinition[];
 }) {
   const [open, setOpen] = useState(false);
   function set<K extends keyof BattlePassTier>(k: K, v: BattlePassTier[K]) { onChange({ ...tier, [k]: v }); }
+
+  const rewardSummary = (type: string, cfg: Record<string, unknown>) => {
+    if (type === "credits") return `${(cfg.amount as number | undefined ?? 0).toLocaleString()} cr`;
+    if (type === "resource") return `${cfg.quantity ?? "?"} × ${cfg.resource_type ?? "?"}`;
+    if (type === "skin") return cfg.skin_id as string ?? "skin";
+    return type;
+  };
 
   return (
     <div className="rounded-lg border border-zinc-800 bg-zinc-900/30">
@@ -51,8 +183,10 @@ function TierRow({ tier, idx, onChange, onRemove }: {
         <div className="flex-1 min-w-0">
           <p className="text-xs font-medium text-zinc-300 truncate">{tier.quest_label || <span className="text-zinc-600 italic">No quest label</span>}</p>
           <p className="text-[9px] text-zinc-600">
-            Free: <span className="text-zinc-500">{tier.free_reward_type}</span>
-            {tier.premium_reward_type && <> · Premium: <span className="text-amber-600">{tier.premium_reward_type}</span></>}
+            Free: <span className="text-zinc-500">{rewardSummary(tier.free_reward_type, tier.free_reward_config)}</span>
+            {tier.premium_reward_type && <>
+              {" · "}Premium: <span className="text-amber-600">{rewardSummary(tier.premium_reward_type, tier.premium_reward_config)}</span>
+            </>}
           </p>
         </div>
         <div className="flex items-center gap-1.5">
@@ -64,55 +198,46 @@ function TierRow({ tier, idx, onChange, onRemove }: {
 
       {open && (
         <div className="border-t border-zinc-800 px-3 py-3 space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1 col-span-2">
-              <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Quest Label</label>
-              <input value={tier.quest_label} onChange={(e) => set("quest_label", e.target.value)}
-                placeholder="e.g. Gather 500 iron"
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Quest Type</label>
-              <select value={tier.quest_type} onChange={(e) => set("quest_type", e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
-                {QUEST_TYPES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
-              </select>
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Quest Config (JSON)</label>
-              <input value={JSON.stringify(tier.quest_config)}
-                onChange={(e) => { try { set("quest_config", JSON.parse(e.target.value)); } catch { /* ignore */ } }}
-                placeholder='{"resource":"iron","amount":500}'
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs font-mono text-zinc-100 focus:border-indigo-600 focus:outline-none" />
-            </div>
+          {/* Quest */}
+          <div className="space-y-2">
+            <label className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Quest</label>
+            <input value={tier.quest_label} onChange={(e) => set("quest_label", e.target.value)}
+              placeholder="e.g. Gather 500 iron"
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+            <select value={tier.quest_type}
+              onChange={(e) => { set("quest_type", e.target.value); set("quest_config", {}); }}
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+              {QUEST_TYPES.map((q) => <option key={q.id} value={q.id}>{q.label}</option>)}
+            </select>
+            <QuestConfigFields questType={tier.quest_type} config={tier.quest_config}
+              onChange={(c) => set("quest_config", c)} />
           </div>
 
-          <div className="grid grid-cols-2 gap-2 border-t border-zinc-800 pt-2">
-            <div className="space-y-1">
-              <label className="text-[9px] font-semibold uppercase tracking-widest text-zinc-600">Free Reward</label>
-              <select value={tier.free_reward_type} onChange={(e) => set("free_reward_type", e.target.value)}
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
-                {REWARD_TYPES.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-              <input value={JSON.stringify(tier.free_reward_config)}
-                onChange={(e) => { try { set("free_reward_config", JSON.parse(e.target.value)); } catch { /* ignore */ } }}
-                placeholder='{"amount":100}'
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs font-mono text-zinc-100 focus:border-indigo-600 focus:outline-none" />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[9px] font-semibold uppercase tracking-widest text-amber-700">Premium Reward</label>
-              <select value={tier.premium_reward_type ?? ""} onChange={(e) => set("premium_reward_type", e.target.value || null)}
-                className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
-                <option value="">None</option>
-                {REWARD_TYPES.map((r) => <option key={r} value={r}>{r}</option>)}
-              </select>
-              {tier.premium_reward_type && (
-                <input value={JSON.stringify(tier.premium_reward_config)}
-                  onChange={(e) => { try { set("premium_reward_config", JSON.parse(e.target.value)); } catch { /* ignore */ } }}
-                  placeholder='{"skin_id":"ship_sovereign"}'
-                  className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs font-mono text-zinc-100 focus:border-indigo-600 focus:outline-none" />
-              )}
-            </div>
+          {/* Free reward */}
+          <div className="space-y-2 border-t border-zinc-800 pt-2">
+            <label className="text-[9px] font-bold uppercase tracking-widest text-zinc-500">Free Reward</label>
+            <select value={tier.free_reward_type}
+              onChange={(e) => { set("free_reward_type", e.target.value); set("free_reward_config", {}); }}
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+              {REWARD_TYPES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            <RewardConfigFields rewardType={tier.free_reward_type} config={tier.free_reward_config}
+              onChange={(c) => set("free_reward_config", c)} allSkinDefs={allSkinDefs} />
+          </div>
+
+          {/* Premium reward */}
+          <div className="space-y-2 border-t border-zinc-800 pt-2">
+            <label className="text-[9px] font-bold uppercase tracking-widest text-amber-700">Premium Reward</label>
+            <select value={tier.premium_reward_type ?? ""}
+              onChange={(e) => { set("premium_reward_type", e.target.value || null); set("premium_reward_config", {}); }}
+              className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-100 focus:border-indigo-600 focus:outline-none">
+              <option value="">None</option>
+              {REWARD_TYPES.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+            {tier.premium_reward_type && (
+              <RewardConfigFields rewardType={tier.premium_reward_type} config={tier.premium_reward_config}
+                onChange={(c) => set("premium_reward_config", c)} allSkinDefs={allSkinDefs} />
+            )}
           </div>
         </div>
       )}
@@ -122,24 +247,24 @@ function TierRow({ tier, idx, onChange, onRemove }: {
 
 // ── Pass Editor ───────────────────────────────────────────────────────────────
 
-function PassEditor({ existing, onSave, onClose }: {
+function PassEditor({ existing, onSave, onClose, allSkinDefs }: {
   existing: BattlePassRow | null;
   onSave: (data: Record<string, unknown>, tiers: BattlePassTier[]) => Promise<void>;
   onClose: () => void;
+  allSkinDefs: SkinDefinition[];
 }) {
-  const [name,       setName]       = useState(existing?.name        ?? "");
-  const [desc,       setDesc]       = useState(existing?.description  ?? "");
-  const [season,     setSeason]     = useState(existing?.season_number ?? 1);
-  const [maxTier,    setMaxTier]    = useState(existing?.max_tier      ?? 30);
-  const [xpPerTier,  setXpPerTier]  = useState(existing?.xp_per_tier   ?? 1000);
-  const [startsAt,   setStartsAt]   = useState(toLocal(existing?.starts_at));
-  const [endsAt,     setEndsAt]     = useState(toLocal(existing?.ends_at));
-  const [isActive,   setIsActive]   = useState(existing?.is_active     ?? false);
-  const [premCr,     setPremCr]     = useState<string>(existing?.premium_cost_credits != null ? String(existing.premium_cost_credits) : "");
-  const [premUsd,    setPremUsd]    = useState<string>(existing?.premium_cost_premium  != null ? String(existing.premium_cost_premium)  : "");
-  const [tiers,      setTiers]      = useState<BattlePassTier[]>(existing?.tiers ?? []);
-  const [saving,     setSaving]     = useState(false);
-  const [error,      setError]      = useState<string | null>(null);
+  const [name,      setName]      = useState(existing?.name        ?? "");
+  const [desc,      setDesc]      = useState(existing?.description  ?? "");
+  const [season,    setSeason]    = useState(existing?.season_number ?? 1);
+  const [maxTier,   setMaxTier]   = useState(existing?.max_tier      ?? 30);
+  const [xpPerTier, setXpPerTier] = useState(existing?.xp_per_tier   ?? 1000);
+  const [startsAt,  setStartsAt]  = useState(toLocal(existing?.starts_at));
+  const [endsAt,    setEndsAt]    = useState(toLocal(existing?.ends_at));
+  const [isActive,  setIsActive]  = useState(existing?.is_active     ?? false);
+  const [premCr,    setPremCr]    = useState<string>(existing?.premium_cost_credits != null ? String(existing.premium_cost_credits) : "");
+  const [tiers,     setTiers]     = useState<BattlePassTier[]>(existing?.tiers ?? []);
+  const [saving,    setSaving]    = useState(false);
+  const [error,     setError]     = useState<string | null>(null);
 
   function addTier() {
     const nextNum = (tiers[tiers.length - 1]?.tier ?? 0) + 1;
@@ -172,7 +297,7 @@ function PassEditor({ existing, onSave, onClose }: {
         max_tier: maxTier, xp_per_tier: xpPerTier,
         starts_at: fromLocal(startsAt), ends_at: fromLocal(endsAt), is_active: isActive,
         premium_cost_credits: premCr !== "" ? parseInt(premCr) : null,
-        premium_cost_premium: premUsd !== "" ? parseInt(premUsd) : null,
+        premium_cost_premium: null,
       }, tiers);
       onClose();
     } catch (e) { setError(e instanceof Error ? e.message : "Save failed"); }
@@ -257,7 +382,7 @@ function PassEditor({ existing, onSave, onClose }: {
             </div>
             <div className="space-y-1.5 max-h-80 overflow-y-auto">
               {tiers.map((t, i) => (
-                <TierRow key={i} tier={t} idx={i}
+                <TierRow key={i} tier={t} idx={i} allSkinDefs={allSkinDefs}
                   onChange={(updated) => setTiers((prev) => prev.map((x, j) => j === i ? updated : x))}
                   onRemove={() => setTiers((prev) => prev.filter((_, j) => j !== i))} />
               ))}
@@ -283,7 +408,7 @@ function PassEditor({ existing, onSave, onClose }: {
   );
 }
 
-export function BattlePassTab({ initial }: { initial: BattlePassRow[] }) {
+export function BattlePassTab({ initial, allSkinDefs }: { initial: BattlePassRow[]; allSkinDefs: SkinDefinition[] }) {
   const [passes,  setPasses]  = useState<BattlePassRow[]>(initial);
   const [editing, setEditing] = useState<BattlePassRow | null | "new">(null);
   const [msg,     setMsg]     = useState<{ text: string; ok: boolean } | null>(null);
@@ -362,7 +487,6 @@ export function BattlePassTab({ initial }: { initial: BattlePassRow[] }) {
                   </div>
                 </div>
 
-                {/* Quick tier preview */}
                 {bp.tiers.length > 0 && (
                   <div className="flex gap-1 flex-wrap">
                     {bp.tiers.slice(0, 10).map((t) => (
@@ -400,6 +524,7 @@ export function BattlePassTab({ initial }: { initial: BattlePassRow[] }) {
           existing={editing === "new" ? null : editing}
           onSave={handleSave}
           onClose={() => setEditing(null)}
+          allSkinDefs={allSkinDefs}
         />
       )}
     </div>
