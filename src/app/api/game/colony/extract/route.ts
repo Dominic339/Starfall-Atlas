@@ -34,7 +34,9 @@ import {
   researchLevel,
   extractionBonusMultiplier,
 } from "@/lib/game/colonyStructures";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { getActiveLiveEvents, dropMultiplier } from "@/lib/game/liveEvents";
+import { awardBattlePassXp } from "@/lib/game/battlePass";
 import type {
   Colony,
   Structure,
@@ -59,6 +61,12 @@ export async function POST(request: NextRequest) {
   const { colonyId } = input.data;
 
   const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const adminAny = admin as any;
+  const [balance, liveEvents] = await Promise.all([
+    getBalanceWithOverrides(adminAny),
+    getActiveLiveEvents(adminAny),
+  ]);
 
   // ── Fetch colony ─────────────────────────────────────────────────────────
   const { data: colony } = singleResult<Colony>(
@@ -141,12 +149,14 @@ export async function POST(request: NextRequest) {
     lastExtractAt,
     now,
     extBonusMult,
+    balance,
   );
 
-  // Apply health multiplier (struggling = 50%, neglected = 25% of base yield).
+  // Apply health multiplier and double_drop event bonus.
   const mult = extractionMultiplier(colony.upkeep_missed_periods);
+  const eventMult = dropMultiplier(liveEvents);
   const extracted = rawExtracted
-    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * mult) }))
+    .map((item) => ({ ...item, quantity: Math.floor(item.quantity * mult * eventMult) }))
     .filter((item) => item.quantity > 0);
 
   if (extracted.length === 0) {
@@ -200,7 +210,12 @@ export async function POST(request: NextRequest) {
   const systemId   = lastColon > 0 ? colony.body_id.slice(0, lastColon) : null;
 
   if (systemId) {
-    void payRoyalty(admin, systemId, player.id, extracted);
+    void payRoyalty(admin, systemId, player.id, extracted, balance);
+  }
+
+  // Award battle pass XP for gathered resources (fire-and-forget)
+  for (const item of extracted) {
+    void awardBattlePassXp(admin, player.id, { type: "gather_resource", resource: item.resource_type, amount: item.quantity });
   }
 
   return Response.json({
@@ -221,6 +236,7 @@ async function payRoyalty(
   systemId: string,
   colonyOwnerId: string,
   extracted: ExtractionAmount[],
+  balance: import("@/lib/config/balanceOverrides").BalanceConfig,
 ): Promise<void> {
   try {
     const { data: stewardRow } = await admin
@@ -248,7 +264,7 @@ async function payRoyalty(
     if (governanceHolderId === colonyOwnerId) return;
 
     // Compute credit value using EUX floor prices as a benchmark
-    const floorPrices = BALANCE.emergencyExchange.floorPricePerUnit as Record<string, number>;
+    const floorPrices = balance.emergencyExchange.floorPricePerUnit as Record<string, number>;
     const DEFAULT_CREDIT_VALUE = 2; // credits/unit for unlisted resources
     let totalCreditValue = 0;
     for (const item of extracted) {

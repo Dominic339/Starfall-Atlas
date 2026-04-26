@@ -43,6 +43,7 @@ import type {
 import { CollectButton, ExtractButton, RevokePermitButton, EuxBuyButton, ReactivateButton } from "../../_components/ColonyActions";
 import { BuildStructureButton } from "../../_components/ColonyStructures";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { BodyType } from "@/lib/types/enums";
 
 export const dynamic = "force-dynamic";
@@ -69,6 +70,7 @@ export default async function ColonyPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const { data: player } = maybeSingleResult<Player>(
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
@@ -77,7 +79,7 @@ export default async function ColonyPage({
 
   // Materialise colony inventory and resolve upkeep so this page always shows
   // current state even when navigated directly (without visiting map/command).
-  await runEngineTick(admin, player.id, new Date());
+  await runEngineTick(admin, player.id, new Date(), balance);
 
   const { data: colony } = maybeSingleResult<Colony>(
     await admin

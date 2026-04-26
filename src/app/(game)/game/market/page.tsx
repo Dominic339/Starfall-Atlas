@@ -16,6 +16,7 @@ import type { Player } from "@/lib/types/game";
 import { MarketClient } from "./_components/MarketClient";
 import type { MarketListing, StationInventoryEntry } from "./_components/MarketClient";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
@@ -27,6 +28,7 @@ export default async function MarketPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const { data: player } = maybeSingleResult<Player>(
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
@@ -34,7 +36,7 @@ export default async function MarketPage() {
   if (!player) redirect("/login");
 
   const requestTime = new Date();
-  await runEngineTick(admin, player.id, requestTime);
+  await runEngineTick(admin, player.id, requestTime, balance);
   await runTravelResolution(admin, player.id, requestTime);
 
   // ── Fetch player station ──────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import { BALANCE } from "@/lib/config/balance";
 import { taxRateForTier } from "@/lib/game/taxes";
 import { dispatchModeLabel, autoStateLabel } from "@/lib/game/shipAutomation";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import type { Player, Ship, PlayerStation, ResourceInventoryRow, Colony } from "@/lib/types/game";
 
@@ -26,10 +27,11 @@ export async function GET() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const now = new Date();
   await Promise.all([
-    runEngineTick(admin, player.id, now),
+    runEngineTick(admin, player.id, now, balance),
     runTravelResolution(admin, player.id, now),
   ]);
 

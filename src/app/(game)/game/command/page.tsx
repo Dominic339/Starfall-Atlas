@@ -23,6 +23,7 @@ import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { systemDisplayName } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import type { Player, Ship, Colony, PlayerStation, TravelJob } from "@/lib/types/game";
 import { DevControls } from "./_components/DevControls";
@@ -39,6 +40,7 @@ export default async function CommandPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const { data: player } = maybeSingleResult<Player>(
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
@@ -47,7 +49,7 @@ export default async function CommandPage() {
 
   // Engine tick + travel resolution (idempotent — also runs on /game/map)
   const requestTime = new Date();
-  await runEngineTick(admin, player.id, requestTime);
+  await runEngineTick(admin, player.id, requestTime, balance);
   await runTravelResolution(admin, player.id, requestTime);
 
   // Parallel fetches for summary data

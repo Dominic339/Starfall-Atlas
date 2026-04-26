@@ -30,6 +30,7 @@ import { ShipAssignColonyControl } from "../_components/ShipAssignColonyControl"
 import { autoStateLabel, dispatchModeLabel, formatEtaMs } from "@/lib/game/shipAutomation";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { taxRateForTier } from "@/lib/game/taxes";
 
 export const dynamic = "force-dynamic";
@@ -66,6 +67,7 @@ export default async function StationPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   const { data: player } = maybeSingleResult<Player>(
     await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
@@ -75,7 +77,7 @@ export default async function StationPage() {
   // Resolve colony growth, upkeep, biomass→food conversion, and passive
   // extraction so colony inventories are current before auto-haul reads them.
   const requestTime = new Date();
-  await runEngineTick(admin, player.id, requestTime);
+  await runEngineTick(admin, player.id, requestTime, balance);
 
   // Advance auto-ship state machines so ships that arrived since the last
   // map/command visit are properly landed and ready to act.

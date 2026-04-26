@@ -19,6 +19,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { getSkinById } from "@/skins";
 import { ColonyMapPanel } from "./ColonyMapPanel";
 import { MarketMapPanel } from "./MarketMapPanel";
 import { EmpireMapPanel } from "./EmpireMapPanel";
@@ -248,6 +249,12 @@ interface GalaxyMapClientProps {
   playerHandle: string;
   /** Player credits balance for the top-left HUD card. */
   playerCredits: number;
+  /** Initially-equipped skin IDs (refreshed via shop panel). */
+  initialEquippedShipSkinId:    string | null;
+  initialEquippedStationSkinId: string | null;
+  initialEquippedFleetSkinId:   string | null;
+  /** Whether this player has admin/dev tool access. */
+  playerIsDev: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -412,13 +419,21 @@ function routeTotalLy(hops: string[], sysById: Map<string, GalaxySystem>): numbe
  * SVG polygon points for a top-down ship chevron centered at (cx,cy).
  * s = half-size in SVG units; angle = rotation in radians (0 = pointing toward -Y = "up").
  */
-function shipPolygon(cx: number, cy: number, s: number, angle: number): string {
-  const pts: [number, number][] = [
-    [0, -s * 1.4],        // nose
-    [s * 0.85, s * 0.9],  // right wing tip
-    [0, s * 0.35],        // rear centre notch
-    [-s * 0.85, s * 0.9], // left wing tip
-  ];
+function shipPolygon(cx: number, cy: number, s: number, angle: number, shape?: string): string {
+  let pts: [number, number][];
+  switch (shape) {
+    case "diamond":
+      pts = [[0, -s * 1.4], [s * 0.7, 0], [0, s * 1.2], [-s * 0.7, 0]];
+      break;
+    case "arrow":
+      pts = [[0, -s * 1.4], [s * 0.85, s * 0.9], [s * 0.3, s * 0.4], [-s * 0.3, s * 0.4], [-s * 0.85, s * 0.9]];
+      break;
+    case "delta":
+      pts = [[0, -s * 1.5], [s * 1.0, s * 1.0], [-s * 1.0, s * 1.0]];
+      break;
+    default: // chevron
+      pts = [[0, -s * 1.4], [s * 0.85, s * 0.9], [0, s * 0.35], [-s * 0.85, s * 0.9]];
+  }
   const cos = Math.cos(angle);
   const sin = Math.sin(angle);
   return pts.map(([px, py]) => {
@@ -455,9 +470,18 @@ export function GalaxyMapClient({
   bodyStewrds,
   playerHandle,
   playerCredits,
+  initialEquippedShipSkinId,
+  initialEquippedStationSkinId,
+  initialEquippedFleetSkinId,
+  playerIsDev,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // ── Equipped skins (updated when player equips via shop panel) ───────────
+  const [equippedShipSkinId,    setEquippedShipSkinId]    = useState(initialEquippedShipSkinId);
+  const [equippedStationSkinId, setEquippedStationSkinId] = useState(initialEquippedStationSkinId);
+  const [equippedFleetSkinId,   setEquippedFleetSkinId]   = useState(initialEquippedFleetSkinId);
 
   // ── Pan/zoom state ────────────────────────────────────────────────────────
   const [transform, setTransform] = useState({ tx: 0, ty: 0, scale: 1 });
@@ -576,6 +600,9 @@ export function GalaxyMapClient({
   // ── Shop panel ─────────────────────────────────────────────────────────────
   const [shopPanelOpen, setShopPanelOpen] = useState(false);
 
+  // ── Map legend ─────────────────────────────────────────────────────────────
+  const [legendOpen, setLegendOpen] = useState(false);
+
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
   const [beaconError, setBeaconError] = useState<string | null>(null);
@@ -670,6 +697,10 @@ export function GalaxyMapClient({
   latestTransform.current = transform;
   const systemsRef = useRef(systems);
   systemsRef.current = systems;
+
+  // Latest-value refs for derived travel state (used inside keyboard handler)
+  const canTravelRef = useRef(false);
+  const handleTravelRef = useRef<(() => void) | null>(null);
 
   // Ships grouped by system for drag marker positioning
   const shipsBySystem = new Map<string, GalaxyShip[]>();
@@ -1050,6 +1081,12 @@ export function GalaxyMapClient({
         return;
       }
 
+      if (e.key === "Enter" && !inInput) {
+        const doTravel = handleTravelRef.current;
+        if (doTravel) { e.preventDefault(); doTravel(); }
+        return;
+      }
+
       if (e.key === "h" && !inInput) {
         e.preventDefault();
         const sys = stationSystemId ? systems.find((s) => s.id === stationSystemId) : null;
@@ -1363,6 +1400,10 @@ export function GalaxyMapClient({
     }
   }
 
+  // Update latest-value refs so keydown handler can read current travel state
+  canTravelRef.current = canTravel;
+  handleTravelRef.current = canTravel && !travelLoading ? () => void handleTravel() : null;
+
   // ── Form fleet from docked ships at a system ─────────────────────────────
   async function handleFormFleet(systemId: string) {
     const shipIds = ships.filter((s) => s.systemId === systemId).map((s) => s.id);
@@ -1381,15 +1422,16 @@ export function GalaxyMapClient({
   }
 
   // ── Asteroid dispatch / recall ────────────────────────────────────────────
-  async function handleDispatch() {
-    if (!selectedAsteroid || !dispatchFleetId) return;
+  async function handleDispatch(overrideFleetId?: string) {
+    const fleetId = overrideFleetId ?? dispatchFleetId;
+    if (!selectedAsteroid || !fleetId) return;
     setDispatchLoading(true);
     setDispatchError(null);
     try {
       const res = await fetch("/api/game/asteroid/dispatch", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ asteroidId: selectedAsteroid.id, fleetId: dispatchFleetId }),
+        body: JSON.stringify({ asteroidId: selectedAsteroid.id, fleetId }),
       });
       const json = await res.json();
       if (json.ok) {
@@ -1578,6 +1620,23 @@ export function GalaxyMapClient({
           {/* ── Main transformable group (pan/zoom) ──────────────────────── */}
           <g transform={groupTransform}>
 
+            {/* ── Faint coordinate grid ────────────────────────────────────── */}
+            {scale >= 0.6 && (() => {
+              const gridStep = pixelsPerLy * 50; // 50 ly grid squares
+              const x0 = Math.floor(-transform.tx / transform.scale / gridStep) * gridStep - gridStep;
+              const y0 = Math.floor(-transform.ty / transform.scale / gridStep) * gridStep - gridStep;
+              const x1 = x0 + (viewboxW / transform.scale) + gridStep * 3;
+              const y1 = y0 + (viewboxH / transform.scale) + gridStep * 3;
+              const lines = [];
+              for (let gx = x0; gx <= x1; gx += gridStep) {
+                lines.push(<line key={`gx${gx}`} x1={gx} y1={y0} x2={gx} y2={y1} stroke="#ffffff" strokeWidth={0.4/scale} opacity={0.04} pointerEvents="none"/>);
+              }
+              for (let gy = y0; gy <= y1; gy += gridStep) {
+                lines.push(<line key={`gy${gy}`} x1={x0} y1={gy} x2={x1} y2={gy} stroke="#ffffff" strokeWidth={0.4/scale} opacity={0.04} pointerEvents="none"/>);
+              }
+              return <g pointerEvents="none">{lines}</g>;
+            })()}
+
             {/* ── Alliance territory polygons (rendered first — under everything) ── */}
             {territories.map((t) => {
               if (t.svgPolygon.length < 3) return null;
@@ -1659,16 +1718,29 @@ export function GalaxyMapClient({
 
             {/* ── Travel range circle ─────────────────────────────────────── */}
             {currentSystem && (
-              <circle
-                cx={currentSystem.svgX}
-                cy={currentSystem.svgY}
-                r={rangeRadius}
-                fill="none"
-                stroke="#3f3f5a"
-                strokeWidth={1 / scale}
-                strokeDasharray={`${6 / scale} ${4 / scale}`}
-                pointerEvents="none"
-              />
+              <g pointerEvents="none">
+                {/* Faint filled disc — marks reachable zone */}
+                <circle
+                  cx={currentSystem.svgX}
+                  cy={currentSystem.svgY}
+                  r={rangeRadius}
+                  fill="#6366f1"
+                  fillOpacity={selectedId ? 0.04 : 0.02}
+                  style={{ transition: "fill-opacity 0.3s" }}
+                />
+                {/* Dashed border */}
+                <circle
+                  cx={currentSystem.svgX}
+                  cy={currentSystem.svgY}
+                  r={rangeRadius}
+                  fill="none"
+                  stroke={selectedId ? "#6366f1" : "#3f3f5a"}
+                  strokeWidth={selectedId ? 1.2 / scale : 0.8 / scale}
+                  strokeDasharray={`${6 / scale} ${4 / scale}`}
+                  opacity={selectedId ? 0.55 : 0.35}
+                  style={{ transition: "stroke 0.3s, opacity 0.3s" }}
+                />
+              </g>
             )}
 
             {/* ── Travel lines (ship/fleet in-transit paths) ──────────────── */}
@@ -1869,10 +1941,17 @@ export function GalaxyMapClient({
               const isDisc      = sys.isDiscovered;
               const isDim       = !isDisc && !sys.hasDockedShip;
 
+              // Dim out-of-range systems when something is selected and a ship is docked
+              const rangeOpacity = (selectedId && currentSystem && sys.id !== selectedId && sys.id !== currentSystem.id && !isHovered)
+                ? (dist3D(currentSystem, sys) <= baseRangeLy + 0.01 ? 1 : 0.45)
+                : 1;
+
               return (
                 <g
                   key={sys.id}
                   className="cursor-pointer"
+                  opacity={rangeOpacity}
+                  style={{ transition: "opacity 0.2s" }}
                   onClick={(e) => handleStarClick(e, sys.id)}
                   onDoubleClick={(e) => handleStarDoubleClick(e, sys.id)}
                   onMouseEnter={() => setHoveredId(sys.id)}
@@ -1992,22 +2071,27 @@ export function GalaxyMapClient({
                   {/* Selection ring */}
                   {isSelected && (
                     <>
+                      {/* Inner solid pulse ring */}
                       <circle
                         cx={sys.svgX} cy={sys.svgY}
                         r={r + 9}
                         fill="none"
                         stroke="#818cf8"
                         strokeWidth={1.5 / scale}
-                        opacity={0.85}
+                        className="galaxy-select-pulse"
+                        pointerEvents="none"
                       />
+                      {/* Outer slowly-spinning dashed ring */}
                       <circle
                         cx={sys.svgX} cy={sys.svgY}
-                        r={r + 13}
+                        r={r + 15}
                         fill="none"
                         stroke="#818cf8"
-                        strokeWidth={0.5 / scale}
-                        opacity={0.25}
-                        strokeDasharray={`${3 / scale} ${2 / scale}`}
+                        strokeWidth={1 / scale}
+                        strokeDasharray={`${5 / scale} ${3 / scale}`}
+                        opacity={0.50}
+                        className="galaxy-select-spin"
+                        pointerEvents="none"
                       />
                     </>
                   )}
@@ -2407,39 +2491,40 @@ export function GalaxyMapClient({
                     setShipDispatchError(null);
                   }}
                 >
-                  {/* Hit area (invisible, large for easy clicking) */}
-                  <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
-                  {/* Background disc */}
-                  <circle
-                    cx={mx} cy={my}
-                    r={10 / scale}
-                    fill={isDraggingThis ? "#312e81" : "#1e1b4b"}
-                    stroke="#6366f1"
-                    strokeWidth={1.5 / scale}
-                    opacity={isDraggingThis ? 0.35 : 0.90}
-                  />
-                  {/* Ship silhouette — top-down chevron pointing up */}
-                  <polygon
-                    points={shipPolygon(mx, my, 5.5 / scale, 0)}
-                    fill={isDraggingThis ? "#c7d2fe" : "#a5b4fc"}
-                    stroke="#06060a"
-                    strokeWidth={0.8 / scale}
-                    filter={isDraggingThis ? undefined : "url(#glow)"}
-                    opacity={isDraggingThis ? 0.35 : 1}
-                  />
-                  {/* Ship name label */}
-                  {scale >= 1.2 && (
-                    <text
-                      x={mx} y={my - 13 / scale}
-                      textAnchor="middle"
-                      fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
-                      fill="#a5b4fc"
-                      opacity={0.9}
-                      className="select-none pointer-events-none"
-                    >
-                      {ship.name}
-                    </text>
-                  )}
+                  {(() => {
+                    const shipSkin = getSkinById(equippedShipSkinId ?? "");
+                    const skinColor   = shipSkin?.visual.color   ?? "#a5b4fc";
+                    const skinAccent  = shipSkin?.visual.accentColor ?? "#6366f1";
+                    const skinShape   = shipSkin?.visual.shape;
+                    const discFill    = isDraggingThis ? "#312e81" : "#1e1b4b";
+                    const discAccent  = isDraggingThis ? "#312e81" : skinAccent;
+                    const polyFill    = isDraggingThis ? skinColor.replace("ff", "88") : skinColor;
+                    return (
+                      <>
+                        {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
+                        <circle cx={mx} cy={my} r={12 / scale} fill="none" />
+                        {/* Background disc */}
+                        <circle cx={mx} cy={my} r={10 / scale}
+                          fill={discFill} stroke={discAccent} strokeWidth={1.5 / scale}
+                          opacity={isDraggingThis ? 0.35 : 0.90} />
+                        {/* Ship silhouette */}
+                        <polygon
+                          points={shipPolygon(mx, my, 5.5 / scale, 0, skinShape)}
+                          fill={polyFill} stroke="#06060a" strokeWidth={0.8 / scale}
+                          filter={isDraggingThis ? undefined : "url(#glow)"}
+                          opacity={isDraggingThis ? 0.35 : 1} />
+                        {/* Ship name label */}
+                        {scale >= 1.2 && (
+                          <text x={mx} y={my - 13 / scale} textAnchor="middle"
+                            fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
+                            fill={skinColor} opacity={0.9}
+                            className="select-none pointer-events-none">
+                            {ship.name}
+                          </text>
+                        )}
+                      </>
+                    );
+                  })()}
                   {/* Loading spinner */}
                   {shipDispatchLoading === ship.id && (
                     <circle cx={mx} cy={my} r={12 / scale} fill="none"
@@ -2478,19 +2563,20 @@ export function GalaxyMapClient({
                   {/* Station cross icon — cross arms + end caps + centre hub */}
                   {(() => {
                     const s = 5.5 / scale;
+                    const stSkin   = getSkinById(equippedStationSkinId ?? "");
+                    const stColor  = stSkin?.visual.color      ?? "#fbbf24";
+                    const stAccent = stSkin?.visual.accentColor ?? "#f59e0b";
                     return (
                       <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
-                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill="#fbbf24" />
-                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill="#fbbf24" />
+                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill={stColor} />
+                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill={stColor} />
                         {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                           <circle key={i}
                             cx={mx + Math.cos(a) * s * 1.6}
                             cy={my + Math.sin(a) * s * 1.6}
-                            r={s * 0.45}
-                            fill="#f59e0b"
-                          />
+                            r={s * 0.45} fill={stAccent} />
                         ))}
-                        <circle cx={mx} cy={my} r={s * 0.6} fill="#f59e0b" />
+                        <circle cx={mx} cy={my} r={s * 0.6} fill={stAccent} />
                       </g>
                     );
                   })()}
@@ -2582,33 +2668,37 @@ export function GalaxyMapClient({
                       style={{ cursor: fleetDispatchLoading === fleet.id ? "wait" : isDraggingThis ? "grabbing" : "grab" }}
                       onMouseDown={(e) => handleFleetMarkerMouseDown(e, fleet)}
                     >
-                      {/* Hit area */}
-                      <circle cx={mx} cy={my} r={12 / scale} fill="transparent" />
-                      {/* Background fill */}
-                      <circle
-                        cx={mx} cy={my}
-                        r={9 / scale}
-                        fill={isDraggingThis ? "#2e1065" : "#1a0a3d"}
-                        stroke="#a78bfa"
-                        strokeWidth={1.5 / scale}
-                        opacity={isDraggingThis ? 0.5 : 0.95}
-                      />
-                      {/* Fleet triangle symbol */}
-                      <polygon
-                        points={`${mx},${my - 5 / scale} ${mx + 4.5 / scale},${my + 3 / scale} ${mx - 4.5 / scale},${my + 3 / scale}`}
-                        fill={isDraggingThis ? "#ddd6fe" : "#c4b5fd"}
-                        stroke="#06060a"
-                        strokeWidth={0.8 / scale}
-                        filter={isDraggingThis ? undefined : "url(#glow)"}
-                        opacity={isDraggingThis ? 0.5 : 1}
-                      />
+                      {/* Hit area — fill="none" so transparent region doesn't block star clicks */}
+                      <circle cx={mx} cy={my} r={12 / scale} fill="none" />
+                      {(() => {
+                        const flSkin   = getSkinById(equippedFleetSkinId ?? "");
+                        const flColor  = flSkin?.visual.color      ?? "#c4b5fd";
+                        const flAccent = flSkin?.visual.accentColor ?? "#7c3aed";
+                        return (
+                          <>
+                            {/* Background fill */}
+                            <circle cx={mx} cy={my} r={9 / scale}
+                              fill={isDraggingThis ? "#2e1065" : "#1a0a3d"}
+                              stroke={isDraggingThis ? "#2e1065" : flAccent}
+                              strokeWidth={1.5 / scale}
+                              opacity={isDraggingThis ? 0.5 : 0.95} />
+                            {/* Fleet triangle symbol */}
+                            <polygon
+                              points={`${mx},${my - 5 / scale} ${mx + 4.5 / scale},${my + 3 / scale} ${mx - 4.5 / scale},${my + 3 / scale}`}
+                              fill={isDraggingThis ? flColor : flColor}
+                              stroke="#06060a" strokeWidth={0.8 / scale}
+                              filter={isDraggingThis ? undefined : "url(#glow)"}
+                              opacity={isDraggingThis ? 0.5 : 1} />
+                          </>
+                        );
+                      })()}
                       {/* Fleet name label */}
                       {scale >= 1.2 && (
                         <text
                           x={mx} y={my + 15 / scale}
                           textAnchor="middle"
                           fontSize={8 / scale < 7 ? 7 : 8 / scale > 10 ? 10 : 8 / scale}
-                          fill="#c4b5fd"
+                          fill={getSkinById(equippedFleetSkinId ?? "")?.visual.color ?? "#c4b5fd"}
                           opacity={0.9}
                           className="select-none pointer-events-none"
                         >
@@ -2850,6 +2940,7 @@ export function GalaxyMapClient({
           {([
             {
               label: "Station", bg: "from-teal-900/70 to-teal-950/80", border: "border-teal-700/40", glow: "shadow-teal-900/40", iconBg: "bg-teal-950/60", onClick: () => setStationPanelOpen(true),
+              badge: fleets.filter((f) => f.isHarvesting).length || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
                 <rect x="10.5" y="3" width="3" height="18" rx="1.5" fill="#64748b"/>
                 <rect x="3" y="10.5" width="18" height="3" rx="1.5" fill="#64748b"/>
@@ -2862,6 +2953,7 @@ export function GalaxyMapClient({
             },
             {
               label: "Ships", bg: "from-rose-900/70 to-rose-950/80", border: "border-rose-800/40", glow: "shadow-rose-900/40", iconBg: "bg-rose-950/60", onClick: () => setCommandPanelOpen(true),
+              badge: ships.filter((s) => s.systemId === null).length || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
                 <path d="M12 2L15.5 10L15.5 17L14 20L12 18L10 20L8.5 17L8.5 10Z" fill="#9f1239" opacity="0.5"/>
                 <path d="M12 2L15 9L15 16L14 19L12 17L10 19L9 16L9 9Z" fill="#f43f5e"/>
@@ -2907,14 +2999,19 @@ export function GalaxyMapClient({
                 <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
               </svg>,
             },
-          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode }[]).map((btn) => (
+          ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode; badge?: number }[]).map((btn) => (
             <button
               key={btn.label}
               onClick={btn.onClick}
-              className={`flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
+              className={`relative flex flex-col items-center gap-1.5 w-16 py-2.5 rounded-xl bg-gradient-to-b ${btn.bg} border ${btn.border} shadow-lg ${btn.glow} hover:brightness-110 active:scale-95 transition-all backdrop-blur-sm`}
             >
-              <div className={`w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
+              <div className={`relative w-9 h-9 rounded-lg ${btn.iconBg} flex items-center justify-center`}>
                 {btn.icon}
+                {btn.badge !== undefined && btn.badge > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[14px] h-3.5 rounded-full bg-rose-500 border border-zinc-950 flex items-center justify-center px-0.5 text-[9px] font-bold text-white leading-none tabular-nums">
+                    {btn.badge > 99 ? "99+" : btn.badge}
+                  </span>
+                )}
               </div>
               <span className="text-[9px] font-bold uppercase tracking-wider text-zinc-400">{btn.label}</span>
             </button>
@@ -2950,6 +3047,12 @@ export function GalaxyMapClient({
           </button>
           <button onClick={resetView} title="Zoom to fit (⊙)"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-xs text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">⊙</button>
+          {playerIsDev && (
+            <Link href="/game/admin" title="Admin Dev Tool"
+              className="flex h-7 w-7 items-center justify-center rounded border border-red-900/60 bg-red-950/30 text-[9px] text-red-500 hover:bg-red-900/40 hover:text-red-300 transition-colors font-bold">
+              ⚙
+            </Link>
+          )}
           <button onClick={() => { setSearchOpen(true); setSearchQuery(""); setTimeout(() => searchRef.current?.focus(), 0); }} title="Find system (/)"
             className="flex h-7 w-7 items-center justify-center rounded border border-zinc-700 bg-zinc-900/80 text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300 transition-colors">
             <svg viewBox="0 0 16 16" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -2959,52 +3062,29 @@ export function GalaxyMapClient({
           </button>
         </div>
 
-        {/* ── Map legend (bottom-right) ─────────────────────────────────── */}
-        <div className="absolute bottom-4 right-4 flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm">
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400 opacity-80" />
-            Current location
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-emerald-400" />
-            Colony
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-violet-400" />
-            Fleet
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-full bg-amber-400" />
-            Steward
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />
-            Station (drag to move)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />
-            Asteroid
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />
-            Beacon
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-0 w-0 border-4 border-transparent" style={{ borderBottomColor: "#a78bfa", borderBottomWidth: 6 }} />
-            Fleet (drag)
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />
-            Territory
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />
-            Disputed
-          </span>
-          <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700">
-            <span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />
-            Travel range
-          </span>
+        {/* ── Map legend (bottom-right, collapsible) ───────────────────── */}
+        <div className="absolute bottom-4 right-4 flex flex-col items-end gap-1.5">
+          <button
+            onClick={() => setLegendOpen((v) => !v)}
+            className="rounded border border-zinc-800 bg-zinc-900/80 px-2 py-1 text-[10px] text-zinc-600 hover:text-zinc-400 hover:border-zinc-700 transition-colors backdrop-blur-sm"
+          >
+            {legendOpen ? "Legend ▾" : "Legend ▸"}
+          </button>
+          {legendOpen && (
+            <div className="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm">
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400 opacity-80" />Current location</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" />Colony</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-400" />Fleet</span>
+              <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-amber-400" />Steward</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-amber-500/70 bg-amber-500/30" />Station (drag)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rotate-45 bg-yellow-300/70" />Asteroid</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-sm bg-indigo-500/80" />Beacon</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-0 w-0 border-4 border-transparent" style={{ borderBottomColor: "#a78bfa", borderBottomWidth: 6 }} />Fleet (drag)</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-sm border border-dashed border-indigo-400/50 bg-indigo-500/10" />Territory</span>
+              <span className="flex items-center gap-1.5"><span className="inline-block h-2 w-2 rounded-full border border-dashed border-orange-500/70" />Disputed</span>
+              <span className="mt-0.5 flex items-center gap-1.5 text-zinc-700"><span className="inline-block h-px w-4 border-t border-dashed border-zinc-700" />Travel range</span>
+            </div>
+          )}
         </div>
 
         {/* ── Hover tooltip (floating) ──────────────────────────────────── */}
@@ -3139,24 +3219,30 @@ export function GalaxyMapClient({
                   {/* Dispatch a fleet */}
                   {!a.myHarvestId && eligibleFleets.length > 0 && (
                     <div className="space-y-1.5">
-                      <select
-                        value={dispatchFleetId}
-                        onChange={(e) => setDispatchFleetId(e.target.value)}
-                        className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
-                      >
-                        <option value="">Select fleet…</option>
-                        {eligibleFleets.map((f) => (
-                          <option key={f.id} value={f.id}>
-                            {f.name}
-                          </option>
-                        ))}
-                      </select>
+                      {eligibleFleets.length === 1 ? (
+                        /* Single fleet — no dropdown needed */
+                        <p className="text-xs text-zinc-500 text-center">{eligibleFleets[0].name}</p>
+                      ) : (
+                        <select
+                          value={dispatchFleetId}
+                          onChange={(e) => setDispatchFleetId(e.target.value)}
+                          className="w-full rounded border border-zinc-700 bg-zinc-900 px-2 py-1.5 text-xs text-zinc-300 focus:border-zinc-500 focus:outline-none"
+                        >
+                          <option value="">Select fleet…</option>
+                          {eligibleFleets.map((f) => (
+                            <option key={f.id} value={f.id}>{f.name}</option>
+                          ))}
+                        </select>
+                      )}
                       <button
-                        onClick={handleDispatch}
-                        disabled={dispatchLoading || !dispatchFleetId}
+                        onClick={() => {
+                          const fid = eligibleFleets.length === 1 ? eligibleFleets[0].id : dispatchFleetId;
+                          void handleDispatch(fid || undefined);
+                        }}
+                        disabled={dispatchLoading || (eligibleFleets.length > 1 && !dispatchFleetId)}
                         className="w-full rounded border border-yellow-700 bg-yellow-950/60 px-3 py-2 text-xs font-medium text-yellow-300 hover:bg-yellow-900/60 hover:text-yellow-200 transition-colors disabled:opacity-50"
                       >
-                        {dispatchLoading ? "Dispatching…" : "Dispatch Fleet"}
+                        {dispatchLoading ? "Dispatching…" : "Dispatch to Harvest"}
                       </button>
                     </div>
                   )}
@@ -3210,11 +3296,20 @@ export function GalaxyMapClient({
                 </div>
                 <button onClick={() => setSelectedId(null)} className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-sm leading-none">✕</button>
               </div>
-              <p className="mt-0.5 text-xs text-zinc-500">
-                {spectralName(selectedSystem.spectralClass)}
-              </p>
-              <p className="mt-0.5 text-xs text-zinc-700">
-                {formatDist(selectedSystem.distanceFromSol)} from Sol
+              <div className="mt-0.5 flex items-center justify-between gap-2">
+                <p className="text-xs text-zinc-500">
+                  {spectralName(selectedSystem.spectralClass)}
+                </p>
+                <button
+                  onClick={() => void navigator.clipboard.writeText(selectedSystem.id).catch(() => null)}
+                  title="Copy system ID"
+                  className="text-[10px] text-zinc-700 hover:text-zinc-400 transition-colors font-mono truncate max-w-[100px]"
+                >
+                  {selectedSystem.id}
+                </button>
+              </div>
+              <p className="mt-0.5 text-[10px] text-zinc-700 font-mono tabular-nums">
+                {selectedSystem.x.toFixed(1)}, {selectedSystem.y.toFixed(1)}, {selectedSystem.z.toFixed(1)} ly
               </p>
             </div>
 
@@ -3280,13 +3375,32 @@ export function GalaxyMapClient({
                 </div>
               )}
 
-              {/* In transit */}
-              {selectedSystem.isInTransitTarget && (
-                <div className="flex items-center justify-between py-2">
-                  <span className="text-xs text-zinc-600">Transit</span>
-                  <span className="text-xs text-indigo-400">Ship en route</span>
-                </div>
-              )}
+              {/* In transit to this system */}
+              {selectedSystem.isInTransitTarget && (() => {
+                const enRouteShips = ships.filter(
+                  (s) => s.destinationSystemId === selectedSystem.id && s.systemId === null
+                );
+                return (
+                  <div className="py-2">
+                    {enRouteShips.map((ship) => {
+                      const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                      return (
+                        <div key={ship.id} className="flex items-center justify-between">
+                          <span className="text-xs text-zinc-600">En route</span>
+                          <div className="text-right">
+                            <span className="text-xs text-indigo-400">{ship.name}</span>
+                            {msLeft !== null && (
+                              <span className="ml-2 text-xs text-indigo-600">
+                                {msLeft > 0 ? formatEta(msLeft / 3600000) : "Arriving"}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
 
               {/* Colonies */}
               {selectedSystem.colonyCount > 0 && (
@@ -3665,8 +3779,8 @@ export function GalaxyMapClient({
                     const inRange = distLy <= baseRangeLy + 0.01;
                     return [{ ship, sys, distLy, etaHr: distLy / ship.speedLyPerHr, inRange }];
                   });
-                const inRange = candidates.filter((c) => c.inRange);
-                const outOfRange = candidates.filter((c) => !c.inRange);
+                const inRange = candidates.filter((c) => c.inRange).sort((a, b) => a.etaHr - b.etaHr);
+                const outOfRange = candidates.filter((c) => !c.inRange).sort((a, b) => a.distLy - b.distLy);
 
                 // Multi-select helpers
                 const selectedInRange = inRange.filter((c) => selectedShipIds.has(c.ship.id));
@@ -4104,11 +4218,15 @@ export function GalaxyMapClient({
       {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}
       {stationPanelOpen  && <StationMapPanel  onClose={() => setStationPanelOpen(false)} />}
       {commandPanelOpen  && <CommandMapPanel  onClose={() => setCommandPanelOpen(false)} />}
-      {shopPanelOpen     && <ShopMapPanel     onClose={() => setShopPanelOpen(false)} />}
-
-      {/* Shop overlay */}
       {shopPanelOpen && (
-        <ShopMapPanel onClose={() => setShopPanelOpen(false)} />
+        <ShopMapPanel
+          onClose={() => setShopPanelOpen(false)}
+          onEquippedChange={(eq) => {
+            setEquippedShipSkinId(eq.shipSkinId);
+            setEquippedStationSkinId(eq.stationSkinId);
+            setEquippedFleetSkinId(eq.fleetSkinId);
+          }}
+        />
       )}
     </div>
   );

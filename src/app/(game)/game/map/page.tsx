@@ -28,6 +28,7 @@ import { GalaxyMapClient } from "./_components/GalaxyMapClient";
 import type { GalaxySystem, GalaxyShip, GalaxyAsteroid, GalaxyFleet, GalaxyBeacon, GalaxyTerritory, GalaxyDispute, GalaxyTravelLine, GalaxyOtherStation, GalaxyBodySteward, GalaxyLane } from "./_components/GalaxyMapClient";
 import { computeAllTerritories } from "@/lib/game/territory";
 import { runEngineTick } from "@/lib/game/engineTick";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { runTravelResolution } from "@/lib/game/travelResolution";
 
 export const dynamic = "force-dynamic";
@@ -84,6 +85,7 @@ export default async function GalaxyMapPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Auth ─────────────────────────────────────────────────────────────────
   const { data: player } = maybeSingleResult<Player>(
@@ -95,7 +97,7 @@ export default async function GalaxyMapPage() {
   // Run before data fetches so the UI always reflects resolved arrivals and
   // updated upkeep/growth state without requiring a Command Centre visit.
   const requestTime = new Date();
-  await runEngineTick(admin, player.id, requestTime);
+  await runEngineTick(admin, player.id, requestTime, balance);
   await runTravelResolution(admin, player.id, requestTime);
 
   // ── Sol safety stipend (GAME_RULES.md §22) ───────────────────────────────
@@ -134,6 +136,8 @@ export default async function GalaxyMapPage() {
     bodyStewrdshipsRes,
     lanesRes,
     gatesRes,
+    equippedSkinsRes,
+    eventNodesRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -247,6 +251,19 @@ export default async function GalaxyMapPage() {
       .from("hyperspace_gates")
       .select("system_id, owner_id, status")
       .eq("status", "active"),
+
+    // Equipped skins (may not exist if player has never visited the shop)
+    admin
+      .from("player_equipped_skins")
+      .select("ship_skin_id, station_skin_id, fleet_skin_id")
+      .eq("player_id", player.id)
+      .maybeSingle(),
+
+    // Active live event nodes (world-visible — special event deposits)
+    admin
+      .from("live_event_nodes")
+      .select("id, event_id, system_id, display_offset_x, display_offset_y, resource_type, total_amount, remaining_amount, status, spawned_at, expires_at")
+      .eq("status", "active"),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -293,7 +310,18 @@ export default async function GalaxyMapPage() {
   const fleets             = listResult<FleetRow>(fleetsRes).data ?? [];
   const travelJobs         = listResult<TravelRow>(travelJobsRes).data ?? [];
   const stewardships       = listResult<StewardRow>(stewardshipsRes).data ?? [];
-  const asteroidRows       = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  // Merge regular asteroids and event nodes into a single array for display
+  const rawAsteroidRows = listResult<AsteroidRow>(asteroidsRes).data ?? [];
+  type EventNodeRow = { id: string; event_id: string; system_id: string; display_offset_x: number; display_offset_y: number; resource_type: string; total_amount: number; remaining_amount: number; status: string; spawned_at: string; expires_at: string | null };
+  const rawEventNodeRows = listResult<EventNodeRow>(eventNodesRes).data ?? [];
+  // Map event nodes to AsteroidRow shape (last_resolved_at defaults to spawned_at)
+  const eventNodeAsAsteroid: AsteroidRow[] = rawEventNodeRows.map((n) => ({
+    id: n.id, system_id: n.system_id,
+    display_offset_x: n.display_offset_x, display_offset_y: n.display_offset_y,
+    resource_type: n.resource_type, total_amount: n.total_amount, remaining_amount: n.remaining_amount,
+    status: n.status, last_resolved_at: n.spawned_at, spawned_at: n.spawned_at, expires_at: n.expires_at,
+  }));
+  const asteroidRows = [...rawAsteroidRows, ...eventNodeAsAsteroid];
   const myHarvests         = listResult<HarvestRow>(myHarvestsRes).data ?? [];
   const firstDiscoveries   = listResult<FirstDiscoveryRow>(firstDiscoveriesRes).data ?? [];
   const rawBeaconRows      = listResult<RawBeaconRow>(beaconsRes).data ?? [];
@@ -700,6 +728,10 @@ export default async function GalaxyMapPage() {
     }),
   }));
 
+  // ── Equipped skins ────────────────────────────────────────────────────────
+  const equippedSkinsRow = equippedSkinsRes?.data as
+    { ship_skin_id: string | null; station_skin_id: string | null; fleet_skin_id: string | null } | null;
+
   // Discovery stats for map sub-bar
   const discoveredCount = systems.filter((s) => s.isDiscovered).length;
 
@@ -756,6 +788,10 @@ export default async function GalaxyMapPage() {
         playerHandle={player.handle}
         playerCredits={player.credits}
         stationSystemId={stationSystemId}
+        initialEquippedShipSkinId={equippedSkinsRow?.ship_skin_id ?? null}
+        initialEquippedStationSkinId={equippedSkinsRow?.station_skin_id ?? null}
+        initialEquippedFleetSkinId={equippedSkinsRow?.fleet_skin_id ?? null}
+        playerIsDev={player.is_dev}
       />
     </div>
   );

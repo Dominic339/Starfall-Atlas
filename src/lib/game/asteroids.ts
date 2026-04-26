@@ -12,6 +12,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 // ---------------------------------------------------------------------------
@@ -24,10 +25,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
  *
  * Formula: base + totalTurretLevel × ratePerLevel
  */
-export function computeHarvestPower(totalTurretLevel: number): number {
+export function computeHarvestPower(totalTurretLevel: number, balance: BalanceConfig = BALANCE): number {
   return (
-    BALANCE.asteroids.baseHarvestUnitsPerHr +
-    totalTurretLevel * BALANCE.asteroids.harvestUnitsPerHrPerTurretLevel
+    balance.asteroids.baseHarvestUnitsPerHr +
+    totalTurretLevel * balance.asteroids.harvestUnitsPerHrPerTurretLevel
   );
 }
 
@@ -60,15 +61,29 @@ export async function resolveAsteroidHarvests(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   admin: SupabaseClient<any>,
   asteroidId: string,
+  balance: BalanceConfig = BALANCE,
 ): Promise<number> {
   const now = new Date();
 
-  // ── Fetch asteroid ────────────────────────────────────────────────────────
-  const { data: asteroid } = await admin
+  // ── Fetch asteroid (regular nodes OR live event nodes) ───────────────────
+  let isEventNode = false;
+  let { data: asteroid } = await admin
     .from("asteroid_nodes")
     .select("id, resource_type, remaining_amount, status, last_resolved_at")
     .eq("id", asteroidId)
     .maybeSingle();
+
+  if (!asteroid) {
+    const { data: ev } = await admin
+      .from("live_event_nodes")
+      .select("id, resource_type, remaining_amount, status, spawned_at")
+      .eq("id", asteroidId)
+      .maybeSingle();
+    if (ev) {
+      isEventNode = true;
+      asteroid = { ...ev, last_resolved_at: ev.spawned_at };
+    }
+  }
 
   if (!asteroid || asteroid.status !== "active" || asteroid.remaining_amount <= 0) {
     return asteroid?.remaining_amount ?? 0;
@@ -86,7 +101,7 @@ export async function resolveAsteroidHarvests(
   }
 
   // ── Compute each harvest's contribution ───────────────────────────────────
-  const cap = BALANCE.asteroids.maxHarvestAccumulationHours;
+  const cap = balance.asteroids.maxHarvestAccumulationHours;
 
   type HarvestEntry = {
     id: string;
@@ -185,9 +200,10 @@ export async function resolveAsteroidHarvests(
   // ── Update asteroid remaining_amount ──────────────────────────────────────
   const newRemaining = available - actualTotal;
   const nowDepleted = newRemaining <= 0;
+  const nodeTable = isEventNode ? "live_event_nodes" : "asteroid_nodes";
 
   await admin
-    .from("asteroid_nodes")
+    .from(nodeTable)
     .update({
       remaining_amount: newRemaining,
       last_resolved_at: now.toISOString(),

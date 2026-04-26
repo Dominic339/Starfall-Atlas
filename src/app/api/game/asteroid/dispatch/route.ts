@@ -25,6 +25,8 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { computeHarvestPower } from "@/lib/game/asteroids";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { getActiveLiveEvents, harvestBoostMultiplier } from "@/lib/game/liveEvents";
 import type { AsteroidHarvest } from "@/lib/types/game";
 
 const DispatchSchema = z.object({
@@ -46,13 +48,30 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const [balance, liveEvents] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    getActiveLiveEvents(admin),
+  ]);
 
-  // ── Fetch asteroid ───────────────────────────────────────────────────────
-  const { data: asteroid } = await admin
-    .from("asteroid_nodes")
-    .select("id, system_id, resource_type, remaining_amount, status")
-    .eq("id", asteroidId)
-    .maybeSingle();
+  // ── Fetch asteroid (checks regular nodes then event nodes) ─────────────────
+  let asteroid: { id: string; system_id: string; resource_type: string; remaining_amount: number; status: string } | null = null;
+  {
+    const { data: reg } = await admin
+      .from("asteroid_nodes")
+      .select("id, system_id, resource_type, remaining_amount, status")
+      .eq("id", asteroidId)
+      .maybeSingle();
+    if (reg) {
+      asteroid = reg;
+    } else {
+      const { data: ev } = await admin
+        .from("live_event_nodes")
+        .select("id, system_id, resource_type, remaining_amount, status")
+        .eq("id", asteroidId)
+        .maybeSingle();
+      asteroid = ev ?? null;
+    }
+  }
 
   if (!asteroid) {
     return toErrorResponse(fail("not_found", "Asteroid node not found.").error);
@@ -125,7 +144,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const harvestPowerPerHr = computeHarvestPower(totalTurretLevel);
+  const basePower = computeHarvestPower(totalTurretLevel, balance);
+  const eventMult = harvestBoostMultiplier(liveEvents, asteroid.system_id);
+  const harvestPowerPerHr = basePower * eventMult;
 
   // ── Insert harvest record ────────────────────────────────────────────────
   const now = new Date().toISOString();

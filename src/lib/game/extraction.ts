@@ -22,6 +22,7 @@
  */
 
 import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { ResourceNodeRecord } from "@/lib/types/game";
 
 // ---------------------------------------------------------------------------
@@ -40,8 +41,8 @@ export interface ExtractionAmount {
 /**
  * Units extracted per hour per resource node at a given colony tier.
  */
-export function extractionRatePerNode(populationTier: number): number {
-  return BALANCE.extraction.baseUnitsPerHrPerTier * populationTier;
+export function extractionRatePerNode(populationTier: number, balance: BalanceConfig = BALANCE): number {
+  return balance.extraction.baseUnitsPerHrPerTier * populationTier;
 }
 
 // ---------------------------------------------------------------------------
@@ -68,15 +69,16 @@ export function calculateAccumulatedExtraction(
   lastExtractAt: string,
   now: Date = new Date(),
   extractionMultiplier = 1.0,
+  balance: BalanceConfig = BALANCE,
 ): ExtractionAmount[] {
   const lastMs = new Date(lastExtractAt).getTime();
   const elapsedMs = Math.max(0, now.getTime() - lastMs);
   const elapsedHours = elapsedMs / (1000 * 60 * 60);
 
-  const capHours = BALANCE.extraction.accumulationCapHours;
+  const capHours = balance.extraction.accumulationCapHours;
   const effectiveHours = Math.min(elapsedHours, capHours);
 
-  const ratePerHr = extractionRatePerNode(populationTier);
+  const ratePerHr = extractionRatePerNode(populationTier, balance);
 
   return resourceNodes
     .filter((node) => !node.is_rare) // rare nodes require Extractor structure (future)

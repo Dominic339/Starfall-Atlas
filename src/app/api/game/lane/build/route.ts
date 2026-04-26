@@ -10,7 +10,7 @@
  *   4. No existing active or pending lane between these two systems.
  *   5. Distance must be ≤ baseRangeLy + relay extensions at each endpoint.
  *
- * Construction takes BALANCE.lanes.constructionHours (12h) and is resolved
+ * Construction takes balance.lanes.constructionHours (12h) and is resolved
  * lazily via gateResolution.resolveLaneJobs on subsequent page loads.
  *
  * Body: { fromSystemId: string, toSystemId: string }
@@ -26,7 +26,7 @@ import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, isWithinLaneRange } from "@/lib/game/travel";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { HyperspaceGate, HyperspaceLane, Ship, PlayerStation } from "@/lib/types/game";
 
 const BuildLaneSchema = z.object({
@@ -58,6 +58,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
   const now   = new Date();
 
   // ── Presence check ────────────────────────────────────────────────────────
@@ -112,7 +113,7 @@ export async function POST(request: NextRequest) {
       fail(
         "lane_out_of_range",
         `${toEntry.properName ?? toSystemId} is ${distLy.toFixed(2)} ly away. ` +
-        `Max lane range is ${BALANCE.lanes.baseRangeLy} ly (build relay stations to extend).`,
+        `Max lane range is ${balance.lanes.baseRangeLy} ly (build relay stations to extend).`,
       ).error,
     );
   }
@@ -145,7 +146,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Create lane + job ─────────────────────────────────────────────────────
-  const completeAt = new Date(now.getTime() + BALANCE.lanes.constructionHours * 60 * 60 * 1000);
+  const completeAt = new Date(now.getTime() + balance.lanes.constructionHours * 60 * 60 * 1000);
 
   const { data: lane } = maybeSingleResult<HyperspaceLane>(
     await admin

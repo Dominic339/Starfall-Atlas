@@ -10,7 +10,7 @@
  *   4. System id is a valid alpha-catalog entry
  *   5. No active beacon from this alliance already exists in that system
  *   6. Alliance has not exceeded maxActiveBeacons
- *   7. Player has sufficient iron in station inventory (BALANCE.alliance.beaconPlaceCostIron)
+ *   7. Player has sufficient iron in station inventory (balance.alliance.beaconPlaceCostIron)
  *
  * Body:   { systemId: string }
  * Returns: { ok: true, data: { beaconId, allianceId, systemId } }
@@ -22,7 +22,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult } from "@/lib/supabase/utils";
-import { BALANCE } from "@/lib/config/balance";
+import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { getCatalogEntry } from "@/lib/catalog";
 import type { PlayerStation } from "@/lib/types/game";
 
@@ -52,6 +52,7 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
+  const balance = await getBalanceWithOverrides(admin);
 
   // ── Player membership and role ────────────────────────────────────────────
   const { data: membership } = maybeSingleResult<{
@@ -99,11 +100,11 @@ export async function POST(request: NextRequest) {
     .eq("alliance_id", alliance_id)
     .eq("is_active", true);
 
-  if ((activeCount ?? 0) >= BALANCE.alliance.maxActiveBeacons) {
+  if ((activeCount ?? 0) >= balance.alliance.maxActiveBeacons) {
     return toErrorResponse(
       fail(
         "invalid_target",
-        `Alliance beacon limit reached (${BALANCE.alliance.maxActiveBeacons} active beacons maximum).`,
+        `Alliance beacon limit reached (${balance.alliance.maxActiveBeacons} active beacons maximum).`,
       ).error,
     );
   }
@@ -120,7 +121,7 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("not_found", "Station not found — refresh the page to rebuild it automatically.").error);
   }
 
-  const cost = BALANCE.alliance.beaconPlaceCostIron;
+  const cost = balance.alliance.beaconPlaceCostIron;
   const { data: ironRow } = maybeSingleResult<{ quantity: number }>(
     await admin
       .from("resource_inventory")
