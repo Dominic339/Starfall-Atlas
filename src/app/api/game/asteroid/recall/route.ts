@@ -19,6 +19,7 @@ import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveAsteroidHarvests } from "@/lib/game/asteroids";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { awardBattlePassXp } from "@/lib/game/battlePass";
 
 const RecallSchema = z.object({
   harvestId: z.string().uuid(),
@@ -58,9 +59,16 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Lazy resolution: deposit pending yield ────────────────────────────────
-  // resolveAsteroidHarvests handles all active fleets on the asteroid (not just this one)
-  // but still correctly deposits only this player's share.
+  // Capture remaining before to estimate what was deposited
+  const { data: asteroidBefore } = await admin
+    .from("asteroid_nodes").select("remaining_amount").eq("id", harvest.asteroid_id).maybeSingle();
+  const remainingBefore = asteroidBefore?.remaining_amount ?? 0;
+
   await resolveAsteroidHarvests(admin, harvest.asteroid_id, balance);
+
+  const { data: asteroidAfter } = await admin
+    .from("asteroid_nodes").select("remaining_amount").eq("id", harvest.asteroid_id).maybeSingle();
+  const deposited = Math.max(0, remainingBefore - (asteroidAfter?.remaining_amount ?? 0));
 
   // ── Mark harvest cancelled ────────────────────────────────────────────────
   await admin
@@ -68,5 +76,10 @@ export async function POST(request: NextRequest) {
     .update({ status: "cancelled" })
     .eq("id", harvestId);
 
-  return Response.json({ ok: true, data: {} });
+  // Award battle pass XP for harvested amount (fire-and-forget)
+  if (deposited > 0) {
+    void awardBattlePassXp(admin, player.id, { type: "harvest_asteroid", amount: deposited });
+  }
+
+  return Response.json({ ok: true, data: { resourcesDeposited: deposited } });
 }

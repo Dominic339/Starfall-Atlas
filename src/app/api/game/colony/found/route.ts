@@ -38,6 +38,7 @@ import { generateSystem } from "@/lib/game/generation";
 import { isHarshPlanetType } from "@/lib/game/habitability";
 import { nextGrowthAt } from "@/lib/game/taxes";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { awardBattlePassXp } from "@/lib/game/battlePass";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import type { Colony, Ship, SystemDiscovery, Player, PlayerStation } from "@/lib/types/game";
 
@@ -471,6 +472,9 @@ export async function POST(request: NextRequest) {
       is_first: isFirstColony,
     },
   });
+
+  // Award battle pass XP for founding a colony (fire-and-forget)
+  void awardBattlePassXp(admin as any, player.id, { type: "found_colonies", count: 1 });
 
   return Response.json({
     ok: true,

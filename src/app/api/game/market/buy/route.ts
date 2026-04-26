@@ -17,6 +17,7 @@ import { requireAuth, parseInput, toErrorResponse } from "@/lib/actions/helpers"
 import { fail } from "@/lib/actions/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult } from "@/lib/supabase/utils";
+import { awardBattlePassXp } from "@/lib/game/battlePass";
 
 const BuySchema = z.object({
   listingId: z.string().uuid(),
@@ -145,6 +146,9 @@ export async function POST(request: NextRequest) {
     .from("market_listings")
     .update({ quantity_filled: newFilled, status: newStatus, buyer_id: player.id })
     .eq("id", listingId);
+
+  // Award battle pass XP for market trade (fire-and-forget)
+  void awardBattlePassXp(admin, player.id, { type: "market_trades", count: 1 });
 
   return Response.json({
     ok: true,

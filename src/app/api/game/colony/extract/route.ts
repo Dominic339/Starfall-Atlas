@@ -36,6 +36,7 @@ import {
 } from "@/lib/game/colonyStructures";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { getActiveLiveEvents, dropMultiplier } from "@/lib/game/liveEvents";
+import { awardBattlePassXp } from "@/lib/game/battlePass";
 import type {
   Colony,
   Structure,
@@ -210,6 +211,11 @@ export async function POST(request: NextRequest) {
 
   if (systemId) {
     void payRoyalty(admin, systemId, player.id, extracted, balance);
+  }
+
+  // Award battle pass XP for gathered resources (fire-and-forget)
+  for (const item of extracted) {
+    void awardBattlePassXp(admin, player.id, { type: "gather_resource", resource: item.resource_type, amount: item.quantity });
   }
 
   return Response.json({

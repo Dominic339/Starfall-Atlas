@@ -5,6 +5,147 @@ import type { SkinDefinition, SkinRarity } from "@/skins";
 import { RARITY_COLOR, RARITY_LABEL } from "@/skins";
 
 // ---------------------------------------------------------------------------
+// Battle Pass tab (self-contained — fetches its own data)
+// ---------------------------------------------------------------------------
+
+interface BpTier {
+  id: string; tier: number; quest_label: string; quest_type: string;
+  free_reward_type: string; free_reward_config: Record<string, unknown>;
+  premium_reward_type: string | null; premium_reward_config: Record<string, unknown>;
+}
+interface BpPass {
+  id: string; name: string; description: string; season_number: number;
+  max_tier: number; xp_per_tier: number; starts_at: string; ends_at: string;
+  premium_cost_credits: number | null;
+}
+interface BpProgress { current_tier: number; xp_points: number; is_premium: boolean; }
+
+function BattlePassTab() {
+  const [pass, setPass] = useState<BpPass | null>(null);
+  const [progress, setProgress] = useState<BpProgress | null>(null);
+  const [tiers, setTiers] = useState<BpTier[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/game/battle-pass/status")
+      .then((r) => r.json())
+      .then((j) => {
+        if (j.ok) { setPass(j.data.pass); setProgress(j.data.progress); setTiers(j.data.tiers); }
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  async function handleUpgrade() {
+    if (!pass) return;
+    setUpgrading(true);
+    const r = await fetch("/api/game/battle-pass/upgrade", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ passId: pass.id }),
+    });
+    const j = await r.json();
+    if (j.ok) {
+      setProgress((p) => p ? { ...p, is_premium: true } : p);
+      setMsg({ text: "Upgraded to Premium!", ok: true });
+    } else {
+      setMsg({ text: j.error?.message ?? "Upgrade failed", ok: false });
+    }
+    setUpgrading(false);
+    setTimeout(() => setMsg(null), 3000);
+  }
+
+  if (loading) return <p className="py-12 text-center text-xs text-zinc-600 animate-pulse uppercase tracking-widest">Loading…</p>;
+
+  if (!pass || !progress) {
+    return (
+      <div className="py-12 text-center space-y-2">
+        <p className="text-sm font-medium text-zinc-400">No active battle pass</p>
+        <p className="text-xs text-zinc-600">Check back next season.</p>
+      </div>
+    );
+  }
+
+  const xpPct = Math.min(100, Math.round((progress.xp_points / pass.xp_per_tier) * 100));
+  const endsIn = Math.max(0, Math.round((new Date(pass.ends_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)));
+
+  return (
+    <div className="space-y-4">
+      {msg && (
+        <div className={`rounded-lg border px-3 py-2 text-xs font-medium ${msg.ok ? "border-emerald-900/40 bg-emerald-950/20 text-emerald-400" : "border-red-900/40 bg-red-950/20 text-red-400"}`}>
+          {msg.text}
+        </div>
+      )}
+
+      {/* Pass header */}
+      <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <p className="text-xs font-bold text-amber-300">{pass.name}</p>
+            <p className="text-[10px] text-zinc-500 mt-0.5">Season {pass.season_number} · {endsIn} days left</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {progress.is_premium ? (
+              <span className="rounded-full bg-amber-900/40 border border-amber-700/40 text-amber-400 text-[9px] font-bold px-2 py-0.5">PREMIUM</span>
+            ) : (
+              <button onClick={handleUpgrade} disabled={upgrading}
+                className="rounded-full bg-amber-950/60 border border-amber-700/50 text-amber-300 text-[9px] font-bold px-2 py-0.5 hover:bg-amber-900/60 disabled:opacity-50 transition-colors">
+                {upgrading ? "…" : pass.premium_cost_credits ? `⬆ ${pass.premium_cost_credits.toLocaleString()} cr` : "⬆ Upgrade"}
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Tier progress */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-[10px] text-zinc-500">
+            <span>Tier {progress.current_tier} / {pass.max_tier}</span>
+            <span>{progress.xp_points} / {pass.xp_per_tier} XP</span>
+          </div>
+          <div className="h-2 rounded-full bg-zinc-800 overflow-hidden">
+            <div className="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all" style={{ width: `${xpPct}%` }} />
+          </div>
+        </div>
+      </div>
+
+      {/* Tier list */}
+      <div className="space-y-1.5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Tiers</p>
+        {tiers.length === 0 && <p className="text-xs text-zinc-600 py-4 text-center">No tiers configured for this pass.</p>}
+        {tiers.map((t) => {
+          const unlocked = progress.current_tier >= t.tier;
+          const current  = progress.current_tier === t.tier - 1;
+          return (
+            <div key={t.id} className={`rounded-lg border px-3 py-2.5 flex items-start gap-3 transition-colors ${
+              unlocked ? "border-amber-900/40 bg-amber-950/10" : current ? "border-zinc-700 bg-zinc-900/40" : "border-zinc-800/60 bg-zinc-900/10"
+            }`}>
+              <div className={`shrink-0 w-6 h-6 rounded-full border flex items-center justify-center text-[9px] font-bold mt-0.5 ${
+                unlocked ? "border-amber-700/60 bg-amber-950/40 text-amber-400" : "border-zinc-700 bg-zinc-900 text-zinc-500"
+              }`}>
+                {unlocked ? "✓" : t.tier}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className={`text-xs font-medium ${unlocked ? "text-zinc-300" : "text-zinc-500"}`}>{t.quest_label || `Tier ${t.tier}`}</p>
+                <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                  <span className={`text-[10px] ${unlocked ? "text-emerald-500" : "text-zinc-600"}`}>
+                    Free: {t.free_reward_type === "credits" ? `${(t.free_reward_config.amount as number | undefined ?? 0).toLocaleString()} cr` : t.free_reward_type}
+                  </span>
+                  {t.premium_reward_type && (
+                    <span className={`text-[10px] ${progress.is_premium && unlocked ? "text-amber-500" : "text-zinc-700"}`}>
+                      ⭐ {t.premium_reward_type === "credits" ? `${(t.premium_reward_config.amount as number | undefined ?? 0).toLocaleString()} cr` : t.premium_reward_type}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
@@ -384,7 +525,7 @@ function WardrobeTab({ skinsData, onEquip }: {
 // ---------------------------------------------------------------------------
 
 export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
-  const [tab, setTab] = useState<"skins" | "packages" | "premium" | "wardrobe">("skins");
+  const [tab, setTab] = useState<"skins" | "packages" | "premium" | "wardrobe" | "battlepass">("skins");
   const [skinsData, setSkinsData] = useState<SkinsData | null>(null);
   const [premiumData, setPremiumData] = useState<{ catalog: PremiumItem[]; entitlements: Entitlement[] } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -464,10 +605,11 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
   const ownedCount = skinsData?.ownedSkins.length ?? 0;
 
   const tabs = [
-    { id: "skins" as const,     label: "Skins" },
-    { id: "packages" as const,  label: "Bundles" },
-    { id: "wardrobe" as const,  label: `Wardrobe${ownedCount > 0 ? ` (${ownedCount})` : ""}` },
-    { id: "premium" as const,   label: "Premium" },
+    { id: "skins" as const,      label: "Skins" },
+    { id: "packages" as const,   label: "Bundles" },
+    { id: "wardrobe" as const,   label: `Wardrobe${ownedCount > 0 ? ` (${ownedCount})` : ""}` },
+    { id: "premium" as const,    label: "Premium" },
+    { id: "battlepass" as const, label: "Battle Pass" },
   ];
 
   return (
@@ -556,6 +698,9 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
           {!loading && !error && tab === "wardrobe" && skinsData && (
             <WardrobeTab skinsData={skinsData} onEquip={handleEquip} />
           )}
+
+          {/* Battle Pass */}
+          {tab === "battlepass" && <BattlePassTab />}
 
           {/* Premium items */}
           {!loading && !error && tab === "premium" && premiumData && (
