@@ -69,7 +69,7 @@ export async function POST(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
   const body = await req.json().catch(() => ({}));
-  const { type: entityType, ...data } = body as { type: "skin" | "package"; [k: string]: unknown };
+  const { entityType, ...data } = body as { entityType: "skin" | "package"; [k: string]: unknown };
 
   if (entityType === "skin") {
     const { skinIds: _ignored, ...skinData } = data as { skinIds?: unknown; [k: string]: unknown };
@@ -109,7 +109,7 @@ export async function DELETE(req: Request) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
   const body = await req.json().catch(() => ({}));
-  const { type: entityType, id } = body as { type: "skin" | "package"; id: string };
+  const { entityType, id } = body as { entityType: "skin" | "package"; id: string };
 
   if (!id) return Response.json({ ok: false, error: "id required" }, { status: 400 });
 

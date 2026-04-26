@@ -10,7 +10,6 @@ export interface ShipClassRow {
   is_available: boolean; sort_order: number;
 }
 
-const RARITIES = ["common", "uncommon", "rare", "legendary"] as const;
 const RARITY_COLOR: Record<string, string> = {
   common: "#9ca3af", uncommon: "#34d399", rare: "#818cf8", legendary: "#fbbf24",
 };
@@ -24,7 +23,7 @@ function ShipClassEditor({ existing, onSave, onClose }: {
   const [id,           setId]           = useState(existing?.id           ?? "");
   const [name,         setName]         = useState(existing?.name         ?? "");
   const [description,  setDesc]         = useState(existing?.description  ?? "");
-  const [rarity,       setRarity]       = useState(existing?.rarity       ?? "common");
+  const rarity = "common"; // All ships use the same base stats; cosmetic variety comes from skins
   const [speed,        setSpeed]        = useState(existing?.base_speed_ly_per_hr ?? 10);
   const [cargo,        setCargo]        = useState(existing?.base_cargo_cap       ?? 100);
   const [maxSpeedTier, setMaxSpeedTier] = useState<string>(existing?.max_speed_tier != null ? String(existing.max_speed_tier) : "");
@@ -81,20 +80,10 @@ function ShipClassEditor({ existing, onSave, onClose }: {
             </div>
           </div>
 
-          {/* Rarity */}
-          <div className="space-y-1">
-            <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Rarity</label>
-            <div className="flex gap-2">
-              {RARITIES.map((r) => (
-                <button key={r} onClick={() => setRarity(r)}
-                  className={`flex-1 rounded-lg py-1.5 text-xs font-medium border transition-all capitalize ${
-                    rarity === r ? "border-current" : "border-zinc-700 text-zinc-500 hover:border-zinc-600"
-                  }`}
-                  style={rarity === r ? { color: RARITY_COLOR[r], borderColor: RARITY_COLOR[r] + "88", background: RARITY_COLOR[r] + "11" } : {}}>
-                  {r}
-                </button>
-              ))}
-            </div>
+          {/* Design note */}
+          <div className="rounded-lg border border-indigo-900/30 bg-indigo-950/10 px-3 py-2 text-[10px] text-indigo-400/70">
+            ✦ All ship classes use the same base stats. Visual variety comes from skins, not ship rarity.
+            Ships are randomly named when players receive them.
           </div>
 
           {/* Stats */}
@@ -223,7 +212,7 @@ export function ShipsTab({ initial }: { initial: ShipClassRow[] }) {
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900/40">
-              {["Class", "Rarity", "Speed", "Cargo", "Max Tiers", "Shape", "Cost", "Status", ""].map((h) => (
+              {["Class", "Speed", "Cargo", "Max Tiers", "Shape", "Cost", "Status", ""].map((h) => (
                 <th key={h} className="text-left px-3 py-2.5 text-[10px] font-semibold uppercase tracking-widest text-zinc-500">{h}</th>
               ))}
             </tr>
@@ -234,11 +223,6 @@ export function ShipsTab({ initial }: { initial: ShipClassRow[] }) {
                 <td className="px-3 py-2.5">
                   <p className="font-semibold text-zinc-200">{c.name}</p>
                   <p className="text-[10px] text-zinc-600">{c.id}</p>
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="font-medium capitalize" style={{ color: RARITY_COLOR[c.rarity] ?? "#9ca3af" }}>
-                    {c.rarity}
-                  </span>
                 </td>
                 <td className="px-3 py-2.5 text-zinc-300 font-mono">{c.base_speed_ly_per_hr} ly/hr</td>
                 <td className="px-3 py-2.5 text-zinc-300 font-mono">{c.base_cargo_cap}</td>

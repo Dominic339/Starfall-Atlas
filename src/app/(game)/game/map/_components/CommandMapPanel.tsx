@@ -2,6 +2,9 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { SkinPreview, RARITY_GLOW } from "@/components/SkinPreview";
+import type { SkinDefinition, SkinRarity } from "@/skins";
+import { RARITY_COLOR, RARITY_LABEL } from "@/skins";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,6 +65,125 @@ const TIER_STYLE: Record<number, { label: string; border: string; bg: string; te
 };
 
 function tierStyle(t: number) { return TIER_STYLE[t] ?? TIER_STYLE[1]; }
+
+// ---------------------------------------------------------------------------
+// Ship skin section — shows owned ship skins + lets player equip one
+// ---------------------------------------------------------------------------
+
+interface SkinSlotData {
+  ownedSkins: SkinDefinition[];
+  equippedShipSkinId: string | null;
+}
+
+function ShipSkinSection() {
+  const [data, setData] = useState<SkinSlotData | null>(null);
+  const [equipping, setEquipping] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+
+  const load = useCallback(async () => {
+    const r = await fetch("/api/game/skins");
+    const j = await r.json();
+    if (j.ok) setData({
+      ownedSkins: (j.data.ownedSkins as SkinDefinition[]).filter((s) => s.type === "ship"),
+      equippedShipSkinId: j.data.equipped?.shipSkinId ?? null,
+    });
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function equip(skinId: string | null) {
+    const key = skinId ?? "__default__";
+    setEquipping(key);
+    await fetch("/api/game/skins/equip", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ slot: "ship", skinId }),
+    });
+    await load();
+    setEquipping(null);
+  }
+
+  const equipped = data?.ownedSkins.find((s) => s.id === data.equippedShipSkinId) ?? null;
+  const equippedGlow = equipped ? (RARITY_GLOW[equipped.rarity] ?? "#6b7280") : "#6366f1";
+
+  return (
+    <div className="border-t border-zinc-800/60">
+      <button onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2.5 text-left hover:bg-zinc-900/40 transition-colors">
+        <div className="flex items-center gap-2.5">
+          <div className="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+            style={{ background: equippedGlow + "18", border: `1px solid ${equippedGlow}33` }}>
+            <SkinPreview visual={equipped?.visual ?? {}} type="ship" size={22} />
+          </div>
+          <div>
+            <p className="text-[10px] font-semibold text-zinc-400 uppercase tracking-widest">Appearance</p>
+            <p className="text-[10px] text-zinc-600">{equipped ? equipped.name : "Default skin"}</p>
+          </div>
+        </div>
+        <span className="text-zinc-700 text-xs">{open ? "▲" : "▼"}</span>
+      </button>
+
+      {open && (
+        <div className="px-4 pb-3">
+          {!data ? (
+            <p className="text-[10px] text-zinc-600 animate-pulse py-2">Loading skins…</p>
+          ) : data.ownedSkins.length === 0 ? (
+            <p className="text-[10px] text-zinc-600 py-2">No ship skins owned. Visit the shop to get some!</p>
+          ) : (
+            <div className="grid grid-cols-3 gap-1.5">
+              {/* Default option */}
+              <button onClick={() => equip(null)} disabled={!!equipping}
+                className="relative flex flex-col items-center gap-1 rounded-lg border p-2 transition-all disabled:opacity-50"
+                style={{
+                  borderColor: !data.equippedShipSkinId ? "#6366f170" : "#27272a",
+                  background: !data.equippedShipSkinId ? "#1e1b4b20" : "transparent",
+                  boxShadow: !data.equippedShipSkinId ? "0 0 8px #6366f118" : "none",
+                }}>
+                {!data.equippedShipSkinId && (
+                  <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full bg-indigo-400" />
+                )}
+                <div className="w-8 h-8 rounded flex items-center justify-center bg-zinc-900">
+                  <SkinPreview visual={{}} type="ship" size={24} />
+                </div>
+                <p className="text-[8px] text-zinc-500 leading-tight text-center">Default</p>
+                {equipping === "__default__" && (
+                  <p className="text-[8px] text-zinc-600 animate-pulse">…</p>
+                )}
+              </button>
+
+              {data.ownedSkins.map((skin) => {
+                const glow = RARITY_GLOW[skin.rarity] ?? "#6b7280";
+                const isEq = data.equippedShipSkinId === skin.id;
+                return (
+                  <button key={skin.id} onClick={() => equip(skin.id)} disabled={!!equipping}
+                    className="relative flex flex-col items-center gap-1 rounded-lg border p-2 transition-all disabled:opacity-50"
+                    style={{
+                      borderColor: isEq ? glow + "70" : glow + "22",
+                      background: isEq ? glow + "12" : "transparent",
+                      boxShadow: isEq ? `0 0 8px ${glow}18` : "none",
+                    }}>
+                    {isEq && (
+                      <div className="absolute top-1 right-1 w-1.5 h-1.5 rounded-full" style={{ background: glow }} />
+                    )}
+                    <div className="w-8 h-8 rounded flex items-center justify-center"
+                      style={{ background: glow + "14", border: `1px solid ${glow}28` }}>
+                      <SkinPreview visual={skin.visual} type="ship" size={24} />
+                    </div>
+                    <p className="text-[8px] leading-tight text-center truncate w-full" style={{ color: isEq ? glow : "#71717a" }}>
+                      {skin.name}
+                    </p>
+                    {equipping === skin.id && (
+                      <p className="text-[8px] text-zinc-600 animate-pulse">…</p>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ---------------------------------------------------------------------------
 // StatRow
@@ -225,6 +347,8 @@ function ShipCard({
           Ship must be docked at station to upgrade.
         </div>
       )}
+
+      <ShipSkinSection />
     </div>
   );
 }

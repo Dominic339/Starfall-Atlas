@@ -79,6 +79,8 @@ interface SkinEditorProps {
 }
 
 function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
+  const [skinName,      setSkinName]      = useState(existing?.name         ?? def.name);
+  const [skinDesc,      setSkinDesc]      = useState(existing?.description  ?? def.description);
   const [priceCredits,  setPriceCredits]  = useState(existing?.price_credits      ?? 500);
   const [premiumCents,  setPremiumCents]  = useState(existing?.price_premium_cents ?? null as number | null);
   const [discountPct,   setDiscountPct]   = useState(existing?.discount_pct       ?? null as number | null);
@@ -103,7 +105,7 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
     setSaving(true); setError(null);
     try {
       await onSave({
-        id: def.id, name: def.name, description: def.description,
+        id: def.id, name: skinName.trim() || def.name, description: skinDesc.trim(),
         type: def.type, rarity: def.rarity,
         price_credits: priceCredits,
         price_premium_cents: premiumCents,
@@ -175,6 +177,21 @@ function SkinEditor({ def, existing, onSave, onClose }: SkinEditorProps) {
 
           {/* ── Right: settings form ── */}
           <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
+            {/* Name */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Display Name</label>
+              <input value={skinName} onChange={(e) => setSkinName(e.target.value)}
+                placeholder={def.name}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none" />
+            </div>
+
+            {/* Description */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-semibold uppercase tracking-widest text-zinc-500">Description</label>
+              <textarea value={skinDesc} onChange={(e) => setSkinDesc(e.target.value)} rows={2}
+                className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 focus:border-indigo-600 focus:outline-none resize-none" />
+            </div>
+
             {/* Availability toggle */}
             <label className="flex items-center gap-3 cursor-pointer">
               <div className={`w-10 h-5 rounded-full transition-colors relative ${isAvailable ? "bg-emerald-600" : "bg-zinc-700"}`}
@@ -627,7 +644,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
   const saveSkin = useCallback(async (data: Partial<DbSkinRow>) => {
     const r = await fetch("/api/game/skins/admin", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "skin", ...data }),
+      body: JSON.stringify({ entityType: "skin", ...data }),
     });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error?.message ?? "Save failed");
@@ -641,7 +658,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
   const savePackage = useCallback(async (data: Partial<DbPackageRow> & { skinIds: string[] }) => {
     const r = await fetch("/api/game/skins/admin", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "package", ...data }),
+      body: JSON.stringify({ entityType: "package", ...data }),
     });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error?.message ?? "Save failed");
@@ -655,7 +672,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
     if (!confirm(`Delete skin "${id}" from DB? Players who own it keep it, but it won't appear in the shop.`)) return;
     const r = await fetch("/api/game/skins/admin", {
       method: "DELETE", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "skin", id }),
+      body: JSON.stringify({ entityType: "skin", id }),
     });
     const j = await r.json();
     if (j.ok) { setDbSkins((prev) => prev.filter((s) => s.id !== id)); showMsg("Skin removed from DB.", true); }
@@ -666,7 +683,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
     if (!confirm(`Delete bundle "${id}"?`)) return;
     const r = await fetch("/api/game/skins/admin", {
       method: "DELETE", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ type: "package", id }),
+      body: JSON.stringify({ entityType: "package", id }),
     });
     const j = await r.json();
     if (j.ok) { setPackages((prev) => prev.filter((p) => p.id !== id)); showMsg("Bundle deleted.", true); }
