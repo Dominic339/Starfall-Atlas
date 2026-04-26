@@ -381,11 +381,155 @@ function PackageEditor({ existing, allSkins, dbSkins, onSave, onClose }: Package
 }
 
 // ---------------------------------------------------------------------------
+// Live Status tab — at-a-glance dashboard
+// ---------------------------------------------------------------------------
+
+function LiveStatusTab({
+  balanceOverrides,
+  liveEvents,
+  battlePasses,
+}: {
+  balanceOverrides: { key: string; value: unknown; description: string; updated_at: string }[];
+  liveEvents: LiveEventRow[];
+  battlePasses: BattlePassRow[];
+}) {
+  const now = new Date();
+  const activeEvents = liveEvents.filter(
+    (e) => e.is_active && new Date(e.starts_at) <= now && new Date(e.ends_at) >= now,
+  );
+  const scheduledEvents = liveEvents.filter(
+    (e) => e.is_active && new Date(e.starts_at) > now,
+  );
+  const activePasses = battlePasses.filter(
+    (p) => p.is_active && new Date(p.starts_at) <= now && new Date(p.ends_at) >= now,
+  );
+
+  function fmtRemaining(iso: string) {
+    const ms = new Date(iso).getTime() - now.getTime();
+    if (ms < 0) return "ended";
+    const h = Math.floor(ms / 3_600_000);
+    const d = Math.floor(h / 24);
+    return d > 0 ? `${d}d ${h % 24}h left` : `${h}h left`;
+  }
+
+  const EventTypeBadge = ({ type }: { type: string }) => {
+    const colors: Record<string, string> = {
+      harvest_boost:    "bg-amber-950/40 border-amber-800/40 text-amber-400",
+      double_drop:      "bg-emerald-950/40 border-emerald-800/40 text-emerald-400",
+      credit_bonus:     "bg-yellow-950/40 border-yellow-800/40 text-yellow-400",
+      special_asteroid: "bg-sky-950/40 border-sky-800/40 text-sky-400",
+      resource_node:    "bg-violet-950/40 border-violet-800/40 text-violet-400",
+      currency_event:   "bg-pink-950/40 border-pink-800/40 text-pink-400",
+    };
+    return (
+      <span className={`rounded-full border px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest ${colors[type] ?? "bg-zinc-900 border-zinc-700 text-zinc-400"}`}>
+        {type.replace(/_/g, " ")}
+      </span>
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Active events */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${activeEvents.length > 0 ? "bg-emerald-400 animate-pulse" : "bg-zinc-700"}`} />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            Active Events ({activeEvents.length})
+          </p>
+        </div>
+        {activeEvents.length === 0 ? (
+          <p className="text-xs text-zinc-600 pl-4">No events running.</p>
+        ) : (
+          activeEvents.map((e) => (
+            <div key={e.id} className="rounded-lg border border-emerald-900/40 bg-emerald-950/10 px-4 py-3 flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-xs font-semibold text-zinc-200">{e.name}</p>
+                  <EventTypeBadge type={e.type} />
+                </div>
+                {e.system_ids && e.system_ids.length > 0 && (
+                  <p className="text-[10px] text-zinc-600">Systems: {e.system_ids.slice(0, 3).join(", ")}{e.system_ids.length > 3 ? ` +${e.system_ids.length - 3}` : ""}</p>
+                )}
+              </div>
+              <p className="text-[10px] text-emerald-500 shrink-0">{fmtRemaining(e.ends_at)}</p>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Scheduled events */}
+      {scheduledEvents.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-500">Scheduled ({scheduledEvents.length})</p>
+          {scheduledEvents.map((e) => (
+            <div key={e.id} className="rounded-lg border border-zinc-800 bg-zinc-900/20 px-4 py-3 flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <p className="text-xs text-zinc-400">{e.name}</p>
+                <EventTypeBadge type={e.type} />
+              </div>
+              <p className="text-[10px] text-zinc-600 shrink-0">Starts {new Date(e.starts_at).toLocaleDateString()}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Active battle pass */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${activePasses.length > 0 ? "bg-amber-400 animate-pulse" : "bg-zinc-700"}`} />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            Battle Pass ({activePasses.length > 0 ? "active" : "none"})
+          </p>
+        </div>
+        {activePasses.length === 0 ? (
+          <p className="text-xs text-zinc-600 pl-4">No active battle pass.</p>
+        ) : (
+          activePasses.map((p) => (
+            <div key={p.id} className="rounded-lg border border-amber-900/40 bg-amber-950/10 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold text-amber-300">{p.name}</p>
+                  <p className="text-[10px] text-zinc-500 mt-0.5">Season {p.season_number} · {p.max_tier} tiers · {p.xp_per_tier.toLocaleString()} XP/tier</p>
+                </div>
+                <p className="text-[10px] text-amber-500 shrink-0">{fmtRemaining(p.ends_at)}</p>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Balance overrides */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <div className={`w-2 h-2 rounded-full ${balanceOverrides.length > 0 ? "bg-amber-400" : "bg-zinc-700"}`} />
+          <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+            Balance Overrides ({balanceOverrides.length})
+          </p>
+        </div>
+        {balanceOverrides.length === 0 ? (
+          <p className="text-xs text-zinc-600 pl-4">All values at defaults.</p>
+        ) : (
+          <div className="rounded-lg border border-amber-900/40 bg-amber-950/10 px-4 py-3 space-y-1.5">
+            {balanceOverrides.map((o) => (
+              <div key={o.key} className="flex items-center justify-between gap-3 text-[10px]">
+                <span className="font-mono text-zinc-400">{o.key}</span>
+                <span className="font-mono text-amber-400">{JSON.stringify(o.value)}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Main AdminDevClient
 // ---------------------------------------------------------------------------
 
 export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPackages, allSkinDefs, shipClasses, balanceOverrides, liveEvents, battlePasses }: Props) {
-  const [tab, setTab] = useState<"ships" | "balance" | "events" | "battlepass" | "skins" | "packages">("ships");
+  const [tab, setTab] = useState<"live" | "ships" | "balance" | "events" | "battlepass" | "skins" | "packages">("live");
   const [dbSkins, setDbSkins] = useState<DbSkinRow[]>(initialDbSkins);
   const [packages, setPackages] = useState<DbPackageRow[]>(initialPackages);
   const [editingSkin, setEditingSkin] = useState<SkinDefinition | null>(null);
@@ -460,6 +604,7 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
       {/* Tabs */}
       <div className="flex flex-wrap gap-1 border-b border-zinc-800 pb-0">
         {([
+          { id: "live",       label: "Live Status" },
           { id: "ships",      label: `Ships (${shipClasses.length})` },
           { id: "balance",    label: `Balance${balanceOverrides.length > 0 ? ` (${balanceOverrides.length}⚠)` : ""}` },
           { id: "events",     label: `Events (${liveEvents.length})` },
@@ -475,6 +620,13 @@ export function AdminDevClient({ dbSkins: initialDbSkins, packages: initialPacka
           </button>
         ))}
       </div>
+
+      {/* ── Live Status tab ── */}
+      {tab === "live" && <LiveStatusTab
+        balanceOverrides={balanceOverrides}
+        liveEvents={liveEvents}
+        battlePasses={battlePasses}
+      />}
 
       {/* ── Ships tab ── */}
       {tab === "ships" && <ShipsTab initial={shipClasses} />}
