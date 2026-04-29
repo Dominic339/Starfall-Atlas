@@ -2595,9 +2595,8 @@ export function GalaxyMapClient({
             {stationSystem && (() => {
               const sys = stationSystem;
               const starR = nodeRadius(sys);
-              // Position station marker below-right of the star (avoids ship marker area)
-              const mx = sys.svgX + starR + 10;
-              const my = sys.svgY + starR + 10;
+              const mx = sys.svgX + starR + 14;
+              const my = sys.svgY + starR + 14;
               const isDragging = stationDrag !== null;
               return (
                 <g
@@ -2614,23 +2613,41 @@ export function GalaxyMapClient({
                     setShipDispatchError(null);
                   }}
                 >
-                  {/* Station cross icon — cross arms + end caps + centre hub */}
                   {(() => {
-                    const s = 5.5 / scale;
+                    const s = 8 / scale;
                     const stSkin   = getSkinById(equippedStationSkinId ?? "");
                     const stColor  = stSkin?.visual.color      ?? "#fbbf24";
                     const stAccent = stSkin?.visual.accentColor ?? "#f59e0b";
                     return (
-                      <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
-                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill={stColor} />
-                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill={stColor} />
+                      <g opacity={isDragging ? 0.25 : 1} filter={isDragging ? undefined : "url(#glow)"}>
+                        {/* Background disc — filled halo */}
+                        <circle cx={mx} cy={my} r={s * 2.2}
+                          fill={stColor} fillOpacity={0.15}
+                          stroke={stColor} strokeOpacity={0.45} strokeWidth={1.2 / scale} />
+                        {/* Outer halo ring */}
+                        <circle cx={mx} cy={my} r={s * 3}
+                          fill="none" stroke={stColor} strokeOpacity={0.20} strokeWidth={0.8 / scale} />
+                        {/* Cross arms */}
+                        <rect x={mx - s * 1.8} y={my - s * 0.25} width={s * 3.6} height={s * 0.5} fill={stColor} rx={s * 0.1} />
+                        <rect x={mx - s * 0.25} y={my - s * 1.8} width={s * 0.5} height={s * 3.6} fill={stColor} rx={s * 0.1} />
+                        {/* Arm-end orbs */}
                         {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                           <circle key={i}
-                            cx={mx + Math.cos(a) * s * 1.6}
-                            cy={my + Math.sin(a) * s * 1.6}
-                            r={s * 0.45} fill={stAccent} />
+                            cx={mx + Math.cos(a) * s * 1.8}
+                            cy={my + Math.sin(a) * s * 1.8}
+                            r={s * 0.55} fill={stAccent} />
                         ))}
-                        <circle cx={mx} cy={my} r={s * 0.6} fill={stAccent} />
+                        {/* Centre hub */}
+                        <circle cx={mx} cy={my} r={s * 0.75} fill={stAccent} />
+                        {/* Station label */}
+                        {scale >= 0.9 && (
+                          <text x={mx} y={my + s * 3.8}
+                            textAnchor="middle" fill={stColor}
+                            fontSize={Math.max(7, 9 / scale)} opacity={0.9}
+                            className="select-none pointer-events-none">
+                            Your Station
+                          </text>
+                        )}
                       </g>
                     );
                   })()}
@@ -2638,15 +2655,14 @@ export function GalaxyMapClient({
               );
             })()}
 
-            {/* ── Other players' station markers (silver cross, read-only) ── */}
+            {/* ── Other players' station markers ── */}
             {otherStations.map((os) => {
               const sys = systemMap.get(os.systemId);
               if (!sys) return null;
               const starR = nodeRadius(sys);
-              // Position upper-left of the star (opposite quadrant from player's own station)
-              const mx = sys.svgX - starR - 10;
-              const my = sys.svgY - starR - 10;
-              const s = 4.5 / scale;
+              const mx = sys.svgX - starR - 14;
+              const my = sys.svgY - starR - 14;
+              const s = 6.5 / scale;
               const isHov = hoveredId === `other-station-${os.id}`;
               return (
                 <g
@@ -2655,19 +2671,31 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(`other-station-${os.id}`)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
-                  <circle cx={mx} cy={my} r={10 / scale} fill="transparent" />
-                  <g opacity={isHov ? 1 : 0.7}>
-                    <rect x={mx - s * 1.5} y={my - s * 0.2} width={s * 3} height={s * 0.4} fill="#9ca3af" />
-                    <rect x={mx - s * 0.2} y={my - s * 1.5} width={s * 0.4} height={s * 3} fill="#9ca3af" />
+                  <circle cx={mx} cy={my} r={14 / scale} fill="transparent" />
+                  <g opacity={isHov ? 1 : 0.65}>
+                    {/* Background disc */}
+                    <circle cx={mx} cy={my} r={s * 2.2}
+                      fill="#9ca3af" fillOpacity={0.10}
+                      stroke="#9ca3af" strokeOpacity={0.35} strokeWidth={1 / scale} />
+                    {/* Cross arms */}
+                    <rect x={mx - s * 1.7} y={my - s * 0.22} width={s * 3.4} height={s * 0.44} fill="#9ca3af" rx={s * 0.1} />
+                    <rect x={mx - s * 0.22} y={my - s * 1.7} width={s * 0.44} height={s * 3.4} fill="#9ca3af" rx={s * 0.1} />
                     {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                       <circle key={i}
-                        cx={mx + Math.cos(a) * s * 1.5}
-                        cy={my + Math.sin(a) * s * 1.5}
-                        r={s * 0.4}
-                        fill="#6b7280"
-                      />
+                        cx={mx + Math.cos(a) * s * 1.7}
+                        cy={my + Math.sin(a) * s * 1.7}
+                        r={s * 0.45} fill="#6b7280" />
                     ))}
-                    <circle cx={mx} cy={my} r={s * 0.55} fill="#6b7280" />
+                    <circle cx={mx} cy={my} r={s * 0.65} fill="#6b7280" />
+                    {/* Owner label (always visible at low-medium zoom) */}
+                    {scale >= 0.7 && (
+                      <text x={mx} y={my + s * 3.5}
+                        textAnchor="middle" fill="#9ca3af"
+                        fontSize={Math.max(7, 9 / scale)} opacity={0.80}
+                        className="select-none pointer-events-none">
+                        {os.ownerHandle}
+                      </text>
+                    )}
                   </g>
                   {/* Tooltip on hover */}
                   {isHov && (
