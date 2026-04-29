@@ -625,6 +625,13 @@ export function GalaxyMapClient({
   const stationSystem = systems.find((s) => s.isStationLocation) ?? null;
   const dockedShip = ships.find((s) => s.systemId != null) ?? null;
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
+
+  // Quick lookup: system ID → which alliance territory it belongs to (if any)
+  const systemTerritoryMap = useMemo(() => {
+    const m = new Map<string, GalaxyTerritory>();
+    for (const t of territories) for (const sid of t.systemIds) m.set(sid, t);
+    return m;
+  }, [territories]);
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
 
   // Search results (top 8 by name prefix match, then substring)
@@ -1652,11 +1659,10 @@ export function GalaxyMapClient({
                   key={t.allianceId}
                   points={pts}
                   fill={color}
-                  fillOpacity={0.08}
+                  fillOpacity={0.13}
                   stroke={color}
-                  strokeOpacity={0.30}
-                  strokeWidth={1.5 / scale}
-                  strokeDasharray={`${5 / scale} ${3 / scale}`}
+                  strokeOpacity={0.55}
+                  strokeWidth={2 / scale}
                   pointerEvents="none"
                 />
               );
@@ -1674,9 +1680,8 @@ export function GalaxyMapClient({
                     x2={lnk.x2}
                     y2={lnk.y2}
                     stroke={color}
-                    strokeOpacity={0.35}
-                    strokeWidth={1 / scale}
-                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    strokeOpacity={0.50}
+                    strokeWidth={1.5 / scale}
                     pointerEvents="none"
                   />
                 );
@@ -1752,8 +1757,11 @@ export function GalaxyMapClient({
             {travelLines.map((tl) => {
               const midX = (tl.x1 + tl.x2) / 2;
               const midY = (tl.y1 + tl.y2) / 2;
-              const lineColor  = tl.isFleet ? "#a78bfa" : "#818cf8";
-              const labelColor = tl.isFleet ? "#c4b5fd" : "#a5b4fc";
+              const shipSkin  = getSkinById(equippedShipSkinId  ?? "");
+              const fleetSkin = getSkinById(equippedFleetSkinId ?? "");
+              const activeSkin = tl.isFleet ? fleetSkin : shipSkin;
+              const lineColor  = activeSkin?.visual.color ?? (tl.isFleet ? "#a78bfa" : "#818cf8");
+              const labelColor = activeSkin?.visual.accentColor ?? (tl.isFleet ? "#c4b5fd" : "#a5b4fc");
 
               // Interpolated ship position along the route
               let shipX: number | null = null;
@@ -1859,29 +1867,36 @@ export function GalaxyMapClient({
                         opacity={0.35}
                         pointerEvents="none"
                       />
-                      {/* Main ship marker — chevron pointing toward destination */}
+                      {/* Main ship/fleet marker — skin-colored, scaled to feel like an army */}
                       {(() => {
                         const angle = Math.atan2(tl.y2 - tl.y1, tl.x2 - tl.x1) + Math.PI / 2;
-                        const s = 6 / scale;
+                        const s = 9 / scale;
+                        if (tl.isFleet) {
+                          // Fleet: lead ship + two flanking escorts (formation look)
+                          const off = s * 0.9;
+                          const perpA = angle - Math.PI / 2;
+                          const ox = Math.cos(perpA) * off;
+                          const oy = Math.sin(perpA) * off;
+                          const sBig = s, sSmall = s * 0.65;
+                          const lagX = shipX! - Math.cos(angle - Math.PI / 2) * s * 1.1;
+                          const lagY = shipY! - Math.sin(angle - Math.PI / 2) * s * 1.1;
+                          return (
+                            <g filter="url(#glow)">
+                              {/* Flanking escorts */}
+                              <polygon points={shipPolygon(shipX! + ox, shipY! + oy, sSmall, angle)} fill={lineColor} stroke="#06060a" strokeWidth={0.8 / scale} opacity={0.75} />
+                              <polygon points={shipPolygon(shipX! - ox, shipY! - oy, sSmall, angle)} fill={lineColor} stroke="#06060a" strokeWidth={0.8 / scale} opacity={0.75} />
+                              {/* Lead ship */}
+                              <polygon points={shipPolygon(lagX, lagY, sBig, angle)} fill={labelColor} stroke="#06060a" strokeWidth={1.2 / scale} />
+                              {/* Orbit ring */}
+                              <circle cx={shipX!} cy={shipY!} r={13 / scale} fill="none" stroke={labelColor} strokeWidth={0.8 / scale} opacity={0.25} pointerEvents="none" />
+                            </g>
+                          );
+                        }
                         return (
-                          <>
-                            <polygon
-                              points={shipPolygon(shipX!, shipY!, s, angle)}
-                              fill={labelColor}
-                              stroke="#06060a"
-                              strokeWidth={1.2 / scale}
-                              filter="url(#glow)"
-                            />
-                            <circle
-                              cx={shipX!} cy={shipY!}
-                              r={9 / scale}
-                              fill="none"
-                              stroke={labelColor}
-                              strokeWidth={0.7 / scale}
-                              opacity={0.20}
-                              pointerEvents="none"
-                            />
-                          </>
+                          <g filter="url(#glow)">
+                            <polygon points={shipPolygon(shipX!, shipY!, s, angle)} fill={labelColor} stroke="#06060a" strokeWidth={1.2 / scale} />
+                            <circle cx={shipX!} cy={shipY!} r={11 / scale} fill="none" stroke={labelColor} strokeWidth={0.7 / scale} opacity={0.22} pointerEvents="none" />
+                          </g>
                         );
                       })()}
                     </>
@@ -1962,6 +1977,40 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
+                  {/* ── Alliance territory ring ─────────────────────────── */}
+                  {!isDim && (() => {
+                    const territory = systemTerritoryMap.get(sys.id);
+                    if (!territory) return null;
+                    const tc = allianceColor(territory.allianceTag);
+                    return (
+                      <g pointerEvents="none">
+                        {/* Filled halo ring */}
+                        <circle
+                          cx={sys.svgX} cy={sys.svgY}
+                          r={r * 4.2}
+                          fill={tc}
+                          fillOpacity={0.16}
+                          stroke={tc}
+                          strokeOpacity={0.60}
+                          strokeWidth={1.8 / scale}
+                        />
+                        {/* Alliance tag badge */}
+                        {scale >= 1.0 && (
+                          <text
+                            x={sys.svgX}
+                            y={sys.svgY + r * 6}
+                            textAnchor="middle"
+                            fill={tc}
+                            fontSize={Math.max(7, 9 / scale)}
+                            opacity={0.85}
+                          >
+                            [{territory.allianceTag}]
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })()}
+
                   {/* ── Undiscovered: faint twinkle only ─────────────────── */}
                   {isDim && (
                     <>
