@@ -193,6 +193,8 @@ export interface GalaxyTravelLine {
   label: string;
   /** True = fleet travel (slightly different styling) */
   isFleet: boolean;
+  /** Number of ships in this travel group (1 for solo ships). */
+  shipCount: number;
   /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
   departAt: string | null;
@@ -1889,6 +1891,21 @@ export function GalaxyMapClient({
                               <polygon points={shipPolygon(lagX, lagY, sBig, angle)} fill={labelColor} stroke="#06060a" strokeWidth={1.2 / scale} />
                               {/* Orbit ring */}
                               <circle cx={shipX!} cy={shipY!} r={13 / scale} fill="none" stroke={labelColor} strokeWidth={0.8 / scale} opacity={0.25} pointerEvents="none" />
+                              {/* Ship count badge */}
+                              {tl.shipCount > 1 && (
+                                <text
+                                  x={shipX! + 11 / scale}
+                                  y={shipY! - 9 / scale}
+                                  fill={labelColor}
+                                  fontSize={Math.max(6, 8 / scale)}
+                                  fontWeight="700"
+                                  textAnchor="middle"
+                                  pointerEvents="none"
+                                  opacity={0.95}
+                                >
+                                  {`×${tl.shipCount}`}
+                                </text>
+                              )}
                             </g>
                           );
                         }

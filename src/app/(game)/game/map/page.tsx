@@ -570,6 +570,12 @@ export default async function GalaxyMapPage() {
   });
 
   // ── Build travel lines for client ────────────────────────────────────────
+  // Pre-count ships per fleet so we can show "×N" badge on fleet icons.
+  const fleetShipCounts = new Map<string, number>();
+  for (const tj of travelJobs) {
+    if (tj.fleet_id) fleetShipCounts.set(tj.fleet_id, (fleetShipCounts.get(tj.fleet_id) ?? 0) + 1);
+  }
+
   // Deduplicate by fleet_id so fleet members don't produce N identical lines.
   const seenFleetIds = new Set<string>();
   const galaxyTravelLines: GalaxyTravelLine[] = [];
@@ -591,6 +597,7 @@ export default async function GalaxyMapPage() {
         toSystemId: tj.to_system_id,
         label: fleet?.name ?? "Fleet",
         isFleet: true,
+        shipCount: fleetShipCounts.get(tj.fleet_id) ?? 1,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
@@ -605,6 +612,7 @@ export default async function GalaxyMapPage() {
         toSystemId: tj.to_system_id,
         label: ship?.name ?? "Ship",
         isFleet: false,
+        shipCount: 1,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
