@@ -202,6 +202,12 @@ export interface GalaxyTravelLine {
   /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
   departAt: string | null;
+  /** True if this is an enemy (other player's) travel line — shown in red. */
+  isEnemy: boolean;
+  /** Player ID of the enemy (null for own lines). */
+  enemyPlayerId: string | null;
+  /** Handle of the enemy player (for display). */
+  enemyHandle: string | null;
 }
 
 /** An active hyperspace lane visible on the galaxy map. */
@@ -625,6 +631,10 @@ export function GalaxyMapClient({
   // ── Dispute state ──────────────────────────────────────────────────────────
   const [disputeLoading, setDisputeLoading] = useState<string | null>(null); // beaconId
   const [disputeError, setDisputeError] = useState<string | null>(null);
+
+  // ── Combat / intercept state ───────────────────────────────────────────────
+  const [interceptLoading, setInterceptLoading] = useState<string | null>(null); // travelLine key
+  const [interceptResult, setInterceptResult] = useState<{ outcome: string; creditsLooted: number } | null>(null);
 
   // ── Multi-hop route (computed when a non-reachable system is selected) ────
   const [routeHops, setRouteHops] = useState<string[] | null>(null);
@@ -1771,8 +1781,11 @@ export function GalaxyMapClient({
               const shipSkin  = getSkinById(equippedShipSkinId  ?? "");
               const fleetSkin = getSkinById(equippedFleetSkinId ?? "");
               const activeSkin = tl.isFleet ? fleetSkin : shipSkin;
-              const lineColor  = activeSkin?.visual.color ?? (tl.isFleet ? "#a78bfa" : "#818cf8");
-              const labelColor = activeSkin?.visual.accentColor ?? (tl.isFleet ? "#c4b5fd" : "#a5b4fc");
+              // Enemy lines use hostile red palette; own lines use skin colors
+              const lineColor  = tl.isEnemy ? "#ef4444"
+                : activeSkin?.visual.color ?? (tl.isFleet ? "#a78bfa" : "#818cf8");
+              const labelColor = tl.isEnemy ? "#fca5a5"
+                : activeSkin?.visual.accentColor ?? (tl.isFleet ? "#c4b5fd" : "#a5b4fc");
 
               // Interpolated ship position along the route
               let shipX: number | null = null;
@@ -1951,6 +1964,45 @@ export function GalaxyMapClient({
                     >
                       {tl.label}{etaStr}
                     </text>
+                  )}
+                  {/* Intercept button — only on enemy lines at moderate zoom */}
+                  {tl.isEnemy && scale >= 0.7 && interceptLoading !== tl.key && (
+                    <g
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setInterceptResult(null);
+                        setInterceptLoading(tl.key);
+                        fetch("/api/game/travel/intercept", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ travelJobId: tl.travelJobId }),
+                        })
+                          .then((r) => r.json())
+                          .then((j) => {
+                            if (j.ok) setInterceptResult(j.data);
+                          })
+                          .catch(() => {})
+                          .finally(() => setInterceptLoading(null));
+                      }}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <rect
+                        x={midX - 22 / scale} y={midY + 3 / scale}
+                        width={44 / scale} height={12 / scale}
+                        rx={3 / scale}
+                        fill="#7f1d1d" stroke="#ef4444" strokeWidth={0.8 / scale} opacity={0.88}
+                      />
+                      <text
+                        x={midX} y={midY + 12 / scale}
+                        fill="#fca5a5" fontSize={Math.max(5.5, 7 / scale)}
+                        textAnchor="middle" fontWeight="700"
+                      >
+                        ⚔ Intercept
+                      </text>
+                    </g>
+                  )}
+                  {tl.isEnemy && interceptLoading === tl.key && (
+                    <text x={midX} y={midY + 14 / scale} fill="#fca5a5" fontSize={Math.max(5.5, 7 / scale)} textAnchor="middle" opacity={0.7}>attacking…</text>
                   )}
                 </g>
               );
@@ -4328,6 +4380,22 @@ export function GalaxyMapClient({
           systemId={colonyPanelSystemId}
           onClose={() => setColonyPanelSystemId(null)}
         />
+      )}
+
+      {/* Combat result toast */}
+      {interceptResult && (
+        <div className="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-3 rounded-xl border shadow-2xl backdrop-blur-md bg-zinc-950/90 border-red-700/50 text-sm text-zinc-100 max-w-xs">
+          <span className="text-xl">{interceptResult.outcome === "attacker_wins" ? "⚔️" : interceptResult.outcome === "draw" ? "🤝" : "💀"}</span>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-xs uppercase tracking-widest text-red-400">
+              {interceptResult.outcome === "attacker_wins" ? "Victory" : interceptResult.outcome === "draw" ? "Draw" : "Defeat"}
+            </div>
+            {interceptResult.creditsLooted > 0 && (
+              <div className="text-[11px] text-yellow-300">+{interceptResult.creditsLooted} credits looted</div>
+            )}
+          </div>
+          <button onClick={() => setInterceptResult(null)} className="text-zinc-500 hover:text-zinc-200 text-lg leading-none">×</button>
+        </div>
       )}
 
       {/* HUD overlays */}

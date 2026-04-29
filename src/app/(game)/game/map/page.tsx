@@ -569,6 +569,39 @@ export default async function GalaxyMapPage() {
     };
   });
 
+  // ── Enemy travel lines (world-visible — other players' in-transit ships) ──
+  // Only include systems the current player has discovered, to limit scope.
+  type EnemyTravelRow = { id: string; player_id: string; fleet_id: string | null; from_system_id: string; to_system_id: string; arrive_at: string; depart_at: string };
+  const discoveredSystemIdsArr = [...discoveredSystemIds];
+  const { data: enemyTravelRows } = discoveredSystemIdsArr.length > 0
+    ? listResult<EnemyTravelRow>(
+        await admin
+          .from("travel_jobs")
+          .select("id, player_id, fleet_id, from_system_id, to_system_id, arrive_at, depart_at")
+          .neq("player_id", player.id)
+          .eq("status", "pending")
+          .in("to_system_id", discoveredSystemIdsArr),
+      )
+    : { data: [] };
+
+  // Resolve handles for enemy players
+  const enemyPlayerIds = [...new Set((enemyTravelRows ?? []).map((r) => r.player_id))];
+  const enemyHandleMap = new Map<string, string>();
+  if (enemyPlayerIds.length > 0) {
+    type EnemyHandleRow = { id: string; handle: string };
+    const { data: enemyHandleRows } = listResult<EnemyHandleRow>(
+      await admin.from("players").select("id, handle").in("id", enemyPlayerIds),
+    );
+    for (const h of enemyHandleRows ?? []) enemyHandleMap.set(h.id, h.handle);
+  }
+
+  // De-duplicate enemy lines by fleet_id (same approach as own lines)
+  const seenEnemyFleetIds = new Set<string>();
+  const enemyFleetShipCounts = new Map<string, number>();
+  for (const tj of enemyTravelRows ?? []) {
+    if (tj.fleet_id) enemyFleetShipCounts.set(tj.fleet_id, (enemyFleetShipCounts.get(tj.fleet_id) ?? 0) + 1);
+  }
+
   // ── Build travel lines for client ────────────────────────────────────────
   // Pre-count ships per fleet so we can show "×N" badge on fleet icons.
   const fleetShipCounts = new Map<string, number>();
@@ -630,6 +663,9 @@ export default async function GalaxyMapPage() {
         travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
+        isEnemy: false,
+        enemyPlayerId: null,
+        enemyHandle: null,
       });
     } else {
       // Ship job: one line per ship
@@ -647,6 +683,58 @@ export default async function GalaxyMapPage() {
         travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
+        isEnemy: false,
+        enemyPlayerId: null,
+        enemyHandle: null,
+      });
+    }
+  }
+
+  // Append enemy travel lines
+  for (const tj of enemyTravelRows ?? []) {
+    const fromPos = systemSvgMap.get(tj.from_system_id);
+    const toPos   = systemSvgMap.get(tj.to_system_id);
+    if (!fromPos || !toPos) continue;
+
+    const handle = enemyHandleMap.get(tj.player_id) ?? "Unknown";
+
+    if (tj.fleet_id) {
+      if (seenEnemyFleetIds.has(tj.fleet_id)) continue;
+      seenEnemyFleetIds.add(tj.fleet_id);
+      galaxyTravelLines.push({
+        key: `enemy-fleet-${tj.fleet_id}`,
+        x1: fromPos.svgX, y1: fromPos.svgY,
+        x2: toPos.svgX,   y2: toPos.svgY,
+        fromSystemId: tj.from_system_id,
+        toSystemId: tj.to_system_id,
+        label: `${handle}'s Fleet`,
+        isFleet: true,
+        shipCount: enemyFleetShipCounts.get(tj.fleet_id) ?? 1,
+        cargo: [],
+        travelJobId: tj.id,
+        arriveAt: tj.arrive_at,
+        departAt: tj.depart_at,
+        isEnemy: true,
+        enemyPlayerId: tj.player_id,
+        enemyHandle: handle,
+      });
+    } else {
+      galaxyTravelLines.push({
+        key: `enemy-ship-${tj.id}`,
+        x1: fromPos.svgX, y1: fromPos.svgY,
+        x2: toPos.svgX,   y2: toPos.svgY,
+        fromSystemId: tj.from_system_id,
+        toSystemId: tj.to_system_id,
+        label: `${handle}'s Ship`,
+        isFleet: false,
+        shipCount: 1,
+        cargo: [],
+        travelJobId: tj.id,
+        arriveAt: tj.arrive_at,
+        departAt: tj.depart_at,
+        isEnemy: true,
+        enemyPlayerId: tj.player_id,
+        enemyHandle: handle,
       });
     }
   }
