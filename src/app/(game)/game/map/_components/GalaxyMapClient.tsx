@@ -195,6 +195,8 @@ export interface GalaxyTravelLine {
   isFleet: boolean;
   /** Number of ships in this travel group (1 for solo ships). */
   shipCount: number;
+  /** Cargo items being carried by this ship/fleet. */
+  cargo: { resourceType: string; quantity: number }[];
   /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
   departAt: string | null;
@@ -608,6 +610,9 @@ export function GalaxyMapClient({
 
   // ── Map legend ─────────────────────────────────────────────────────────────
   const [legendOpen, setLegendOpen] = useState(false);
+
+  // ── Cargo manifest panel ───────────────────────────────────────────────────
+  const [manifestOpen, setManifestOpen] = useState(false);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -1117,11 +1122,11 @@ export function GalaxyMapClient({
       if (inInput) return;
       const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
         messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
-        colonyPanelSystemId !== null;
+        colonyPanelSystemId !== null || manifestOpen;
       if (anyOverlay) {
         setProfilePanelOpen(false); setMarketPanelOpen(false); setEmpirePanelOpen(false);
         setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false);
-        setShopPanelOpen(false); setColonyPanelSystemId(null);
+        setShopPanelOpen(false); setColonyPanelSystemId(null); setManifestOpen(false);
       } else {
         setSelectedId(null); setSelectedAsteroidId(null);
       }
@@ -1129,7 +1134,7 @@ export function GalaxyMapClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [searchOpen, profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
-      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId]);
+      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId, manifestOpen]);
 
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
@@ -3098,6 +3103,17 @@ export function GalaxyMapClient({
                 <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
               </svg>,
             },
+            {
+              label: "Cargo", bg: "from-emerald-900/70 to-emerald-950/80", border: "border-emerald-800/40", glow: "shadow-emerald-900/40", iconBg: "bg-emerald-950/60", onClick: () => setManifestOpen(true),
+              badge: travelLines.filter((tl) => tl.cargo.length > 0).length || undefined,
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <rect x="3" y="10" width="18" height="11" rx="2" fill="#064e3b" opacity="0.6"/>
+                <rect x="3" y="10" width="18" height="11" rx="2" stroke="#34d399" strokeWidth="1.5"/>
+                <path d="M7 10V7a5 5 0 0110 0v3" stroke="#6ee7b7" strokeWidth="2" strokeLinecap="round"/>
+                <circle cx="12" cy="15.5" r="2" fill="#34d399"/>
+                <line x1="12" y1="14" x2="12" y2="13" stroke="#6ee7b7" strokeWidth="1.5" strokeLinecap="round"/>
+              </svg>,
+            },
           ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode; badge?: number }[]).map((btn) => (
             <button
               key={btn.label}
@@ -4326,6 +4342,58 @@ export function GalaxyMapClient({
             setEquippedFleetSkinId(eq.fleetSkinId);
           }}
         />
+      )}
+
+      {/* ── Cargo Manifest panel ──────────────────────────────────────── */}
+      {manifestOpen && (
+        <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-80 bg-zinc-950/95 border-l border-emerald-900/40 shadow-2xl backdrop-blur-md">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-emerald-900/30">
+            <span className="text-sm font-semibold text-emerald-300 uppercase tracking-widest">Cargo Manifest</span>
+            <button onClick={() => setManifestOpen(false)} className="text-zinc-500 hover:text-zinc-200 transition-colors text-lg leading-none">×</button>
+          </div>
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {travelLines.length === 0 ? (
+              <p className="text-xs text-zinc-600 text-center mt-8">No ships in transit.</p>
+            ) : (
+              travelLines.map((tl) => {
+                const msLeft = tl.arriveAt ? new Date(tl.arriveAt).getTime() - Date.now() : null;
+                const etaStr = msLeft !== null && msLeft > 0 ? formatEta(msLeft / 3600000) : "arriving";
+                const fromSys = systems.find((s) => s.id === tl.fromSystemId);
+                const toSys   = systems.find((s) => s.id === tl.toSystemId);
+                return (
+                  <div key={tl.key} className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 p-3 space-y-2">
+                    {/* Route + ETA header */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-zinc-200 truncate">
+                        {tl.label}{tl.shipCount > 1 ? ` ×${tl.shipCount}` : ""}
+                      </span>
+                      <span className="text-[10px] text-emerald-400 shrink-0">{etaStr}</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-500">
+                      {fromSys?.name ?? tl.fromSystemId} → {toSys?.name ?? tl.toSystemId}
+                    </div>
+                    {/* Cargo rows */}
+                    {tl.cargo.length === 0 ? (
+                      <div className="text-[10px] text-zinc-600 italic">Empty hold</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {tl.cargo.map((c) => (
+                          <div key={c.resourceType} className="flex items-center justify-between text-[11px]">
+                            <span className="capitalize text-zinc-300">{c.resourceType.replace(/_/g, " ")}</span>
+                            <span className="font-mono text-emerald-400 tabular-nums">{c.quantity.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

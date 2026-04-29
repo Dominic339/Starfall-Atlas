@@ -576,6 +576,26 @@ export default async function GalaxyMapPage() {
     if (tj.fleet_id) fleetShipCounts.set(tj.fleet_id, (fleetShipCounts.get(tj.fleet_id) ?? 0) + 1);
   }
 
+  // Fetch cargo for all in-transit ships so we can populate cargo manifests.
+  type CargoRow = { location_id: string; resource_type: string; quantity: number };
+  const inTransitShipIds = travelJobs.map((tj) => tj.ship_id).filter(Boolean);
+  const shipCargoByShipId = new Map<string, { resourceType: string; quantity: number }[]>();
+  if (inTransitShipIds.length > 0) {
+    const { data: cargoRows } = listResult<CargoRow>(
+      await admin
+        .from("resource_inventory")
+        .select("location_id, resource_type, quantity")
+        .eq("location_type", "ship")
+        .in("location_id", inTransitShipIds)
+        .gt("quantity", 0),
+    );
+    for (const row of cargoRows ?? []) {
+      const list = shipCargoByShipId.get(row.location_id) ?? [];
+      list.push({ resourceType: row.resource_type, quantity: row.quantity });
+      shipCargoByShipId.set(row.location_id, list);
+    }
+  }
+
   // Deduplicate by fleet_id so fleet members don't produce N identical lines.
   const seenFleetIds = new Set<string>();
   const galaxyTravelLines: GalaxyTravelLine[] = [];
@@ -589,6 +609,14 @@ export default async function GalaxyMapPage() {
       if (seenFleetIds.has(tj.fleet_id)) continue;
       seenFleetIds.add(tj.fleet_id);
       const fleet = fleets.find((f) => f.id === tj.fleet_id);
+      // Aggregate cargo across all ships in this fleet
+      const fleetShipIds = travelJobs.filter((j) => j.fleet_id === tj.fleet_id).map((j) => j.ship_id);
+      const cargoMap = new Map<string, number>();
+      for (const sid of fleetShipIds) {
+        for (const c of shipCargoByShipId.get(sid) ?? []) {
+          cargoMap.set(c.resourceType, (cargoMap.get(c.resourceType) ?? 0) + c.quantity);
+        }
+      }
       galaxyTravelLines.push({
         key: `fleet-${tj.fleet_id}`,
         x1: fromPos.svgX, y1: fromPos.svgY,
@@ -598,6 +626,7 @@ export default async function GalaxyMapPage() {
         label: fleet?.name ?? "Fleet",
         isFleet: true,
         shipCount: fleetShipCounts.get(tj.fleet_id) ?? 1,
+        cargo: [...cargoMap.entries()].map(([resourceType, quantity]) => ({ resourceType, quantity })),
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
@@ -613,6 +642,7 @@ export default async function GalaxyMapPage() {
         label: ship?.name ?? "Ship",
         isFleet: false,
         shipCount: 1,
+        cargo: shipCargoByShipId.get(tj.ship_id) ?? [],
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
