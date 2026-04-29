@@ -627,6 +627,7 @@ export default async function GalaxyMapPage() {
         isFleet: true,
         shipCount: fleetShipCounts.get(tj.fleet_id) ?? 1,
         cargo: [...cargoMap.entries()].map(([resourceType, quantity]) => ({ resourceType, quantity })),
+        travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
@@ -643,6 +644,7 @@ export default async function GalaxyMapPage() {
         isFleet: false,
         shipCount: 1,
         cargo: shipCargoByShipId.get(tj.ship_id) ?? [],
+        travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });

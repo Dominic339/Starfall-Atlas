@@ -197,6 +197,8 @@ export interface GalaxyTravelLine {
   shipCount: number;
   /** Cargo items being carried by this ship/fleet. */
   cargo: { resourceType: string; quantity: number }[];
+  /** A travel_jobs.id for this line (any member job for fleets). Used for speedups. */
+  travelJobId: string;
   /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
   departAt: string | null;
@@ -613,6 +615,8 @@ export function GalaxyMapClient({
 
   // ── Cargo manifest panel ───────────────────────────────────────────────────
   const [manifestOpen, setManifestOpen] = useState(false);
+  const [speedupLoading, setSpeedupLoading] = useState<string | null>(null); // travelLine key
+  const [speedupError,   setSpeedupError]   = useState<string | null>(null);
 
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
@@ -4353,6 +4357,18 @@ export function GalaxyMapClient({
             <button onClick={() => setManifestOpen(false)} className="text-zinc-500 hover:text-zinc-200 transition-colors text-lg leading-none">×</button>
           </div>
 
+          {/* Speedup hint */}
+          <div className="px-3 py-2 border-b border-zinc-800/40 text-[10px] text-zinc-500">
+            ⚡ Speed Up costs <span className="text-yellow-400 font-semibold">25 credits</span> · cuts 1 hr off travel time
+          </div>
+
+          {/* Error */}
+          {speedupError && (
+            <div className="mx-3 mt-2 px-2 py-1.5 rounded bg-red-950/60 border border-red-800/50 text-[10px] text-red-400">
+              {speedupError}
+            </div>
+          )}
+
           {/* Body */}
           <div className="flex-1 overflow-y-auto p-3 space-y-3">
             {travelLines.length === 0 ? (
@@ -4363,6 +4379,8 @@ export function GalaxyMapClient({
                 const etaStr = msLeft !== null && msLeft > 0 ? formatEta(msLeft / 3600000) : "arriving";
                 const fromSys = systems.find((s) => s.id === tl.fromSystemId);
                 const toSys   = systems.find((s) => s.id === tl.toSystemId);
+                const isArriving = msLeft !== null && msLeft <= 0;
+                const isLoading  = speedupLoading === tl.key;
                 return (
                   <div key={tl.key} className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 p-3 space-y-2">
                     {/* Route + ETA header */}
@@ -4387,6 +4405,32 @@ export function GalaxyMapClient({
                           </div>
                         ))}
                       </div>
+                    )}
+                    {/* Speedup button */}
+                    {!isArriving && (
+                      <button
+                        disabled={isLoading}
+                        onClick={async () => {
+                          setSpeedupError(null);
+                          setSpeedupLoading(tl.key);
+                          try {
+                            const res = await fetch("/api/game/travel/speedup", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ travelJobId: tl.travelJobId }),
+                            });
+                            const json = await res.json();
+                            if (!json.ok) setSpeedupError(json.error ?? "Speedup failed.");
+                          } catch {
+                            setSpeedupError("Network error.");
+                          } finally {
+                            setSpeedupLoading(null);
+                          }
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md bg-yellow-900/30 border border-yellow-700/40 text-[10px] font-semibold text-yellow-300 hover:bg-yellow-900/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isLoading ? "Applying…" : "⚡ Speed Up  (25 cr)"}
+                      </button>
                     )}
                   </div>
                 );
