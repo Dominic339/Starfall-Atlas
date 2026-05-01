@@ -347,74 +347,45 @@ export default async function GalaxyMapPage() {
     totalColonyBySystem.set(c.system_id, (totalColonyBySystem.get(c.system_id) ?? 0) + 1);
   }
 
-  // ── Resolve handles for body stewards ────────────────────────────────────
-  const bodyStewardPlayerIds = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
-  const bodyStewardHandles   = new Map<string, string>();
-  if (bodyStewardPlayerIds.length > 0) {
-    type HandleRowBS = { id: string; handle: string };
-    const { data: bsHandleRows } = listResult<HandleRowBS>(
-      await admin.from("players").select("id, handle").in("id", bodyStewardPlayerIds),
+  // ── Collect all player IDs needing handle lookups ───────────────────────
+  // Merge body-steward, other-station-owner, and first-discoverer IDs into one
+  // batch to avoid three sequential round-trips to the players table.
+  const bodyStewardPlayerIds  = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
+  const otherStationOwnerIds  = [...new Set(otherStationRows.map((s) => s.owner_id))];
+  const firstDiscovererIds    = [...new Set(firstDiscoveries.map((d) => d.player_id))];
+  const allHandleIds = [...new Set([...bodyStewardPlayerIds, ...otherStationOwnerIds, ...firstDiscovererIds])];
+
+  type HandleRow = { id: string; handle: string };
+  const handleMap = new Map<string, string>();
+  if (allHandleIds.length > 0) {
+    const { data: handleRows } = listResult<HandleRow>(
+      await admin.from("players").select("id, handle").in("id", allHandleIds),
     );
-    for (const h of bsHandleRows ?? []) bodyStewardHandles.set(h.id, h.handle);
+    for (const h of handleRows ?? []) handleMap.set(h.id, h.handle);
   }
+
+  const otherStationHandles = handleMap;
 
   const galaxyBodyStewrds: GalaxyBodySteward[] = rawBodyStewrdRows.map((s) => ({
     bodyId:           s.body_id,
     systemId:         s.system_id,
     stewardId:        s.steward_id,
-    stewardHandle:    bodyStewardHandles.get(s.steward_id) ?? "Unknown",
+    stewardHandle:    handleMap.get(s.steward_id) ?? "Unknown",
     isPlayerSteward:  s.steward_id === player.id,
     defaultTaxRatePct: s.default_tax_rate_pct,
   }));
 
-  // ── Build lane + gate lists for client ────────────────────────────────────
-  const rawLaneRows   = listResult<LaneRow2>(lanesRes).data ?? [];
-  const rawGateRows   = listResult<GateRow2>(gatesRes).data ?? [];
-  const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
-
-  const galaxyLanes: GalaxyLane[] = rawLaneRows
-    .filter((l) => systemSvgMap.has(l.from_system_id) && systemSvgMap.has(l.to_system_id))
-    .map((l) => {
-      const from = systemSvgMap.get(l.from_system_id)!;
-      const to   = systemSvgMap.get(l.to_system_id)!;
-      return {
-        id:           l.id,
-        fromSystemId: l.from_system_id,
-        toSystemId:   l.to_system_id,
-        accessLevel:  l.access_level as "public" | "alliance_only" | "private",
-        isOwner:      l.owner_id === player.id,
-        x1: from.svgX, y1: from.svgY,
-        x2: to.svgX,   y2: to.svgY,
-      };
-    });
-
-  // ── Resolve handles for other players' station owners ─────────────────────
-  const otherStationOwnerIds = [...new Set(otherStationRows.map((s) => s.owner_id))];
-  const otherStationHandles  = new Map<string, string>();
-  if (otherStationOwnerIds.length > 0) {
-    type HandleRow2 = { id: string; handle: string };
-    const { data: stationHandleRows } = listResult<HandleRow2>(
-      await admin.from("players").select("id, handle").in("id", otherStationOwnerIds),
-    );
-    for (const h of stationHandleRows ?? []) otherStationHandles.set(h.id, h.handle);
-  }
-
-  // Fetch discoverer handles for first-discovery systems (so panel can show names)
-  const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
-  type HandleRow = { id: string; handle: string };
-  const discovererHandles = new Map<string, string>();
-  if (firstDiscovererIds.length > 0) {
-    const { data: handleRows } = listResult<HandleRow>(
-      await admin.from("players").select("id, handle").in("id", firstDiscovererIds),
-    );
-    for (const h of handleRows ?? []) discovererHandles.set(h.id, h.handle);
-  }
   // Map: systemId → discoverer handle (null if not first-discovered yet)
   const firstDiscovererBySystem = new Map<string, string>();
   for (const d of firstDiscoveries) {
-    const handle = discovererHandles.get(d.player_id);
+    const handle = handleMap.get(d.player_id);
     if (handle) firstDiscovererBySystem.set(d.system_id, handle);
   }
+
+  // ── Parse lane + gate rows (SVG coords computed after systemSvgMap below) ──
+  const rawLaneRows       = listResult<LaneRow2>(lanesRes).data ?? [];
+  const rawGateRows       = listResult<GateRow2>(gatesRes).data ?? [];
+  const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
 
   // ── Resolve beacon alliance tags ──────────────────────────────────────────
   const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
@@ -436,12 +407,14 @@ export default async function GalaxyMapPage() {
   // Resolve all asteroids that have active harvests from this player.
   // This ensures the map shows up-to-date remaining_amount.
   const resolvedAmounts = new Map<string, number>();
-  for (const asteroidId of asteroidsBeingHarvested) {
-    if (activeAsteroidIds.has(asteroidId)) {
-      const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
-      resolvedAmounts.set(asteroidId, newRemaining);
-    }
-  }
+  await Promise.all(
+    [...asteroidsBeingHarvested]
+      .filter((id) => activeAsteroidIds.has(id))
+      .map(async (asteroidId) => {
+        const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
+        resolvedAmounts.set(asteroidId, newRemaining);
+      }),
+  );
 
   // ── Build lookup sets ─────────────────────────────────────────────────────
   const discoveredSystemIds = new Set(discoveries.map((d) => d.system_id));
@@ -485,7 +458,24 @@ export default async function GalaxyMapPage() {
     catalogEntries.map((entry, i) => [entry.id, { svgX: projected[i].svgX, svgY: projected[i].svgY }]),
   );
 
-  // Build GalaxyOtherStation list — must be after systemSvgMap is defined
+  // Build lane SVG coordinate pairs now that systemSvgMap is available
+  const galaxyLanes: GalaxyLane[] = rawLaneRows
+    .filter((l) => systemSvgMap.has(l.from_system_id) && systemSvgMap.has(l.to_system_id))
+    .map((l) => {
+      const from = systemSvgMap.get(l.from_system_id)!;
+      const to   = systemSvgMap.get(l.to_system_id)!;
+      return {
+        id:           l.id,
+        fromSystemId: l.from_system_id,
+        toSystemId:   l.to_system_id,
+        accessLevel:  l.access_level as "public" | "alliance_only" | "private",
+        isOwner:      l.owner_id === player.id,
+        x1: from.svgX, y1: from.svgY,
+        x2: to.svgX,   y2: to.svgY,
+      };
+    });
+
+  // Build GalaxyOtherStation list
   const galaxyOtherStations: GalaxyOtherStation[] = otherStationRows
     .filter((s) => s.current_system_id !== null && systemSvgMap.has(s.current_system_id!))
     .map((s) => {
