@@ -630,11 +630,11 @@ export function GalaxyMapClient({
   const [routeHops, setRouteHops] = useState<string[] | null>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  const systemMap = new Map(systems.map((s) => [s.id, s]));
-  const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
-  const currentSystem = systems.find((s) => s.isCurrentLocation) ?? null;
-  const stationSystem = systems.find((s) => s.isStationLocation) ?? null;
-  const dockedShip = ships.find((s) => s.systemId != null) ?? null;
+  const systemMap   = useMemo(() => new Map(systems.map((s) => [s.id, s])),   [systems]);
+  const asteroidMap = useMemo(() => new Map(asteroids.map((a) => [a.id, a])), [asteroids]);
+  const currentSystem = useMemo(() => systems.find((s) => s.isCurrentLocation) ?? null, [systems]);
+  const stationSystem = useMemo(() => systems.find((s) => s.isStationLocation) ?? null, [systems]);
+  const dockedShip    = useMemo(() => ships.find((s) => s.systemId != null) ?? null, [ships]);
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
 
   // Quick lookup: system ID → which alliance territory it belongs to (if any)
@@ -645,20 +645,19 @@ export function GalaxyMapClient({
   }, [territories]);
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
 
-  // Search results (top 8 by name prefix match, then substring)
-  const searchResults = searchOpen && searchQuery.trim().length > 0
-    ? (() => {
-        const q = searchQuery.trim().toLowerCase();
-        return systems
-          .filter((s) => s.name.toLowerCase().includes(q))
-          .sort((a, b) => {
-            const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-            const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-            return aStart - bStart || a.name.localeCompare(b.name);
-          })
-          .slice(0, 8);
-      })()
-    : [];
+  // Search results (top 8 by name prefix match, then substring) — memoized
+  const searchResults = useMemo(() => {
+    if (!searchOpen || !searchQuery.trim()) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return systems
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return aStart - bStart || a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+  }, [searchOpen, searchQuery, systems]);
 
   // Travel range circle radius in SVG base coords
   const rangeRadius = baseRangeLy * pixelsPerLy;
@@ -690,29 +689,44 @@ export function GalaxyMapClient({
     ? asteroids.filter((a) => a.systemId === selectedSystem.id).length
     : 0;
 
-  // Beacons grouped by system (for SVG markers)
-  const beaconsBySystem = new Map<string, GalaxyBeacon[]>();
-  for (const b of beacons) {
-    const list = beaconsBySystem.get(b.systemId) ?? [];
-    list.push(b);
-    beaconsBySystem.set(b.systemId, list);
-  }
-  // Beacons in the selected system
+  // Beacons grouped by system (for SVG markers) — memoized
+  const beaconsBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyBeacon[]>();
+    for (const b of beacons) {
+      const list = m.get(b.systemId) ?? [];
+      list.push(b);
+      m.set(b.systemId, list);
+    }
+    return m;
+  }, [beacons]);
   const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
 
-  // Territories that contain the selected system
-  const territoriesInSelected = selectedSystem
-    ? territories.filter((t) => t.systemIds.includes(selectedSystem.id))
-    : [];
+  // Territories that contain the selected system — use O(1) map lookup
+  const selectedTerritory = selectedSystem ? (systemTerritoryMap.get(selectedSystem.id) ?? null) : null;
+  const territoriesInSelected = selectedTerritory ? [selectedTerritory] : [];
 
-  // Disputes indexed by beacon system id
-  const disputesBySystem = new Map<string, GalaxyDispute[]>();
-  for (const d of disputes) {
-    const list = disputesBySystem.get(d.beaconSystemId) ?? [];
-    list.push(d);
-    disputesBySystem.set(d.beaconSystemId, list);
-  }
+  // Disputes indexed by beacon system id — memoized
+  const disputesBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyDispute[]>();
+    for (const d of disputes) {
+      const list = m.get(d.beaconSystemId) ?? [];
+      list.push(d);
+      m.set(d.beaconSystemId, list);
+    }
+    return m;
+  }, [disputes]);
   const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
+
+  // Body stewards grouped by system — memoized so the system panel filter is O(1)
+  const stewrdsBySystem = useMemo(() => {
+    const m = new Map<string, typeof bodyStewrds>();
+    for (const s of bodyStewrds) {
+      const list = m.get(s.systemId) ?? [];
+      list.push(s);
+      m.set(s.systemId, list);
+    }
+    return m;
+  }, [bodyStewrds]);
 
   // latest-value refs (avoid stale closures in useCallback handlers)
   const latestTransform = useRef(transform);
@@ -724,15 +738,18 @@ export function GalaxyMapClient({
   const canTravelRef = useRef(false);
   const handleTravelRef = useRef<(() => void) | null>(null);
 
-  // Ships grouped by system for drag marker positioning
-  const shipsBySystem = new Map<string, GalaxyShip[]>();
-  for (const ship of ships) {
-    if (ship.systemId) {
-      const list = shipsBySystem.get(ship.systemId) ?? [];
-      list.push(ship);
-      shipsBySystem.set(ship.systemId, list);
+  // Ships grouped by system for drag marker positioning — memoized
+  const shipsBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyShip[]>();
+    for (const ship of ships) {
+      if (ship.systemId) {
+        const list = m.get(ship.systemId) ?? [];
+        list.push(ship);
+        m.set(ship.systemId, list);
+      }
     }
-  }
+    return m;
+  }, [ships]);
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -3738,7 +3755,7 @@ export function GalaxyMapClient({
                           >
                             {disputeLoading === b.id
                               ? "Challenging…"
-                              : `Challenge [{${b.allianceTag}}] Beacon`}
+                              : `Challenge [${b.allianceTag}] Beacon`}
                           </button>
                         ))}
                       </div>
@@ -3816,7 +3833,7 @@ export function GalaxyMapClient({
 
               {/* ── Body stewardship ───────────────────────────────────── */}
               {(() => {
-                const stewrdsHere = bodyStewrds.filter((s) => s.systemId === selectedSystem.id);
+                const stewrdsHere = stewrdsBySystem.get(selectedSystem.id) ?? [];
                 if (stewrdsHere.length === 0) return null;
                 return (
                   <div className="py-2">

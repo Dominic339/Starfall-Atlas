@@ -195,6 +195,36 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // ── Attacker must hold a beacon in a neighboring system ──────────────────
+  // "Neighboring" = within beacon link range of the contested system.
+  const { data: attackerBeacons } = listResult<AllBeaconRow>(
+    await admin
+      .from("alliance_beacons")
+      .select("id, alliance_id, system_id")
+      .eq("alliance_id", callerAllianceId)
+      .eq("is_active", true),
+  );
+
+  const targetPos = catalogBySystem.get(beacon.system_id);
+  const maxDist   = BALANCE.alliance.beaconLinkMaxDistanceLy;
+
+  if (targetPos && (attackerBeacons ?? []).length > 0) {
+    const hasNeighbor = (attackerBeacons ?? []).some((ab) => {
+      const aPos = catalogBySystem.get(ab.system_id);
+      if (!aPos) return false;
+      const dx = aPos.x - targetPos.x, dy = aPos.y - targetPos.y;
+      return Math.sqrt(dx * dx + dy * dy) <= maxDist;
+    });
+    if (!hasNeighbor) {
+      return toErrorResponse(
+        fail(
+          "invalid_target",
+          `Your alliance must control a system within ${maxDist} ly of the disputed system to challenge it.`,
+        ).error,
+      );
+    }
+  }
+
   // ── Create the dispute ────────────────────────────────────────────────────
   const resolvesAt = new Date(
     now.getTime() + BALANCE.disputes.windowHours * 60 * 60 * 1000,
