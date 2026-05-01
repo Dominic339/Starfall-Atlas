@@ -17,7 +17,7 @@ import { systemDisplayName } from "@/lib/catalog";
 import { getNearbySystems } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player, Fleet, Ship, TravelJob } from "@/lib/types/game";
-import { DisbandFleetButton, DispatchFleetForm } from "../../_components/FleetActions";
+import { DisbandFleetButton, DispatchFleetForm, RenameFleetButton } from "../../_components/FleetActions";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +101,10 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">{fleet.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-zinc-100">{fleet.name}</h1>
+            <RenameFleetButton fleetId={fleet.id} currentName={fleet.name} />
+          </div>
           <p className="mt-0.5 text-sm text-zinc-500">
             {fleet.status === "traveling" ? (
               <>

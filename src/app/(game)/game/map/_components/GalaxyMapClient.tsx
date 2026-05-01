@@ -3968,6 +3968,29 @@ export function GalaxyMapClient({
                       </div>
                     )}
 
+                    {/* Ships en route to this system */}
+                    {shipsInTransit.filter((s) => s.destinationSystemId === selectedSystem.id).length > 0 && (
+                      <div className="mb-3">
+                        <p className="mb-1.5 text-xs text-zinc-700">Incoming</p>
+                        <div className="space-y-1">
+                          {shipsInTransit
+                            .filter((s) => s.destinationSystemId === selectedSystem.id)
+                            .map((ship) => {
+                              const tl = travelLines.find((t) => t.key.includes(ship.id) || (t.isFleet && fleets.find((f) => f.id === t.key.replace("fleet-","") && f.destinationSystemId === selectedSystem.id)));
+                              const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                              const eta = msLeft !== null && msLeft > 0 ? formatEta(msLeft / 3600000) : "arriving";
+                              return (
+                                <div key={ship.id} className="flex items-center gap-2 rounded border border-sky-900/40 bg-sky-950/20 px-2.5 py-1.5">
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400 opacity-70 animate-pulse" />
+                                  <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
+                                  <span className="text-[10px] text-sky-500 shrink-0">{eta}</span>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Eligible ships to dispatch here */}
                     {inRange.length > 0 && (
                       <div className="mb-3">

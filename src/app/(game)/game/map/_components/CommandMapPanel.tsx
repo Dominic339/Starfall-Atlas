@@ -282,6 +282,28 @@ function ShipCard({
     : 0;
   const err = upgradeError?.shipId === ship.id ? upgradeError.text : null;
 
+  const [renaming, setRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState(ship.name);
+  const [displayName, setDisplayName] = useState(ship.name);
+  const [renameLoading, setRenameLoading] = useState(false);
+
+  async function submitRename() {
+    const trimmed = renameValue.trim();
+    if (!trimmed || trimmed === displayName) { setRenaming(false); return; }
+    setRenameLoading(true);
+    try {
+      const res = await fetch("/api/game/ship/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ shipId: ship.id, name: trimmed }),
+      });
+      const json = await res.json();
+      if (json.ok) { setDisplayName(trimmed); setRenaming(false); }
+    } finally {
+      setRenameLoading(false);
+    }
+  }
+
   return (
     <div className="rounded-xl border border-zinc-800 bg-zinc-900/60 overflow-hidden">
 
@@ -289,7 +311,30 @@ function ShipCard({
       <div className="flex items-start justify-between gap-3 px-4 py-3 bg-gradient-to-r from-zinc-900/80 to-zinc-950/60">
         <div className="min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
-            <h3 className="text-sm font-bold text-zinc-200">{ship.name}</h3>
+            {renaming ? (
+              <input
+                autoFocus
+                value={renameValue}
+                onChange={(e) => setRenameValue(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submitRename();
+                  if (e.key === "Escape") { setRenaming(false); setRenameValue(displayName); }
+                }}
+                onBlur={submitRename}
+                disabled={renameLoading}
+                maxLength={32}
+                className="text-sm font-bold bg-transparent border-b border-zinc-500 text-zinc-200 focus:outline-none focus:border-indigo-400 w-36"
+              />
+            ) : (
+              <h3
+                className="text-sm font-bold text-zinc-200 cursor-pointer hover:text-white group flex items-center gap-1"
+                onClick={() => { setRenaming(true); setRenameValue(displayName); }}
+                title="Click to rename"
+              >
+                {displayName}
+                <span className="opacity-0 group-hover:opacity-40 text-zinc-400 text-[10px]">✎</span>
+              </h3>
+            )}
             <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold border ${ts.border} ${ts.bg} ${ts.text}`}>
               {ts.label}
             </span>
