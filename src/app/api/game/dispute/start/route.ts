@@ -51,159 +51,91 @@ export async function POST(request: NextRequest) {
   // ── Lazy resolution pass ──────────────────────────────────────────────────
   await resolveOverdueDisputes(admin);
 
-  // ── Caller must be in an alliance as officer or founder ───────────────────
-  type MemberRow = { alliance_id: string; role: string };
-  const { data: membership } = maybeSingleResult<MemberRow>(
-    await admin
-      .from("alliance_members")
-      .select("alliance_id, role")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  type MemberRow    = { alliance_id: string; role: string };
+  type BeaconRow    = { id: string; alliance_id: string; system_id: string; is_active: boolean };
 
+  // ── Batch 1: caller membership + target beacon (parallel) ─────────────────
+  const [membershipRes, beaconRes] = await Promise.all([
+    admin.from("alliance_members").select("alliance_id, role").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliance_beacons").select("id, alliance_id, system_id, is_active").eq("id", beaconId).maybeSingle(),
+  ]);
+
+  const { data: membership } = maybeSingleResult<MemberRow>(membershipRes);
   if (!membership) {
     return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
   }
   if (membership.role === "member") {
-    return toErrorResponse(
-      fail("forbidden", "Only officers and founders can open disputes.").error,
-    );
+    return toErrorResponse(fail("forbidden", "Only officers and founders can open disputes.").error);
   }
 
-  const callerAllianceId = membership.alliance_id;
-
-  // ── Fetch target beacon ───────────────────────────────────────────────────
-  type BeaconRow = {
-    id: string;
-    alliance_id: string;
-    system_id: string;
-    is_active: boolean;
-  };
-  const { data: beacon } = maybeSingleResult<BeaconRow>(
-    await admin
-      .from("alliance_beacons")
-      .select("id, alliance_id, system_id, is_active")
-      .eq("id", beaconId)
-      .maybeSingle(),
-  );
-
+  const { data: beacon } = maybeSingleResult<BeaconRow>(beaconRes);
   if (!beacon || !beacon.is_active) {
     return toErrorResponse(fail("not_found", "Beacon not found or not active.").error);
   }
+
+  const callerAllianceId = membership.alliance_id;
   if (beacon.alliance_id === callerAllianceId) {
-    return toErrorResponse(
-      fail("invalid_target", "You cannot dispute your own alliance's beacon.").error,
-    );
+    return toErrorResponse(fail("invalid_target", "You cannot dispute your own alliance's beacon.").error);
   }
 
-  // ── Check for existing active dispute ─────────────────────────────────────
-  type DisputeExistsRow = { id: string };
-  const { data: existingDispute } = maybeSingleResult<DisputeExistsRow>(
-    await admin
-      .from("disputes")
-      .select("id")
-      .eq("beacon_id", beaconId)
-      .eq("status", "open")
-      .maybeSingle(),
-  );
-
-  if (existingDispute) {
-    return toErrorResponse(
-      fail("already_exists", "This beacon already has an active dispute.").error,
-    );
-  }
-
-  // ── Check beacon cooldown ─────────────────────────────────────────────────
+  // ── Batch 2: dispute check, cooldown, defending beacons+alliance, attacker beacons ──
   const now = new Date();
-  type CooldownRow = { id: string; expires_at: string };
-  const { data: cooldown } = maybeSingleResult<CooldownRow>(
-    await admin
-      .from("beacon_cooldowns")
-      .select("id, expires_at")
-      .eq("beacon_id", beaconId)
-      .gt("expires_at", now.toISOString())
-      .maybeSingle(),
-  );
+  type DisputeExistsRow = { id: string };
+  type CooldownRow      = { id: string; expires_at: string };
+  type AllBeaconRow     = { id: string; alliance_id: string; system_id: string };
+  type AllianceRow      = { id: string; name: string; tag: string };
 
+  const [existingDisputeRes, cooldownRes, defendingBeaconsRes, defendingAllianceRes, attackerBeaconsRes] =
+    await Promise.all([
+      admin.from("disputes").select("id").eq("beacon_id", beaconId).eq("status", "open").maybeSingle(),
+      admin.from("beacon_cooldowns").select("id, expires_at").eq("beacon_id", beaconId).gt("expires_at", now.toISOString()).maybeSingle(),
+      admin.from("alliance_beacons").select("id, alliance_id, system_id").eq("alliance_id", beacon.alliance_id).eq("is_active", true),
+      admin.from("alliances").select("id, name, tag").eq("id", beacon.alliance_id).maybeSingle(),
+      admin.from("alliance_beacons").select("id, alliance_id, system_id").eq("alliance_id", callerAllianceId).eq("is_active", true),
+    ]);
+
+  const { data: existingDispute } = maybeSingleResult<DisputeExistsRow>(existingDisputeRes);
+  if (existingDispute) {
+    return toErrorResponse(fail("already_exists", "This beacon already has an active dispute.").error);
+  }
+
+  const { data: cooldown } = maybeSingleResult<CooldownRow>(cooldownRes);
   if (cooldown) {
     const expiresAt = new Date(cooldown.expires_at);
     const hoursLeft = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60));
     return toErrorResponse(
-      fail(
-        "invalid_target",
-        `This beacon is on cooldown for another ~${hoursLeft} hour${hoursLeft !== 1 ? "s" : ""}.`,
-      ).error,
+      fail("invalid_target", `This beacon is on cooldown for another ~${hoursLeft} hour${hoursLeft !== 1 ? "s" : ""}.`).error,
     );
   }
 
-  // ── Check disputability: beacon must NOT be safely inside a territory ─────
-  // Fetch all active beacons for the defending alliance
-  type AllBeaconRow = { id: string; alliance_id: string; system_id: string };
-  const { data: defendingBeacons } = listResult<AllBeaconRow>(
-    await admin
-      .from("alliance_beacons")
-      .select("id, alliance_id, system_id")
-      .eq("alliance_id", beacon.alliance_id)
-      .eq("is_active", true),
-  );
-
-  const allDefendingBeacons = defendingBeacons ?? [];
-
-  // Build catalog data
+  // ── Territory check ───────────────────────────────────────────────────────
+  const allDefendingBeacons = listResult<AllBeaconRow>(defendingBeaconsRes).data ?? [];
   const catalog = getAllCatalogEntries();
   const catalogBySystem = new Map(catalog.map((e) => [e.id, { x: e.x, y: e.y }]));
   const allSystems = catalog.map((e) => ({ systemId: e.id, x: e.x, y: e.y }));
 
-  // Fetch defending alliance tag/name for territory computation
-  type AllianceRow = { id: string; name: string; tag: string };
-  const { data: defendingAlliance } = maybeSingleResult<AllianceRow>(
-    await admin
-      .from("alliances")
-      .select("id, name, tag")
-      .eq("id", beacon.alliance_id)
-      .maybeSingle(),
-  );
-
+  const { data: defendingAlliance } = maybeSingleResult<AllianceRow>(defendingAllianceRes);
   if (defendingAlliance) {
     const allianceMap = new Map([
       [beacon.alliance_id, { name: defendingAlliance.name, tag: defendingAlliance.tag }],
     ]);
-
     const territoryResults = computeAllTerritories({
-      beacons: allDefendingBeacons.map((b) => ({
-        id: b.id,
-        allianceId: b.alliance_id,
-        systemId: b.system_id,
-      })),
+      beacons: allDefendingBeacons.map((b) => ({ id: b.id, allianceId: b.alliance_id, systemId: b.system_id })),
       alliances: allianceMap,
       catalogBySystem,
       allSystems,
       maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
     });
-
     const territory = territoryResults[0];
-    if (territory?.hasValidTerritory) {
-      // If the beacon's system is inside the territory polygon, it is protected
-      if (territory.systemsInTerritory.includes(beacon.system_id)) {
-        return toErrorResponse(
-          fail(
-            "invalid_target",
-            "This beacon is safely inside a completed territory and cannot be disputed.",
-          ).error,
-        );
-      }
+    if (territory?.hasValidTerritory && territory.systemsInTerritory.includes(beacon.system_id)) {
+      return toErrorResponse(
+        fail("invalid_target", "This beacon is safely inside a completed territory and cannot be disputed.").error,
+      );
     }
   }
 
   // ── Attacker must hold a beacon in a neighboring system ──────────────────
-  // "Neighboring" = within beacon link range of the contested system.
-  const { data: attackerBeacons } = listResult<AllBeaconRow>(
-    await admin
-      .from("alliance_beacons")
-      .select("id, alliance_id, system_id")
-      .eq("alliance_id", callerAllianceId)
-      .eq("is_active", true),
-  );
+  const { data: attackerBeacons } = listResult<AllBeaconRow>(attackerBeaconsRes);
 
   const targetPos = catalogBySystem.get(beacon.system_id);
   const maxDist   = BALANCE.alliance.beaconLinkMaxDistanceLy;
