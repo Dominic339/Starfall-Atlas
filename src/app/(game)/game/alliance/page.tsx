@@ -93,149 +93,77 @@ export default async function AlliancePage() {
   let beacons: BeaconRow[] = [];
   let activeBeaconCount = 0;
 
-  if (membership) {
-    // ── Fetch alliance details ──────────────────────────────────────────────
-    type AllianceRow = {
-      id: string;
-      name: string;
-      tag: string;
-      invite_code: string;
-      member_count: number;
-    };
-    const { data: alliance } = maybeSingleResult<AllianceRow>(
-      await admin
-        .from("alliances")
-        .select("id, name, tag, invite_code, member_count")
-        .eq("id", membership.alliance_id)
-        .maybeSingle(),
-    );
+  const pageNow = new Date();
 
+  if (membership) {
+    type AllianceRow    = { id: string; name: string; tag: string; invite_code: string; member_count: number };
+    type RawMemberRow   = { id: string; player_id: string; role: AllianceRole; alliance_credits: number };
+    type RawBeaconRow   = { id: string; system_id: string; placed_at: string };
+    type RawGoalRow     = { id: string; title: string; resource_type: string; quantity_target: number; quantity_filled: number; credit_reward: number; deadline_at: string; completed_at: string | null };
+    type RawStorageRow  = { resource_type: string; quantity: number };
+
+    const nowIso = pageNow.toISOString();
+
+    // ── Batch 1: all independent membership queries in parallel ────────────
+    const [allianceRes, membersRes, beaconsRes, goalsRes, storageRes, stationRes] = await Promise.all([
+      admin.from("alliances").select("id, name, tag, invite_code, member_count").eq("id", membership.alliance_id).maybeSingle(),
+      admin.from("alliance_members").select("id, player_id, role, alliance_credits").eq("alliance_id", membership.alliance_id).order("joined_at", { ascending: true }),
+      admin.from("alliance_beacons").select("id, system_id, placed_at").eq("alliance_id", membership.alliance_id).eq("is_active", true).order("placed_at", { ascending: true }),
+      admin.from("alliance_goals").select("id, title, resource_type, quantity_target, quantity_filled, credit_reward, deadline_at, completed_at").eq("alliance_id", membership.alliance_id).eq("expired", false).is("completed_at", null).gt("deadline_at", nowIso).order("deadline_at", { ascending: true }),
+      admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "alliance_storage").eq("location_id", membership.alliance_id),
+      admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+    ]);
+
+    // Parse alliance
+    const alliance = maybeSingleResult<AllianceRow>(allianceRes).data;
     if (alliance) {
-      allianceData = {
-        id: alliance.id,
-        name: alliance.name,
-        tag: alliance.tag,
-        inviteCode: alliance.invite_code,
-        memberCount: alliance.member_count,
-      };
+      allianceData = { id: alliance.id, name: alliance.name, tag: alliance.tag, inviteCode: alliance.invite_code, memberCount: alliance.member_count };
     }
 
-    // ── Fetch all members with player handles ──────────────────────────────
-    type RawMemberRow = { id: string; player_id: string; role: AllianceRole; alliance_credits: number };
-    const { data: rawMembers } = listResult<RawMemberRow>(
-      await admin
-        .from("alliance_members")
-        .select("id, player_id, role, alliance_credits")
-        .eq("alliance_id", membership.alliance_id)
-        .order("joined_at", { ascending: true }),
-    );
+    // Parse members
+    const memberRows = listResult<RawMemberRow>(membersRes).data ?? [];
+    const playerIds  = memberRows.map((m) => m.player_id);
 
-    const memberRows = rawMembers ?? [];
-    const playerIds = memberRows.map((m) => m.player_id);
+    // Parse beacons
+    const rawBeaconsData = listResult<RawBeaconRow>(beaconsRes).data ?? [];
+    activeBeaconCount = rawBeaconsData.length;
+    const catalog = getAllCatalogEntries();
+    const systemNameMap = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
+    beacons = rawBeaconsData.map((b) => ({
+      id: b.id, systemId: b.system_id, systemName: systemNameMap.get(b.system_id) ?? b.system_id, placedAt: b.placed_at,
+    }));
+
+    // Parse goals + storage
+    goals = ((goalsRes.data ?? []) as RawGoalRow[]).map((g) => ({
+      id: g.id, title: g.title, resourceType: g.resource_type, quantityTarget: g.quantity_target,
+      quantityFilled: g.quantity_filled, creditReward: g.credit_reward, deadlineAt: g.deadline_at, completedAt: g.completed_at,
+    }));
+    storage = ((storageRes.data ?? []) as RawStorageRow[]).map((r) => ({ resourceType: r.resource_type, quantity: r.quantity }));
+
+    // Parse station ID
+    const stationId = maybeSingleResult<{ id: string }>(stationRes).data?.id ?? null;
+
+    // ── Batch 2: handle lookup + station inventory (parallel) ─────────────
+    const [handleRes, stationInvRes] = await Promise.all([
+      playerIds.length > 0
+        ? admin.from("players").select("id, handle").in("id", playerIds)
+        : Promise.resolve({ data: [] }),
+      stationId
+        ? admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", stationId).order("quantity", { ascending: false })
+        : Promise.resolve({ data: [] }),
+    ]);
 
     type HandleRow = { id: string; handle: string };
     const handleMap = new Map<string, string>();
-    if (playerIds.length > 0) {
-      const { data: handleRows } = listResult<HandleRow>(
-        await admin.from("players").select("id, handle").in("id", playerIds),
-      );
-      for (const h of handleRows ?? []) handleMap.set(h.id, h.handle);
-    }
+    for (const h of (listResult<HandleRow>(handleRes).data ?? [])) handleMap.set(h.id, h.handle);
 
     members = memberRows.map((m) => ({
-      id: m.id,
-      playerId: m.player_id,
-      handle: handleMap.get(m.player_id) ?? "Unknown",
-      role: m.role,
-      allianceCredits: m.alliance_credits,
+      id: m.id, playerId: m.player_id, handle: handleMap.get(m.player_id) ?? "Unknown", role: m.role, allianceCredits: m.alliance_credits,
     }));
 
-    // ── Fetch active beacons ───────────────────────────────────────────────
-    type RawBeaconRow = { id: string; system_id: string; placed_at: string };
-    const { data: rawBeacons } = listResult<RawBeaconRow>(
-      await admin
-        .from("alliance_beacons")
-        .select("id, system_id, placed_at")
-        .eq("alliance_id", membership.alliance_id)
-        .eq("is_active", true)
-        .order("placed_at", { ascending: true }),
-    );
+    stationInventory = ((stationInvRes.data ?? []) as RawStorageRow[]).map((r) => ({ resourceType: r.resource_type, quantity: r.quantity }));
 
-    activeBeaconCount = rawBeacons?.length ?? 0;
-
-    // Enrich with system names from catalog
-    const catalog = getAllCatalogEntries();
-    const systemNameMap = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
-
-    beacons = (rawBeacons ?? []).map((b) => ({
-      id: b.id,
-      systemId: b.system_id,
-      systemName: systemNameMap.get(b.system_id) ?? b.system_id,
-      placedAt: b.placed_at,
-    }));
-
-    // ── Fetch active goals, alliance storage, player station + credits ─────
-    const now = new Date().toISOString();
-    type RawGoalRow = {
-      id: string; title: string; resource_type: string;
-      quantity_target: number; quantity_filled: number;
-      credit_reward: number; deadline_at: string; completed_at: string | null;
-    };
-    type RawStorageRow = { resource_type: string; quantity: number };
-
-    const [goalsRes, storageRes, stationRes] = await Promise.all([
-      admin
-        .from("alliance_goals")
-        .select("id, title, resource_type, quantity_target, quantity_filled, credit_reward, deadline_at, completed_at")
-        .eq("alliance_id", membership.alliance_id)
-        .eq("expired", false)
-        .is("completed_at", null)
-        .gt("deadline_at", now)
-        .order("deadline_at", { ascending: true }),
-      admin
-        .from("resource_inventory")
-        .select("resource_type, quantity")
-        .eq("location_type", "alliance_storage")
-        .eq("location_id", membership.alliance_id),
-      admin
-        .from("player_stations")
-        .select("id")
-        .eq("owner_id", player.id)
-        .maybeSingle(),
-    ]);
-
-    goals = ((goalsRes.data ?? []) as RawGoalRow[]).map((g) => ({
-      id: g.id,
-      title: g.title,
-      resourceType: g.resource_type,
-      quantityTarget: g.quantity_target,
-      quantityFilled: g.quantity_filled,
-      creditReward: g.credit_reward,
-      deadlineAt: g.deadline_at,
-      completedAt: g.completed_at,
-    }));
-
-    storage = ((storageRes.data ?? []) as RawStorageRow[]).map((r) => ({
-      resourceType: r.resource_type,
-      quantity: r.quantity,
-    }));
-
-    const stationId = (stationRes.data as { id: string } | null)?.id ?? null;
-    if (stationId) {
-      const { data: stInv } = await admin
-        .from("resource_inventory")
-        .select("resource_type, quantity")
-        .eq("location_type", "station")
-        .eq("location_id", stationId)
-        .order("quantity", { ascending: false });
-      stationInventory = ((stInv ?? []) as RawStorageRow[]).map((r) => ({
-        resourceType: r.resource_type,
-        quantity: r.quantity,
-      }));
-    }
-
-    playerAllianceCredits =
-      members.find((m) => m.playerId === player.id)?.allianceCredits ?? 0;
+    playerAllianceCredits = members.find((m) => m.playerId === player.id)?.allianceCredits ?? 0;
   }
 
   // ── Fetch disputes involving this alliance ────────────────────────────────
@@ -266,21 +194,62 @@ export default async function AlliancePage() {
     msLeft: number;
   };
 
-  const pageNow = new Date();
   let allianceDisputes: DisputePanelEntry[] = [];
 
-  if (membership) {
-    const { data: rawDisputes } = listResult<DisputePanelRow>(
-      await admin
-        .from("disputes")
-        .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, status, opened_at, resolves_at, resolved_at, winner_alliance_id")
-        .or(`defending_alliance_id.eq.${membership.alliance_id},attacking_alliance_id.eq.${membership.alliance_id}`)
-        .order("opened_at", { ascending: false })
-        .limit(20),
-    );
+  // ── Catalog systems (synchronous, in-memory) ──────────────────────────────
+  const catalog = getAllCatalogEntries();
+  const catalogSystems = catalog.map((e) => ({ id: e.id, name: e.properName ?? e.id }));
 
-    // Build a map of beacon_id → {system_id} for enrichment
-    const disputeBeaconIds = [...new Set((rawDisputes ?? []).map((d) => d.beacon_id))];
+  // ── Compute territory (synchronous) ──────────────────────────────────────
+  let hasValidTerritory = false;
+  let territorySystems: string[] = [];
+  let linkCount = 0;
+
+  if (membership && beacons.length > 0 && allianceData) {
+    const catalogBySystem = new Map(catalog.map((e) => [e.id, { x: e.x, y: e.y }]));
+    const allSystems      = catalog.map((e) => ({ systemId: e.id, x: e.x, y: e.y }));
+
+    const territoryResults = computeAllTerritories({
+      beacons: beacons.map((b) => ({ id: b.id, allianceId: membership.alliance_id, systemId: b.systemId })),
+      alliances: new Map([[membership.alliance_id, { name: allianceData.name, tag: allianceData.tag }]]),
+      catalogBySystem,
+      allSystems,
+      maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
+    });
+
+    const result = territoryResults[0];
+    if (result) {
+      hasValidTerritory = result.hasValidTerritory;
+      territorySystems  = result.systemsInTerritory;
+      linkCount         = result.links.length;
+    }
+  }
+
+  // ── Disputes + fleets (parallel) ─────────────────────────────────────────
+  type FleetRow = { id: string; name: string; current_system_id: string | null };
+  const [disputesRes, fleetRes] = await Promise.all([
+    membership
+      ? admin
+          .from("disputes")
+          .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, status, opened_at, resolves_at, resolved_at, winner_alliance_id")
+          .or(`defending_alliance_id.eq.${membership.alliance_id},attacking_alliance_id.eq.${membership.alliance_id}`)
+          .order("opened_at", { ascending: false })
+          .limit(20)
+      : Promise.resolve({ data: [] }),
+    admin
+      .from("fleets")
+      .select("id, name, current_system_id")
+      .eq("player_id", player.id)
+      .eq("status", "active")
+      .is("dispute_commit_id", null)
+      .order("created_at", { ascending: true }),
+  ]);
+
+  if (membership) {
+    const rawDisputes = listResult<DisputePanelRow>(disputesRes).data ?? [];
+
+    // Enrich disputes with beacon system IDs
+    const disputeBeaconIds = [...new Set(rawDisputes.map((d) => d.beacon_id))];
     type BeaconSysRow = { id: string; system_id: string };
     const beaconSysMap = new Map<string, string>();
     if (disputeBeaconIds.length > 0) {
@@ -290,10 +259,9 @@ export default async function AlliancePage() {
       for (const b of bRows ?? []) beaconSysMap.set(b.id, b.system_id);
     }
 
-    const catalogLocal = getAllCatalogEntries();
-    const sysNameMapLocal = new Map(catalogLocal.map((e) => [e.id, e.properName ?? e.id]));
+    const sysNameMapLocal = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
 
-    allianceDisputes = (rawDisputes ?? []).map((d) => {
+    allianceDisputes = rawDisputes.map((d) => {
       const sysId = beaconSysMap.get(d.beacon_id) ?? "";
       return {
         id:                  d.id,
@@ -313,64 +281,12 @@ export default async function AlliancePage() {
     });
   }
 
-  // ── Catalog systems for beacon placement selector ─────────────────────────
-  const catalog = getAllCatalogEntries();
-  const catalogSystems = catalog.map((e) => ({
-    id: e.id,
-    name: e.properName ?? e.id,
-  }));
-
-  // ── Compute territory for this alliance (if any) ──────────────────────────
-  let hasValidTerritory = false;
-  let territorySystems: string[] = [];
-  let linkCount = 0;
-
-  if (membership && beacons.length > 0 && allianceData) {
-    const catalogBySystem = new Map(catalog.map((e) => [e.id, { x: e.x, y: e.y }]));
-    const allSystems      = catalog.map((e) => ({ systemId: e.id, x: e.x, y: e.y }));
-
-    const territoryResults = computeAllTerritories({
-      beacons: beacons.map((b) => ({
-        id: b.id,
-        allianceId: membership.alliance_id,
-        systemId: b.systemId,
-      })),
-      alliances: new Map([[membership.alliance_id, { name: allianceData.name, tag: allianceData.tag }]]),
-      catalogBySystem,
-      allSystems,
-      maxLinkDist: BALANCE.alliance.beaconLinkMaxDistanceLy,
-    });
-
-    const result = territoryResults[0];
-    if (result) {
-      hasValidTerritory = result.hasValidTerritory;
-      territorySystems  = result.systemsInTerritory;
-      linkCount         = result.links.length;
-    }
-  }
-
-  // ── Fetch player's active fleets (for dispute reinforcement selector) ───────
-  // Only show fleets that are active (not traveling, not disbanded) and not
-  // already committed to another dispute. These are the only ones the reinforce
-  // endpoint will accept.
-  type FleetRow = { id: string; name: string; current_system_id: string | null };
-  const { data: fleetRows } = listResult<FleetRow>(
-    await admin
-      .from("fleets")
-      .select("id, name, current_system_id")
-      .eq("player_id", player.id)
-      .eq("status", "active")
-      .is("dispute_commit_id", null)
-      .order("created_at", { ascending: true }),
-  );
   const fleetSystemNameMap = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
-  const playerFleets = (fleetRows ?? []).map((f) => ({
+  const playerFleets = (listResult<FleetRow>(fleetRes).data ?? []).map((f) => ({
     id: f.id,
     name: f.name,
     currentSystemId: f.current_system_id,
-    currentSystemName: f.current_system_id
-      ? (fleetSystemNameMap.get(f.current_system_id) ?? f.current_system_id)
-      : null,
+    currentSystemName: f.current_system_id ? (fleetSystemNameMap.get(f.current_system_id) ?? f.current_system_id) : null,
   }));
 
   return (

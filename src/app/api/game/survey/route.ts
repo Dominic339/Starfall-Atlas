@@ -86,21 +86,12 @@ export async function POST(request: NextRequest) {
 
   // ── Presence check (ship or station) ─────────────────────────────────────
   // Either a ship or the player's station being present in the system suffices.
-  const [{ data: allShips }, { data: stationRow }] = await Promise.all([
-    listResult<Pick<Ship, "current_system_id">>(
-      await admin
-        .from("ships")
-        .select("current_system_id")
-        .eq("owner_id", player.id),
-    ),
-    maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
-      await admin
-        .from("player_stations")
-        .select("current_system_id")
-        .eq("owner_id", player.id)
-        .maybeSingle(),
-    ),
+  const [shipsRes, stationRes] = await Promise.all([
+    admin.from("ships").select("current_system_id").eq("owner_id", player.id),
+    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
   ]);
+  const { data: allShips }   = listResult<Pick<Ship, "current_system_id">>(shipsRes);
+  const { data: stationRow } = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
 
   const shipPresent    = (allShips ?? []).some((s) => s.current_system_id === systemId);
   const stationPresent = stationRow?.current_system_id === systemId;

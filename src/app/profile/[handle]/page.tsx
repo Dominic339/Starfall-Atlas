@@ -9,7 +9,7 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult } from "@/lib/supabase/utils";
 
 export const dynamic = "force-dynamic";
 
@@ -54,19 +54,17 @@ export default async function PublicProfilePage({
   if (!profile || profile.deactivated_at) notFound();
 
   // ── Fetch public stats ─────────────────────────────────────────────────────
-  const [discoveriesRes, firstDiscRows, coloniesRes, allianceRes] =
+  const [discoveriesRes, firstDiscRes, coloniesRes, allianceRes] =
     await Promise.all([
       admin
         .from("system_discoveries")
         .select("id", { count: "exact", head: true })
         .eq("player_id", profile.id),
-      listResult<{ id: string }>(
-        await admin
-          .from("system_discoveries")
-          .select("id")
-          .eq("player_id", profile.id)
-          .eq("is_first", true),
-      ),
+      admin
+        .from("system_discoveries")
+        .select("id", { count: "exact", head: true })
+        .eq("player_id", profile.id)
+        .eq("is_first", true),
       admin
         .from("colonies")
         .select("id", { count: "exact", head: true })
@@ -80,7 +78,7 @@ export default async function PublicProfilePage({
     ]);
 
   const discoveryCount     = discoveriesRes.count ?? 0;
-  const firstDiscCount     = firstDiscRows.data?.length ?? 0;
+  const firstDiscCount     = firstDiscRes.count ?? 0;
   const colonyCount        = coloniesRes.count ?? 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allianceData       = allianceRes.data as any;
