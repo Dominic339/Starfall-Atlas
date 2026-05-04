@@ -54,90 +54,52 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const balance = await getBalanceWithOverrides(admin);
 
-  // ── Player membership and role ────────────────────────────────────────────
-  const { data: membership } = maybeSingleResult<{
-    alliance_id: string;
-    role: string;
-  }>(
-    await admin
-      .from("alliance_members")
-      .select("alliance_id, role")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Batch 1: membership + station (parallel) ─────────────────────────────
+  const [membershipRes, stationRes] = await Promise.all([
+    admin.from("alliance_members").select("alliance_id, role").eq("player_id", player.id).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
+  const { data: membership } = maybeSingleResult<{ alliance_id: string; role: string }>(membershipRes);
   if (!membership) {
     return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
   }
   if (membership.role !== "founder" && membership.role !== "officer") {
-    return toErrorResponse(
-      fail("forbidden", "Only alliance founders and officers may place beacons.").error,
-    );
+    return toErrorResponse(fail("forbidden", "Only alliance founders and officers may place beacons.").error);
   }
 
-  const { alliance_id } = membership;
-
-  // ── Check for existing active beacon in this system ───────────────────────
-  const { data: existing } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliance_beacons")
-      .select("id")
-      .eq("alliance_id", alliance_id)
-      .eq("system_id", systemId)
-      .eq("is_active", true)
-      .maybeSingle(),
-  );
-  if (existing) {
-    return toErrorResponse(
-      fail("invalid_target", "Your alliance already has an active beacon in that system.").error,
-    );
-  }
-
-  // ── Check active beacon cap ───────────────────────────────────────────────
-  const { count: activeCount } = await admin
-    .from("alliance_beacons")
-    .select("id", { count: "exact", head: true })
-    .eq("alliance_id", alliance_id)
-    .eq("is_active", true);
-
-  if ((activeCount ?? 0) >= balance.alliance.maxActiveBeacons) {
-    return toErrorResponse(
-      fail(
-        "invalid_target",
-        `Alliance beacon limit reached (${balance.alliance.maxActiveBeacons} active beacons maximum).`,
-      ).error,
-    );
-  }
-
-  // ── Station and iron check ────────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<PlayerStation>(
-    await admin
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  const { data: station } = maybeSingleResult<PlayerStation>(stationRes);
   if (!station) {
     return toErrorResponse(fail("not_found", "Station not found — refresh the page to rebuild it automatically.").error);
   }
 
+  const { alliance_id } = membership;
+
+  // ── Batch 2: existing beacon + beacon count + station iron (parallel) ──────
   const cost = balance.alliance.beaconPlaceCostIron;
-  const { data: ironRow } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron")
-      .maybeSingle(),
-  );
+  const [existingRes, countRes, ironRes] = await Promise.all([
+    admin.from("alliance_beacons").select("id").eq("alliance_id", alliance_id).eq("system_id", systemId).eq("is_active", true).maybeSingle(),
+    admin.from("alliance_beacons").select("id", { count: "exact", head: true }).eq("alliance_id", alliance_id).eq("is_active", true),
+    admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron").maybeSingle(),
+  ]);
+
+  const { data: existing } = maybeSingleResult<{ id: string }>(existingRes);
+  if (existing) {
+    return toErrorResponse(fail("invalid_target", "Your alliance already has an active beacon in that system.").error);
+  }
+
+  const activeCount = (countRes as { count: number | null }).count ?? 0;
+  if (activeCount >= balance.alliance.maxActiveBeacons) {
+    return toErrorResponse(
+      fail("invalid_target", `Alliance beacon limit reached (${balance.alliance.maxActiveBeacons} active beacons maximum).`).error,
+    );
+  }
+
+  const { data: ironRow } = maybeSingleResult<{ quantity: number }>(ironRes);
   const ironAvailable = ironRow?.quantity ?? 0;
   if (ironAvailable < cost) {
     return toErrorResponse(
-      fail(
-        "insufficient_resources",
-        `Not enough iron. Need ${cost}, have ${ironAvailable}.`,
-      ).error,
+      fail("insufficient_resources", `Not enough iron. Need ${cost}, have ${ironAvailable}.`).error,
     );
   }
 
