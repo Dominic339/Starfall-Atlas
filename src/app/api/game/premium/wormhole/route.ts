@@ -36,24 +36,14 @@ async function playerGovernsSystem(
   playerId: string,
   systemId: string,
 ): Promise<boolean> {
-  // Check majority control first (takes precedence)
-  const { data: mc } = await admin
-    .from("system_majority_control")
-    .select("controller_id")
-    .eq("system_id", systemId)
-    .eq("is_confirmed", true)
-    .maybeSingle();
-  if (mc?.controller_id === playerId) return true;
-
-  // Fall back to stewardship with governance
-  const { data: ss } = await admin
-    .from("system_stewardship")
-    .select("steward_id, has_governance")
-    .eq("system_id", systemId)
-    .maybeSingle();
-  if (ss?.steward_id === playerId && ss?.has_governance) return true;
-
-  return false;
+  // Majority control and stewardship fetched in parallel
+  const [mcRes, ssRes] = await Promise.all([
+    admin.from("system_majority_control").select("controller_id").eq("system_id", systemId).eq("is_confirmed", true).maybeSingle(),
+    admin.from("system_stewardship").select("steward_id, has_governance").eq("system_id", systemId).maybeSingle(),
+  ]);
+  if ((mcRes.data as { controller_id: string } | null)?.controller_id === playerId) return true;
+  const ss = ssRes.data as { steward_id: string; has_governance: boolean } | null;
+  return ss?.steward_id === playerId && !!ss?.has_governance;
 }
 
 export async function POST(request: NextRequest) {
@@ -101,54 +91,37 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("already_exists", "This wormhole has already been used.").error);
   }
 
-  // ── Both systems must be discovered ───────────────────────────────────────
-  for (const sysId of [fromSystemId, toSystemId]) {
-    const { data: disc } = maybeSingleResult<SystemDiscovery>(
-      await admin
-        .from("system_discoveries")
-        .select("id")
-        .eq("system_id", sysId)
-        .limit(1)
-        .maybeSingle(),
-    );
-    if (!disc) {
-      return toErrorResponse(fail("invalid_target", `System '${sysId}' has not been discovered.`).error);
-    }
-  }
+  // ── Parallel validation batch ─────────────────────────────────────────────
+  // Discovery checks for both systems, governance, lane cap, existing lane — all at once.
+  const [fromDiscRes, toDiscRes, governs, ownedLanesRes, existingLanesRes] = await Promise.all([
+    admin.from("system_discoveries").select("id").eq("system_id", fromSystemId).limit(1).maybeSingle(),
+    admin.from("system_discoveries").select("id").eq("system_id", toSystemId).limit(1).maybeSingle(),
+    playerGovernsSystem(admin, player.id, fromSystemId),
+    admin.from("hyperspace_lanes").select("id", { count: "exact" }).eq("owner_id", player.id).eq("is_active", true),
+    admin.from("hyperspace_lanes").select("id").or(
+      `and(from_system_id.eq.${fromSystemId},to_system_id.eq.${toSystemId}),` +
+      `and(from_system_id.eq.${toSystemId},to_system_id.eq.${fromSystemId})`,
+    ).eq("is_active", true),
+  ]);
 
-  // ── Player must govern source system ──────────────────────────────────────
-  const governs = await playerGovernsSystem(admin, player.id, fromSystemId);
+  if (!maybeSingleResult<SystemDiscovery>(fromDiscRes).data) {
+    return toErrorResponse(fail("invalid_target", `System '${fromSystemId}' has not been discovered.`).error);
+  }
+  if (!maybeSingleResult<SystemDiscovery>(toDiscRes).data) {
+    return toErrorResponse(fail("invalid_target", `System '${toSystemId}' has not been discovered.`).error);
+  }
   if (!governs) {
     return toErrorResponse(
       fail("forbidden", "You must hold governance (stewardship or majority control) in the source system.").error,
     );
   }
-
-  // ── Lane cap check ────────────────────────────────────────────────────────
-  const { data: ownedLanes } = listResult<{ id: string }>(
-    await admin
-      .from("hyperspace_lanes")
-      .select("id", { count: "exact" })
-      .eq("owner_id", player.id)
-      .eq("is_active", true),
-  );
-  // A wormhole creates 2 lanes; check cap with +2 headroom
-  if ((ownedLanes?.length ?? 0) + 2 > BALANCE.lanes.maxOwnedLanes) {
+  const ownedLanes = listResult<{ id: string }>(ownedLanesRes).data ?? [];
+  if (ownedLanes.length + 2 > BALANCE.lanes.maxOwnedLanes) {
     return toErrorResponse(
       fail("capacity_exceeded", `Lane cap reached (max ${BALANCE.lanes.maxOwnedLanes} active lanes).`).error,
     );
   }
-
-  // ── No existing active lane between these systems ─────────────────────────
-  const { data: existingLanes } = await admin
-    .from("hyperspace_lanes")
-    .select("id")
-    .or(
-      `and(from_system_id.eq.${fromSystemId},to_system_id.eq.${toSystemId}),` +
-      `and(from_system_id.eq.${toSystemId},to_system_id.eq.${fromSystemId})`,
-    )
-    .eq("is_active", true);
-  if (existingLanes && existingLanes.length > 0) {
+  if ((existingLanesRes.data ?? []).length > 0) {
     return toErrorResponse(fail("already_exists", "An active lane already connects these systems.").error);
   }
 
@@ -166,20 +139,12 @@ export async function POST(request: NextRequest) {
     is_one_way:       false,
   };
 
-  const { data: laneAB } = maybeSingleResult<HyperspaceLane>(
-    await admin
-      .from("hyperspace_lanes")
-      .insert({ ...laneBase, from_system_id: fromSystemId, to_system_id: toSystemId })
-      .select("*")
-      .maybeSingle(),
-  );
-  const { data: laneBA } = maybeSingleResult<HyperspaceLane>(
-    await admin
-      .from("hyperspace_lanes")
-      .insert({ ...laneBase, from_system_id: toSystemId, to_system_id: fromSystemId })
-      .select("*")
-      .maybeSingle(),
-  );
+  const [laneABRes, laneBARes] = await Promise.all([
+    admin.from("hyperspace_lanes").insert({ ...laneBase, from_system_id: fromSystemId, to_system_id: toSystemId }).select("*").maybeSingle(),
+    admin.from("hyperspace_lanes").insert({ ...laneBase, from_system_id: toSystemId, to_system_id: fromSystemId }).select("*").maybeSingle(),
+  ]);
+  const { data: laneAB } = maybeSingleResult<HyperspaceLane>(laneABRes);
+  const { data: laneBA } = maybeSingleResult<HyperspaceLane>(laneBARes);
 
   if (!laneAB || !laneBA) {
     return toErrorResponse(fail("internal_error", "Failed to create wormhole lanes.").error);

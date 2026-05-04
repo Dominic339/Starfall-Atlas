@@ -83,39 +83,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch buyer's station ─────────────────────────────────────────────────
-  const { data: buyerStation } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Fetch buyer station + seller credits in parallel ─────────────────────
+  const [stationRes, sellerRes] = await Promise.all([
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+    admin.from("players").select("credits").eq("id", listing.seller_id).maybeSingle(),
+  ]);
+
+  const { data: buyerStation } = maybeSingleResult<{ id: string }>(stationRes);
   if (!buyerStation) {
     return toErrorResponse(fail("not_found", "Your station was not found.").error);
   }
-
-  // ── Fetch seller's current credits for the update ─────────────────────────
-  const { data: seller } = maybeSingleResult<{ credits: number }>(
-    await admin
-      .from("players")
-      .select("credits")
-      .eq("id", listing.seller_id)
-      .maybeSingle(),
-  );
+  const { data: seller } = maybeSingleResult<{ credits: number }>(sellerRes);
   const sellerCredits = seller?.credits ?? 0;
 
-  // ── Deduct credits from buyer ──────────────────────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: player.credits - totalCost })
-    .eq("id", player.id);
-
-  // ── Add credits to seller ──────────────────────────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: sellerCredits + totalCost })
-    .eq("id", listing.seller_id);
+  // ── Deduct buyer credits + add seller credits in parallel ─────────────────
+  await Promise.all([
+    admin.from("players").update({ credits: player.credits - totalCost }).eq("id", player.id),
+    admin.from("players").update({ credits: sellerCredits + totalCost }).eq("id", listing.seller_id),
+  ]);
 
   // ── Deliver resources to buyer's station ──────────────────────────────────
   const { data: buyerInv } = maybeSingleResult<{ quantity: number }>(
