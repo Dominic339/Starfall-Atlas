@@ -138,6 +138,7 @@ export default async function GalaxyMapPage() {
     gatesRes,
     equippedSkinsRes,
     eventNodesRes,
+    unreadMsgRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -264,6 +265,14 @@ export default async function GalaxyMapPage() {
       .from("live_event_nodes")
       .select("id, event_id, system_id, display_offset_x, display_offset_y, resource_type, total_amount, remaining_amount, status, spawned_at, expires_at")
       .eq("status", "active"),
+
+    // Unread direct message count — for the Comms HUD badge
+    admin
+      .from("player_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("recipient_id", player.id)
+      .is("read_at", null)
+      .eq("deleted_recipient", false),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -765,6 +774,9 @@ export default async function GalaxyMapPage() {
   // Discovery stats for map sub-bar
   const discoveredCount = systems.filter((s) => s.isDiscovered).length;
 
+  // Unread message count for Comms HUD badge
+  const unreadMessageCount = (unreadMsgRes as { count: number | null }).count ?? 0;
+
   return (
     // Full-height flex column — fills the layout's main flex container.
     // The sub-bar is a thin info strip; GalaxyMapClient fills the rest.
@@ -822,6 +834,7 @@ export default async function GalaxyMapPage() {
         initialEquippedStationSkinId={equippedSkinsRow?.station_skin_id ?? null}
         initialEquippedFleetSkinId={equippedSkinsRow?.fleet_skin_id ?? null}
         playerIsDev={player.is_dev}
+        unreadMessageCount={unreadMessageCount}
       />
     </div>
   );

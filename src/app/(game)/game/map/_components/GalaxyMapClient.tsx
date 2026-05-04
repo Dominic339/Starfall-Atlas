@@ -261,6 +261,8 @@ interface GalaxyMapClientProps {
   initialEquippedFleetSkinId:   string | null;
   /** Whether this player has admin/dev tool access. */
   playerIsDev: boolean;
+  /** Number of unread direct messages — shown as badge on the Comms button. */
+  unreadMessageCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -480,6 +482,7 @@ export function GalaxyMapClient({
   initialEquippedStationSkinId,
   initialEquippedFleetSkinId,
   playerIsDev,
+  unreadMessageCount,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -3100,7 +3103,7 @@ export function GalaxyMapClient({
               </svg>,
             },
             {
-              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true),
+              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true), badge: unreadMessageCount || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" className="w-6 h-6">
                 <polygon points="9,21 12,13 15,21" fill="#3b0764" opacity="0.7"/>
                 <line x1="12" y1="22" x2="12" y2="13" stroke="#a78bfa" strokeWidth="2"/>
