@@ -88,38 +88,37 @@ export default async function SystemPage({
 
   if (!player) redirect("/login");
 
-  // Phase 16: fetch player research to check harsh colony gating.
-  const { data: researchData } = listResult<{ research_id: string }>(
-    await admin
+  // ── Parallel initial fetches ──────────────────────────────────────────────
+  // All queries below are independent of each other — run together.
+  const [
+    researchRes,
+    shipsRes,
+    pendingJobsRes,
+  ] = await Promise.all([
+    admin
       .from("player_research")
       .select("research_id")
       .eq("player_id", player.id),
-  );
-  const hasHarshColonyResearch = (researchData ?? []).some(
-    (r) => r.research_id === "harsh_colony_environment",
-  );
-
-  // Fetch all ships — players start with 2 (Phase 5.5).
-  const { data: shipsData } = listResult<Ship>(
-    await admin
+    admin
       .from("ships")
       .select("*")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
-  );
-  const shipList = shipsData ?? [];
-
-  // ── Fetch pending travel job (in transit?) ────────────────────────────────
-  const { data: pendingJobs } = listResult<TravelJob>(
-    await admin
+    admin
       .from("travel_jobs")
       .select("*")
       .eq("player_id", player.id)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
       .limit(1),
+  ]);
+
+  const researchData = listResult<{ research_id: string }>(researchRes).data ?? [];
+  const hasHarshColonyResearch = researchData.some(
+    (r) => r.research_id === "harsh_colony_environment",
   );
-  const activeTravelJob = pendingJobs?.[0] ?? null;
+  const shipList = listResult<Ship>(shipsRes).data ?? [];
+  const activeTravelJob = listResult<TravelJob>(pendingJobsRes).data?.[0] ?? null;
 
   // Is any ship currently in transit TO this system?
   const inTransitHere =
@@ -133,23 +132,36 @@ export default async function SystemPage({
   const shipPresentHere = shipList.find((s) => s.current_system_id === systemId) ?? null;
   const shipIsHere = !!shipPresentHere;
 
-  // ── Discovery / stewardship state ─────────────────────────────────────────
-  const { data: myDiscovery } = maybeSingleResult<SystemDiscovery>(
-    await admin
+  // ── Second parallel batch: system-specific lookups ───────────────────────
+  const [
+    discoveryRes,
+    stewardshipRes,
+    surveyRes,
+    systemColoniesRes,
+  ] = await Promise.all([
+    admin
       .from("system_discoveries")
       .select("*")
       .eq("system_id", systemId)
       .eq("player_id", player.id)
       .maybeSingle(),
-  );
-
-  const { data: stewardship } = maybeSingleResult<SystemStewardship>(
-    await admin
+    admin
       .from("system_stewardship")
       .select("*")
       .eq("system_id", systemId)
       .maybeSingle(),
-  );
+    admin
+      .from("survey_results")
+      .select("*")
+      .eq("system_id", systemId),
+    admin
+      .from("colonies")
+      .select("id, body_id, owner_id, status, population_tier, next_growth_at")
+      .eq("system_id", systemId),
+  ]);
+
+  const myDiscovery   = maybeSingleResult<SystemDiscovery>(discoveryRes).data ?? null;
+  const stewardship   = maybeSingleResult<SystemStewardship>(stewardshipRes).data ?? null;
 
   // Fetch steward's handle if stewardship exists.
   let stewardHandle: string | null = null;
@@ -209,36 +221,21 @@ export default async function SystemPage({
     ? getNearbySystems(systemId, maxRangeLy)
     : getNearbySystems(systemId, maxRangeLy).slice(0, 6);
 
-  // ── Phase 5: Survey results for all bodies in this system ─────────────────
-  const { data: surveyResults } = listResult<SurveyResult>(
-    await admin
-      .from("survey_results")
-      .select("*")
-      .eq("system_id", systemId),
-  );
-  const surveyByBodyId = new Map(
-    (surveyResults ?? []).map((s) => [s.body_id, s]),
-  );
-
-  // ── Phase 5/6: Colonies in this system (any player) ──────────────────────
+  // Parse survey + colony results from the parallel batch above
   type ColonyRow = Pick<
     Colony,
     "id" | "body_id" | "owner_id" | "status" | "population_tier" | "next_growth_at"
   >;
-  const { data: systemColonies } = listResult<ColonyRow>(
-    await admin
-      .from("colonies")
-      .select("id, body_id, owner_id, status, population_tier, next_growth_at")
-      .eq("system_id", systemId),
-  );
-  const colonyByBodyId = new Map(
-    (systemColonies ?? []).map((c) => [c.body_id, c]),
-  );
+  const surveyResults  = listResult<SurveyResult>(surveyRes).data ?? [];
+  const systemColonies = listResult<ColonyRow>(systemColoniesRes).data ?? [];
+
+  const surveyByBodyId = new Map(surveyResults.map((s) => [s.body_id, s]));
+  const colonyByBodyId = new Map(systemColonies.map((c) => [c.body_id, c]));
 
   // ── Phase 26: Fetch owner handles for other players' active colonies ───────
   const otherOwnerIds = [
     ...new Set(
-      (systemColonies ?? [])
+      systemColonies
         .filter((c) => c.owner_id !== player.id && c.status !== "collapsed")
         .map((c) => c.owner_id),
     ),
@@ -281,7 +278,7 @@ export default async function SystemPage({
 
   // ── Phase 7: Colony inventory for player's colonies in this system ─────────
   // Used to display load actions when a ship is present.
-  const myColonyIds = (systemColonies ?? [])
+  const myColonyIds = systemColonies
     .filter((c) => c.owner_id === player.id && c.status === "active")
     .map((c) => c.id);
 
@@ -415,15 +412,8 @@ export default async function SystemPage({
   const hasSystemAccess = isSol || !!myDiscovery;
   const canActOnBodies = shipIsHere && hasSystemAccess;
 
-  // Count player's active colonies (for first-colony detection display)
-  const { data: playerActiveColonies } = listResult<{ id: string }>(
-    await admin
-      .from("colonies")
-      .select("id")
-      .eq("owner_id", player.id)
-      .eq("status", "active"),
-  );
-  const activeColonyCount = playerActiveColonies?.length ?? 0;
+  // allActiveColonies (fetched above for route selectors) doubles as the count source.
+  const activeColonyCount = allActiveColonies.length;
   const isFirstColony = !player.first_colony_placed && activeColonyCount === 0;
   // True when the player has filled their current slot tier (unlimited tier bypasses this).
   const atSlotCap =
