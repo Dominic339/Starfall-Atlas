@@ -148,30 +148,22 @@ export async function POST(request: NextRequest) {
       { onConflict: "location_type,location_id,resource_type" },
     );
 
-  // ── Update goal progress ──────────────────────────────────────────────────
-  const newFilled     = goal.quantity_filled + actualQty;
-  const nowCompleted  = newFilled >= goal.quantity_target;
-  await admin
-    .from("alliance_goals")
-    .update({
+  // ── Update goal progress, alliance credits, and contribution record (parallel) ──
+  const newFilled    = goal.quantity_filled + actualQty;
+  const nowCompleted = newFilled >= goal.quantity_target;
+  await Promise.all([
+    admin.from("alliance_goals").update({
       quantity_filled: newFilled,
       ...(nowCompleted ? { completed_at: new Date().toISOString() } : {}),
-    })
-    .eq("id", goalId);
-
-  // ── Earn alliance credits ─────────────────────────────────────────────────
-  await admin
-    .from("alliance_members")
-    .update({ alliance_credits: membership.alliance_credits + actualQty })
-    .eq("id", membership.id);
-
-  // ── Record contribution ───────────────────────────────────────────────────
-  await admin.from("alliance_goal_contributions").insert({
-    goal_id:       goalId,
-    player_id:     player.id,
-    resource_type: goal.resource_type,
-    quantity:      actualQty,
-  });
+    }).eq("id", goalId),
+    admin.from("alliance_members").update({ alliance_credits: membership.alliance_credits + actualQty }).eq("id", membership.id),
+    admin.from("alliance_goal_contributions").insert({
+      goal_id:       goalId,
+      player_id:     player.id,
+      resource_type: goal.resource_type,
+      quantity:      actualQty,
+    }),
+  ]);
 
   return Response.json({
     ok: true,
