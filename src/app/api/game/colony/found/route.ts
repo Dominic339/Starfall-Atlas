@@ -108,96 +108,63 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const balance = await getBalanceWithOverrides(admin as any);
 
-  // ── Ship presence check ───────────────────────────────────────────────────
-  // Either of the player's ships being present is sufficient.
-  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(
-    await admin
-      .from("ships")
-      .select("current_system_id")
-      .eq("owner_id", player.id),
-  );
-
-  const shipPresent = (allShips ?? []).some(
-    (s) => s.current_system_id === systemId,
-  );
-
-  if (!shipPresent) {
-    return toErrorResponse(
-      fail(
-        "invalid_target",
-        "Your ship must be physically present in the system to found a colony.",
-      ).error,
-    );
-  }
-
-  // ── Discovery check (Sol exempt) ─────────────────────────────────────────
-  if (systemId !== SOL_SYSTEM_ID) {
-    const { data: discovery } = maybeSingleResult<SystemDiscovery>(
-      await admin
-        .from("system_discoveries")
-        .select("id")
-        .eq("system_id", systemId)
-        .eq("player_id", player.id)
-        .maybeSingle(),
-    );
-
-    if (!discovery) {
-      return toErrorResponse(
-        fail(
-          "invalid_target",
-          "You must discover this system before founding a colony here.",
-        ).error,
-      );
-    }
-  }
-
-  // ── Survey check ─────────────────────────────────────────────────────────
-  const { data: surveyResult } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("survey_results")
-      .select("id")
-      .eq("body_id", bodyId)
-      .maybeSingle(),
-  );
-
-  if (!surveyResult) {
-    return toErrorResponse(
-      fail(
-        "invalid_target",
-        "This body has not been surveyed. Survey it before founding a colony.",
-      ).error,
-    );
-  }
-
-  // ── Body eligibility check ────────────────────────────────────────────────
+  // ── Body generation (CPU-bound, synchronous) ─────────────────────────────
+  // Done before DB queries so we know isHarsh early and can include the
+  // harsh_colony_environment research check in the parallel batch.
   const generatedSystem = generateSystem(systemId, catalogEntry);
   const generatedBody = generatedSystem.bodies[bodyIndex];
 
   if (!generatedBody) {
     return toErrorResponse(
-      fail(
-        "not_found",
-        `Body index ${bodyIndex} does not exist in system '${systemId}'.`,
-      ).error,
+      fail("not_found", `Body index ${bodyIndex} does not exist in system '${systemId}'.`).error,
     );
   }
 
-  // ── Phase 16: harsh planet colonization gate ─────────────────────────────
-  // Volcanic and toxic worlds require explicit research before founding.
-  // Even with research, they count as harsh colonies (iron dome maintenance).
   const isHarsh = isHarshPlanetType(generatedBody.type);
 
-  if (isHarsh) {
-    // Check player has harsh_colony_environment research unlocked.
-    const { data: harshResearch } = maybeSingleResult<{ research_id: string }>(
-      await admin
-        .from("player_research")
-        .select("research_id")
-        .eq("player_id", player.id)
-        .eq("research_id", "harsh_colony_environment")
-        .maybeSingle(),
-    );
+  // SOL_SYSTEM_ID guard above ensures discovery query is always needed here.
+  // ── Parallel validation batch ─────────────────────────────────────────────
+  const [shipsRes, discoveryRes, surveyRes, existingColonyRes, activeColoniesRes, harshResearchRes] =
+    await Promise.all([
+      admin.from("ships").select("current_system_id").eq("owner_id", player.id),
+      admin.from("system_discoveries").select("id").eq("system_id", systemId).eq("player_id", player.id).maybeSingle(),
+      admin.from("survey_results").select("id").eq("body_id", bodyId).maybeSingle(),
+      admin.from("colonies").select("id, status").eq("body_id", bodyId).limit(1),
+      admin.from("colonies").select("id").eq("owner_id", player.id).eq("status", "active"),
+      isHarsh
+        ? admin.from("player_research").select("research_id").eq("player_id", player.id).eq("research_id", "harsh_colony_environment").maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
+    ]);
 
+  // ── Ship presence check ───────────────────────────────────────────────────
+  const { data: allShips } = listResult<Pick<Ship, "current_system_id">>(shipsRes);
+  const shipPresent = (allShips ?? []).some((s) => s.current_system_id === systemId);
+  if (!shipPresent) {
+    return toErrorResponse(
+      fail("invalid_target", "Your ship must be physically present in the system to found a colony.").error,
+    );
+  }
+
+  // ── Discovery check ───────────────────────────────────────────────────────
+  const { data: discovery } = maybeSingleResult<SystemDiscovery>(discoveryRes);
+  if (!discovery) {
+    return toErrorResponse(
+      fail("invalid_target", "You must discover this system before founding a colony here.").error,
+    );
+  }
+
+  // ── Survey check ─────────────────────────────────────────────────────────
+  const { data: surveyResult } = maybeSingleResult<{ id: string }>(surveyRes);
+  if (!surveyResult) {
+    return toErrorResponse(
+      fail("invalid_target", "This body has not been surveyed. Survey it before founding a colony.").error,
+    );
+  }
+
+  // ── Body eligibility check ────────────────────────────────────────────────
+  // Volcanic and toxic worlds require explicit research before founding.
+  if (isHarsh) {
+    const { data: harshResearch } = maybeSingleResult<{ research_id: string }>(harshResearchRes);
     if (!harshResearch) {
       return toErrorResponse(
         fail(
@@ -207,8 +174,6 @@ export async function POST(request: NextRequest) {
         ).error,
       );
     }
-    // Harsh worlds bypass the standard habitability score check.
-    // Their dome maintenance cost (iron) will apply each upkeep period.
   } else if (!generatedBody.canHostColony) {
     return toErrorResponse(
       fail(
@@ -220,32 +185,14 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Occupation check ──────────────────────────────────────────────────────
-  // A body with an active or abandoned colony cannot be claimed again.
-  // A collapsed colony body is available for re-founding (UPDATE path below).
-  // Use limit(1) instead of maybeSingle() to avoid throwing on multiple rows.
-  const { data: existingColonyRows } = listResult<{ id: string; status: string }>(
-    await admin
-      .from("colonies")
-      .select("id, status")
-      .eq("body_id", bodyId)
-      .limit(1),
-  );
+  const { data: existingColonyRows } = listResult<{ id: string; status: string }>(existingColonyRes);
   const existingColony = existingColonyRows?.[0] ?? null;
-
   if (existingColony && existingColony.status !== "collapsed") {
-    return toErrorResponse(
-      fail("already_exists", "This body already has an active colony.").error,
-    );
+    return toErrorResponse(fail("already_exists", "This body already has an active colony.").error);
   }
 
   // ── Colony slot check ─────────────────────────────────────────────────────
-  const { data: playerColonies } = listResult<{ id: string }>(
-    await admin
-      .from("colonies")
-      .select("id")
-      .eq("owner_id", player.id)
-      .eq("status", "active"),
-  );
+  const { data: playerColonies } = listResult<{ id: string }>(activeColoniesRes);
   const activeColonyCount = playerColonies?.length ?? 0;
   const slotCheck = requireColonySlot(player, activeColonyCount);
   if (!slotCheck.ok) return toErrorResponse(slotCheck.error);
