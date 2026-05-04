@@ -60,15 +60,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Presence check ────────────────────────────────────────────────────────
-  const [{ data: shipRows }, { data: stationRow }] = await Promise.all([
-    listResult<Pick<Ship, "current_system_id">>(
-      await admin.from("ships").select("current_system_id").eq("owner_id", player.id),
-    ),
-    maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
-      await admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
-    ),
+  // ── Presence + gate check (parallel) ─────────────────────────────────────
+  const [shipsRes, stationRes, gateRes] = await Promise.all([
+    admin.from("ships").select("current_system_id").eq("owner_id", player.id),
+    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
+    admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
   ]);
+
+  const { data: shipRows }  = listResult<Pick<Ship, "current_system_id">>(shipsRes);
+  const { data: stationRow } = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
+  const { data: gate }       = maybeSingleResult<HyperspaceGate>(gateRes);
 
   const shipPresent    = (shipRows ?? []).some((s) => s.current_system_id === systemId);
   const stationPresent = stationRow?.current_system_id === systemId;
@@ -78,11 +79,6 @@ export async function POST(request: NextRequest) {
       fail("invalid_target", "Your ship or station must be in the system to reclaim a gate.").error,
     );
   }
-
-  // ── Gate check ────────────────────────────────────────────────────────────
-  const { data: gate } = maybeSingleResult<HyperspaceGate>(
-    await admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
-  );
 
   if (!gate) {
     return toErrorResponse(fail("not_found", "No gate exists in this system. Use build to construct one.").error);
