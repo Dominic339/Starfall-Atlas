@@ -178,18 +178,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (lane.access_level === "alliance_only") {
-      const { data: memberRow2 } = await admin
-        .from("alliance_members")
-        .select("alliance_id")
-        .eq("player_id", player.id)
-        .maybeSingle();
-      const allianceId = (memberRow2 as { alliance_id: string } | null)?.alliance_id ?? null;
-      if (allianceId !== lane.alliance_id) {
-        return toErrorResponse(
-          fail("forbidden", "This lane is restricted to a specific alliance.").error,
-        );
-      }
+    if (lane.access_level === "alliance_only" && playerAllianceId !== lane.alliance_id) {
+      return toErrorResponse(
+        fail("forbidden", "This lane is restricted to a specific alliance.").error,
+      );
     }
 
     laneId = lane.id;

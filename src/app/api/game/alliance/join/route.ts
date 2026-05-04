@@ -42,37 +42,23 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Player must not already be in an alliance ─────────────────────────────
-  const { data: existingMembership } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliance_members")
-      .select("id")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Validate membership + alliance in parallel ────────────────────────────
+  const [existingMembershipRes, allianceRes] = await Promise.all([
+    admin.from("alliance_members").select("id").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliances").select("id, name, tag, member_count, dissolved_at").eq("invite_code", inviteCode.toLowerCase()).maybeSingle(),
+  ]);
+
+  const { data: existingMembership } = maybeSingleResult<{ id: string }>(existingMembershipRes);
   if (existingMembership) {
-    return toErrorResponse(
-      fail("invalid_target", "You are already in an alliance. Leave it first.").error,
-    );
+    return toErrorResponse(fail("invalid_target", "You are already in an alliance. Leave it first.").error);
   }
 
-  // ── Find alliance by invite code ──────────────────────────────────────────
-  const { data: alliance } = maybeSingleResult<Alliance>(
-    await admin
-      .from("alliances")
-      .select("id, name, tag, member_count, dissolved_at")
-      .eq("invite_code", inviteCode.toLowerCase())
-      .maybeSingle(),
-  );
+  const { data: alliance } = maybeSingleResult<Alliance>(allianceRes);
   if (!alliance) {
-    return toErrorResponse(
-      fail("not_found", "No alliance found with that invite code.").error,
-    );
+    return toErrorResponse(fail("not_found", "No alliance found with that invite code.").error);
   }
   if (alliance.dissolved_at) {
-    return toErrorResponse(
-      fail("invalid_target", "That alliance has been dissolved.").error,
-    );
+    return toErrorResponse(fail("invalid_target", "That alliance has been dissolved.").error);
   }
 
   // ── Add member ────────────────────────────────────────────────────────────
