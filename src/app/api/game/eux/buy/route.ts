@@ -39,27 +39,21 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
+  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
 
-  // ── Verify colony ownership ───────────────────────────────────────────────
-  const { data: colony } = maybeSingleResult<{ id: string; owner_id: string }>(
-    await admin
-      .from("colonies")
-      .select("id, owner_id")
-      .eq("id", colonyId)
-      .maybeSingle(),
-  );
+  // ── Fetch balance, colony, and daily usage in parallel ────────────────────
+  const [balance, colonyRes, usageRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("colonies").select("id, owner_id").eq("id", colonyId).maybeSingle(),
+    admin.from("universal_exchange_purchases").select("quantity").eq("player_id", player.id).gte("purchased_at", since),
+  ]);
+
+  const { data: colony } = maybeSingleResult<{ id: string; owner_id: string }>(colonyRes);
   if (!colony || colony.owner_id !== player.id) {
     return toErrorResponse(fail("not_found", "Colony not found.").error);
   }
 
-  // ── Check rolling 24-hour daily limit ─────────────────────────────────────
-  const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: usageRows } = await admin
-    .from("universal_exchange_purchases")
-    .select("quantity")
-    .eq("player_id", player.id)
-    .gte("purchased_at", since);
+  const { data: usageRows } = usageRes as { data: { quantity: number }[] | null };
 
   const dailyUsed = (usageRows ?? []).reduce(
     (sum: number, r: { quantity: number }) => sum + r.quantity,
@@ -92,25 +86,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Deduct credits ────────────────────────────────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: player.credits - totalCost })
-    .eq("id", player.id);
+  // ── Deduct credits + fetch existing inventory in parallel ────────────────
+  const [, existingRes] = await Promise.all([
+    admin.from("players").update({ credits: player.credits - totalCost }).eq("id", player.id),
+    admin.from("resource_inventory").select("quantity").eq("location_type", "colony").eq("location_id", colonyId).eq("resource_type", resourceType).maybeSingle(),
+  ]);
+  const { data: existing } = maybeSingleResult<{ quantity: number }>(existingRes);
 
-  // ── Add resources to colony inventory ─────────────────────────────────────
-  const { data: existing } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "colony")
-      .eq("location_id", colonyId)
-      .eq("resource_type", resourceType)
-      .maybeSingle(),
-  );
-  await admin
-    .from("resource_inventory")
-    .upsert(
+  // ── Upsert inventory + log purchase in parallel ────────────────────────────
+  await Promise.all([
+    admin.from("resource_inventory").upsert(
       {
         location_type: "colony",
         location_id:   colonyId,
@@ -118,16 +103,15 @@ export async function POST(request: NextRequest) {
         quantity:      (existing?.quantity ?? 0) + quantity,
       },
       { onConflict: "location_type,location_id,resource_type" },
-    );
-
-  // ── Log purchase ──────────────────────────────────────────────────────────
-  await admin.from("universal_exchange_purchases").insert({
-    player_id:    player.id,
-    resource_type: resourceType,
-    quantity,
-    credits_paid: totalCost,
-    colony_id:    colonyId,
-  });
+    ),
+    admin.from("universal_exchange_purchases").insert({
+      player_id:     player.id,
+      resource_type: resourceType,
+      quantity,
+      credits_paid:  totalCost,
+      colony_id:     colonyId,
+    }),
+  ]);
 
   return Response.json({
     ok: true,

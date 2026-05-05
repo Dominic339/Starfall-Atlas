@@ -48,14 +48,14 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── System must have a stewardship record ────────────────────────────────
-  const { data: stewardRow } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(
-    await admin
-      .from("system_stewardship")
-      .select("steward_id, has_governance")
-      .eq("system_id", systemId)
-      .maybeSingle(),
-  );
+  // ── Fetch stewardship, player alliance, and refresh influence in parallel ──
+  const [stewardRes, memberRes, snapshots] = await Promise.all([
+    admin.from("system_stewardship").select("steward_id, has_governance").eq("system_id", systemId).maybeSingle(),
+    admin.from("alliance_members").select("alliance_id").eq("player_id", player.id).maybeSingle(),
+    refreshInfluenceCache(admin, systemId),
+  ]);
+
+  const { data: stewardRow } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(stewardRes);
 
   if (!stewardRow) {
     return toErrorResponse(
@@ -63,16 +63,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Player alliance membership ───────────────────────────────────────────
-  const { data: memberRow } = await admin
-    .from("alliance_members")
-    .select("alliance_id")
-    .eq("player_id", player.id)
-    .maybeSingle();
-  const playerAllianceId = (memberRow as { alliance_id: string } | null)?.alliance_id ?? null;
-
-  // ── Refresh influence cache ───────────────────────────────────────────────
-  const snapshots = await refreshInfluenceCache(admin, systemId);
+  const playerAllianceId = (memberRes.data as { alliance_id: string } | null)?.alliance_id ?? null;
 
   // Build alliance membership map if player is in an alliance.
   let allianceMembership: Map<string, string> | undefined;
@@ -114,7 +105,7 @@ export async function POST(request: NextRequest) {
 
   // ── Upsert majority control ──────────────────────────────────────────────
   const now = new Date().toISOString();
-  await admin.from("system_majority_control").upsert(
+  const majorityUpsert = admin.from("system_majority_control").upsert(
     {
       system_id:       systemId,
       controller_id:   player.id,
@@ -129,42 +120,37 @@ export async function POST(request: NextRequest) {
   // ── Governance transfer (if steward currently holds it) ──────────────────
   const governanceTransferred = stewardRow.has_governance;
   if (governanceTransferred) {
-    await admin
-      .from("system_stewardship")
-      .update({ has_governance: false })
-      .eq("system_id", systemId);
+    // Stewardship update + gate fetch + majority upsert all fire in parallel
+    const [, , gateRes] = await Promise.all([
+      admin.from("system_stewardship").update({ has_governance: false }).eq("system_id", systemId),
+      majorityUpsert,
+      admin.from("hyperspace_gates").select("id").eq("system_id", systemId).eq("status", "active").maybeSingle(),
+    ]);
+    const gateRow = (gateRes.data ?? null) as { id: string } | null;
 
-    // Neutralize the active gate (if any).
-    const { data: gateRow } = await admin
-      .from("hyperspace_gates")
-      .select("id")
-      .eq("system_id", systemId)
-      .eq("status", "active")
-      .maybeSingle();
-
-    if (gateRow) {
-      await admin
-        .from("hyperspace_gates")
-        .update({ status: "neutral", neutralized_at: now })
-        .eq("id", (gateRow as { id: string }).id);
-
-      await admin.from("world_events").insert({
-        event_type: "gate_neutralized",
+    // Majority world event + optional gate neutralization all in parallel
+    const finalWrites: Promise<unknown>[] = [
+      admin.from("world_events").insert({
+        event_type: "majority_control_gained",
         player_id:  player.id,
         system_id:  systemId,
-        metadata:   { reason: "majority_control_transfer" },
-      });
+        metadata: { influence_share: majority.influenceShare, alliance_id: majority.allianceId },
+      }),
+    ];
+    if (gateRow) {
+      finalWrites.push(
+        admin.from("hyperspace_gates").update({ status: "neutral", neutralized_at: now }).eq("id", gateRow.id),
+        admin.from("world_events").insert({
+          event_type: "gate_neutralized",
+          player_id:  player.id,
+          system_id:  systemId,
+          metadata:   { reason: "majority_control_transfer" },
+        }),
+      );
     }
-
-    await admin.from("world_events").insert({
-      event_type: "majority_control_gained",
-      player_id:  player.id,
-      system_id:  systemId,
-      metadata: {
-        influence_share: majority.influenceShare,
-        alliance_id:     majority.allianceId,
-      },
-    });
+    await Promise.all(finalWrites);
+  } else {
+    await majorityUpsert;
   }
 
   return Response.json({

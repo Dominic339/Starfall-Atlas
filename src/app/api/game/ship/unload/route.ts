@@ -37,55 +37,25 @@ export async function POST(request: NextRequest) {
   if (!input.ok) return toErrorResponse(input.error);
   const { shipId } = input.data;
 
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
-  // ── Fetch ship ────────────────────────────────────────────────────────────
-  const { data: ship } = maybeSingleResult<Ship>(
-    await admin
-      .from("ships")
-      .select("*")
-      .eq("id", shipId)
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Fetch ship + station in parallel ─────────────────────────────────────
+  const [shipRes, stationRes] = await Promise.all([
+    admin.from("ships").select("*").eq("id", shipId).eq("owner_id", player.id).maybeSingle(),
+    admin.from("player_stations").select("id, current_system_id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
-  if (!ship) {
-    return toErrorResponse(fail("not_found", "Ship not found.").error);
-  }
-  if (!ship.current_system_id) {
-    return toErrorResponse(
-      fail("job_in_progress", "Ship is currently in transit.").error,
-    );
-  }
+  const { data: ship } = maybeSingleResult<Ship>(shipRes);
+  if (!ship) return toErrorResponse(fail("not_found", "Ship not found.").error);
+  if (!ship.current_system_id) return toErrorResponse(fail("job_in_progress", "Ship is currently in transit.").error);
 
-  // ── Fetch station ─────────────────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<
-    Pick<PlayerStation, "id" | "current_system_id">
-  >(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id, current_system_id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-
+  const { data: station } = maybeSingleResult<Pick<PlayerStation, "id" | "current_system_id">>(stationRes);
   if (!station) {
-    return toErrorResponse(
-      fail(
-        "not_found",
-        "Your station was not found. Sign out and back in to re-initialize it.",
-      ).error,
-    );
+    return toErrorResponse(fail("not_found", "Your station was not found. Sign out and back in to re-initialize it.").error);
   }
-
   if (ship.current_system_id !== station.current_system_id) {
-    return toErrorResponse(
-      fail(
-        "invalid_target",
-        "Ship must be docked at your station's system to unload.",
-      ).error,
-    );
+    return toErrorResponse(fail("invalid_target", "Ship must be docked at your station's system to unload.").error);
   }
 
   // ── Fetch ship cargo ──────────────────────────────────────────────────────
@@ -121,8 +91,7 @@ export async function POST(request: NextRequest) {
   );
 
   // ── Upsert station inventory (add ship cargo quantities) ──────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
+  await admin
     .from("resource_inventory")
     .upsert(
       cargo.map((item) => ({
@@ -135,8 +104,7 @@ export async function POST(request: NextRequest) {
     );
 
   // ── Clear ship cargo ──────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
+  await admin
     .from("resource_inventory")
     .delete()
     .eq("location_type", "ship")

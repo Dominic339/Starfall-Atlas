@@ -111,12 +111,11 @@ export async function POST(request: NextRequest) {
     );
 
     if (job && new Date(job.complete_at) <= now) {
-      // Construction complete — activate
-      await admin
-        .from("hyperspace_gates")
-        .update({ status: "active", built_at: now.toISOString() })
-        .eq("id", existingGate.id);
-      await admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", job.id);
+      // Construction complete — activate both writes in parallel
+      await Promise.all([
+        admin.from("hyperspace_gates").update({ status: "active", built_at: now.toISOString() }).eq("id", existingGate.id),
+        admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", job.id),
+      ]);
 
       void admin.from("world_events").insert({
         event_type: "gate_built",

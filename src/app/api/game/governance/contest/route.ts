@@ -44,27 +44,25 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Current majority control record ──────────────────────────────────────
-  const { data: mcRaw } = await admin
-    .from("system_majority_control")
-    .select("id, controller_id, alliance_id, influence_share, is_confirmed")
-    .eq("system_id", systemId)
-    .maybeSingle();
+  // ── Fetch majority control record + refresh influence cache in parallel ───
+  const [mcRes, snapshots] = await Promise.all([
+    admin.from("system_majority_control").select("id, controller_id, alliance_id, influence_share, is_confirmed").eq("system_id", systemId).maybeSingle(),
+    refreshInfluenceCache(admin, systemId),
+  ]);
 
-  if (!mcRaw) {
-    return Response.json({ ok: true, data: { hasMajorityControl: false } });
-  }
-
-  const mc = mcRaw as {
+  const mcRaw = mcRes.data as {
     id: string;
     controller_id: string;
     alliance_id: string | null;
     influence_share: number;
     is_confirmed: boolean;
-  };
+  } | null;
 
-  // ── Refresh influence cache ───────────────────────────────────────────────
-  const snapshots = await refreshInfluenceCache(admin, systemId);
+  if (!mcRaw) {
+    return Response.json({ ok: true, data: { hasMajorityControl: false } });
+  }
+
+  const mc = mcRaw;
 
   const total = snapshots.reduce((s, e) => s + e.influence, 0);
   let currentShare = 0;
