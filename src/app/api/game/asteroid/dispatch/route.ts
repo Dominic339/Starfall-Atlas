@@ -53,65 +53,30 @@ export async function POST(request: NextRequest) {
     getActiveLiveEvents(admin),
   ]);
 
-  // ── Fetch asteroid (checks regular nodes then event nodes) ─────────────────
-  let asteroid: { id: string; system_id: string; resource_type: string; remaining_amount: number; status: string } | null = null;
-  {
-    const { data: reg } = await admin
-      .from("asteroid_nodes")
-      .select("id, system_id, resource_type, remaining_amount, status")
-      .eq("id", asteroidId)
-      .maybeSingle();
-    if (reg) {
-      asteroid = reg;
-    } else {
-      const { data: ev } = await admin
-        .from("live_event_nodes")
-        .select("id, system_id, resource_type, remaining_amount, status")
-        .eq("id", asteroidId)
-        .maybeSingle();
-      asteroid = ev ?? null;
-    }
-  }
+  // ── Fetch asteroid (both tables), fleet, and existing harvest in parallel ──
+  type AsteroidRow = { id: string; system_id: string; resource_type: string; remaining_amount: number; status: string };
+  const [regRes, evRes, fleetRes, existingHarvestRes] = await Promise.all([
+    admin.from("asteroid_nodes").select("id, system_id, resource_type, remaining_amount, status").eq("id", asteroidId).maybeSingle(),
+    admin.from("live_event_nodes").select("id, system_id, resource_type, remaining_amount, status").eq("id", asteroidId).maybeSingle(),
+    admin.from("fleets").select("id, player_id, current_system_id, status").eq("id", fleetId).maybeSingle(),
+    admin.from("asteroid_harvests").select("id, asteroid_id").eq("fleet_id", fleetId).eq("status", "active").maybeSingle(),
+  ]);
 
-  if (!asteroid) {
-    return toErrorResponse(fail("not_found", "Asteroid node not found.").error);
-  }
+  const asteroid = (regRes.data ?? evRes.data ?? null) as AsteroidRow | null;
+  if (!asteroid) return toErrorResponse(fail("not_found", "Asteroid node not found.").error);
   if (asteroid.status !== "active" || asteroid.remaining_amount <= 0) {
     return toErrorResponse(fail("invalid_target", "This asteroid has already been depleted.").error);
   }
 
-  // ── Fetch fleet ──────────────────────────────────────────────────────────
-  const { data: fleet } = await admin
-    .from("fleets")
-    .select("id, player_id, current_system_id, status")
-    .eq("id", fleetId)
-    .maybeSingle();
-
-  if (!fleet) {
-    return toErrorResponse(fail("not_found", "Fleet not found.").error);
-  }
-  if (fleet.player_id !== player.id) {
-    return toErrorResponse(fail("forbidden", "You do not own this fleet.").error);
-  }
-  if (fleet.status === "disbanded") {
-    return toErrorResponse(fail("invalid_target", "This fleet has been disbanded.").error);
-  }
+  const fleet = fleetRes.data as { id: string; player_id: string; current_system_id: string | null; status: string } | null;
+  if (!fleet) return toErrorResponse(fail("not_found", "Fleet not found.").error);
+  if (fleet.player_id !== player.id) return toErrorResponse(fail("forbidden", "You do not own this fleet.").error);
+  if (fleet.status === "disbanded") return toErrorResponse(fail("invalid_target", "This fleet has been disbanded.").error);
   if (fleet.current_system_id !== asteroid.system_id) {
-    return toErrorResponse(
-      fail(
-        "invalid_target",
-        `Fleet must be in ${asteroid.system_id} to harvest this asteroid (currently in ${fleet.current_system_id ?? "transit"}).`,
-      ).error,
-    );
+    return toErrorResponse(fail("invalid_target", `Fleet must be in ${asteroid.system_id} to harvest this asteroid (currently in ${fleet.current_system_id ?? "transit"}).`).error);
   }
 
-  // ── Check for existing active harvest for this fleet ─────────────────────
-  const { data: existingHarvest } = await admin
-    .from("asteroid_harvests")
-    .select("id, asteroid_id")
-    .eq("fleet_id", fleetId)
-    .eq("status", "active")
-    .maybeSingle();
+  const existingHarvest = existingHarvestRes.data as { id: string; asteroid_id: string } | null;
 
   if (existingHarvest) {
     if (existingHarvest.asteroid_id === asteroidId) {
