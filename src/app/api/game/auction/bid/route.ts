@@ -83,65 +83,47 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Deduct credits from new bidder (escrow) ───────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: player.credits - amount })
-    .eq("id", player.id);
-
-  // ── Refund previous high bidder ───────────────────────────────────────────
-  if (auction.high_bidder_id && auction.current_high_bid > 0) {
-    const { data: prevBidder } = await admin
-      .from("players")
-      .select("credits")
-      .eq("id", auction.high_bidder_id)
-      .maybeSingle();
-
-    if (prevBidder) {
-      await admin
-        .from("players")
-        .update({
-          credits: (prevBidder as { credits: number }).credits + auction.current_high_bid,
-        })
-        .eq("id", auction.high_bidder_id);
-    }
-
-    await admin
-      .from("auction_bids")
-      .update({ escrow_held: false })
-      .eq("auction_id", auctionId)
-      .eq("bidder_id", auction.high_bidder_id)
-      .eq("escrow_held", true);
-  }
-
-  // ── Anti-snipe: extend ends_at if bid placed near the deadline ────────────
+  // ── Anti-snipe calculation (pure computation, no DB) ─────────────────────
   const windowMs    = BALANCE.auctions.antiSnipeWindowMinutes * 60_000;
   const extensionMs = BALANCE.auctions.antiSnipeExtensionMinutes * 60_000;
   const endsAt      = new Date(auction.ends_at);
   const extended    = endsAt.getTime() - now.getTime() <= windowMs;
   const newEndsAt   = extended ? new Date(now.getTime() + extensionMs) : endsAt;
 
-  // ── Update auction ────────────────────────────────────────────────────────
-  await admin
-    .from("auctions")
-    .update({
-      current_high_bid: amount,
-      high_bidder_id: player.id,
-      ends_at: newEndsAt.toISOString(),
-    })
-    .eq("id", auctionId);
+  // ── Deduct from new bidder + fetch previous bidder credits in parallel ────
+  const hasPrevBidder = !!(auction.high_bidder_id && auction.current_high_bid > 0);
+  const [, prevBidderRes] = await Promise.all([
+    admin.from("players").update({ credits: player.credits - amount }).eq("id", player.id),
+    hasPrevBidder
+      ? admin.from("players").select("credits").eq("id", auction.high_bidder_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
-  // ── Record bid ────────────────────────────────────────────────────────────
-  const { data: bidRow } = await admin
-    .from("auction_bids")
-    .insert({ auction_id: auctionId, bidder_id: player.id, amount, escrow_held: true })
-    .select("id")
-    .single();
+  // ── Refund previous high bidder (if any) ─────────────────────────────────
+  if (hasPrevBidder) {
+    const prevBidder = (prevBidderRes.data ?? null) as { credits: number } | null;
+    const refundWrites: Promise<unknown>[] = [
+      admin.from("auction_bids").update({ escrow_held: false }).eq("auction_id", auctionId).eq("bidder_id", auction.high_bidder_id).eq("escrow_held", true),
+    ];
+    if (prevBidder) {
+      refundWrites.push(
+        admin.from("players").update({ credits: prevBidder.credits + auction.current_high_bid }).eq("id", auction.high_bidder_id),
+      );
+    }
+    await Promise.all(refundWrites);
+  }
+
+  // ── Update auction + record bid in parallel ───────────────────────────────
+  const [, bidRes] = await Promise.all([
+    admin.from("auctions").update({ current_high_bid: amount, high_bidder_id: player.id, ends_at: newEndsAt.toISOString() }).eq("id", auctionId),
+    admin.from("auction_bids").insert({ auction_id: auctionId, bidder_id: player.id, amount, escrow_held: true }).select("id").single(),
+  ]);
+  const { data: bidRow } = bidRes as { data: { id: string } | null };
 
   return Response.json({
     ok: true,
     data: {
-      bidId:      (bidRow as { id: string }).id,
+      bidId:      bidRow!.id,
       newEndTime: newEndsAt.toISOString(),
       extended,
     },

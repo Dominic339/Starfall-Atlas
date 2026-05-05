@@ -58,11 +58,11 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
   const now   = new Date();
 
-  // ── Presence + gate checks (all parallel) ────────────────────────────────
-  const [shipsRes, stationRes, fromGateRes, toGateRes] = await Promise.all([
+  // ── Balance + presence + gate checks in one parallel batch ───────────────
+  const [balance, shipsRes, stationRes, fromGateRes, toGateRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
     admin.from("ships").select("current_system_id").eq("owner_id", player.id),
     admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
     admin.from("hyperspace_gates").select("*").eq("system_id", fromSystemId).maybeSingle(),

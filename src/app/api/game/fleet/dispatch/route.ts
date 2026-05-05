@@ -49,18 +49,16 @@ export async function POST(request: NextRequest) {
   if (!input.ok) return toErrorResponse(input.error);
   const { fleetId, destinationSystemId } = input.data;
 
-  const admin = createAdminClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const balance = await getBalanceWithOverrides(admin as any);
+  const admin = createAdminClient() as any;
 
-  // ── Fetch fleet ───────────────────────────────────────────────────────────
-  const { data: fleet } = maybeSingleResult<Fleet>(
-    await admin
-      .from("fleets")
-      .select("*")
-      .eq("id", fleetId)
-      .maybeSingle(),
-  );
+  // ── Fetch balance + fleet in parallel ─────────────────────────────────────
+  const [balance, fleetRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("fleets").select("*").eq("id", fleetId).maybeSingle(),
+  ]);
+
+  const { data: fleet } = maybeSingleResult<Fleet>(fleetRes);
 
   if (!fleet) {
     return toErrorResponse(fail("not_found", "Fleet not found.").error);
@@ -162,21 +160,7 @@ export async function POST(request: NextRequest) {
   const now = new Date();
   const arriveAt = computeArrivalTime(now, distanceLy, fleetSpeed);
 
-  // ── Update fleet status ───────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
-    .from("fleets")
-    .update({ status: "traveling", current_system_id: null, updated_at: now.toISOString() })
-    .eq("id", fleetId);
-
-  // ── Clear ship locations (bulk) ───────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
-    .from("ships")
-    .update({ current_system_id: null, current_body_id: null })
-    .in("id", memberShipIds);
-
-  // ── Insert one travel job per ship ────────────────────────────────────────
+  // ── Update fleet, clear ship locations, insert travel jobs — all in parallel
   const jobRows = ships.map((s) => ({
     ship_id: s.id,
     player_id: player.id,
@@ -190,8 +174,11 @@ export async function POST(request: NextRequest) {
     status: "pending",
   }));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any).from("travel_jobs").insert(jobRows);
+  await Promise.all([
+    admin.from("fleets").update({ status: "traveling", current_system_id: null, updated_at: now.toISOString() }).eq("id", fleetId),
+    admin.from("ships").update({ current_system_id: null, current_body_id: null }).in("id", memberShipIds),
+    admin.from("travel_jobs").insert(jobRows),
+  ]);
 
   return Response.json({
     ok: true,
