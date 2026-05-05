@@ -163,19 +163,6 @@ export default async function SystemPage({
   const myDiscovery   = maybeSingleResult<SystemDiscovery>(discoveryRes).data ?? null;
   const stewardship   = maybeSingleResult<SystemStewardship>(stewardshipRes).data ?? null;
 
-  // Fetch steward's handle if stewardship exists.
-  let stewardHandle: string | null = null;
-  if (stewardship) {
-    const { data: stewardPlayer } = maybeSingleResult<{ handle: string }>(
-      await admin
-        .from("players")
-        .select("handle")
-        .eq("id", stewardship.steward_id)
-        .maybeSingle(),
-    );
-    stewardHandle = stewardPlayer?.handle ?? null;
-  }
-
   // ── Travel reachability ───────────────────────────────────────────────────
   // Find a ship that is docked somewhere other than this system and not the
   // ship currently in an active travel job. This is the ship that would be
@@ -232,7 +219,11 @@ export default async function SystemPage({
   const surveyByBodyId = new Map(surveyResults.map((s) => [s.body_id, s]));
   const colonyByBodyId = new Map(systemColonies.map((c) => [c.body_id, c]));
 
-  // ── Phase 26: Fetch owner handles for other players' active colonies ───────
+  // ── Batch 3: all post-batch-2 queries run in parallel ────────────────────
+  const myColonyIds = systemColonies
+    .filter((c) => c.owner_id === player.id && c.status === "active")
+    .map((c) => c.id);
+
   const otherOwnerIds = [
     ...new Set(
       systemColonies
@@ -240,66 +231,76 @@ export default async function SystemPage({
         .map((c) => c.owner_id),
     ),
   ];
-  const colonyOwnerHandles = new Map<string, string>();
-  if (otherOwnerIds.length > 0) {
-    const { data: ownerRows } = listResult<{ id: string; handle: string }>(
-      await admin
-        .from("players")
-        .select("id, handle")
-        .in("id", otherOwnerIds),
-    );
-    for (const row of ownerRows ?? []) {
-      colonyOwnerHandles.set(row.id, row.handle);
-    }
-  }
 
-  // ── Phase 26: Fetch first discoverer info for this system ─────────────────
-  let firstDiscovererHandle: string | null = null;
-  if (!isSol && !myDiscovery?.is_first) {
-    const { data: firstDisc } = maybeSingleResult<{ player_id: string }>(
-      await admin
-        .from("system_discoveries")
-        .select("player_id")
-        .eq("system_id", systemId)
-        .eq("is_first", true)
-        .maybeSingle(),
-    );
-    if (firstDisc) {
-      const { data: discPlayer } = maybeSingleResult<{ handle: string }>(
-        await admin
-          .from("players")
-          .select("handle")
-          .eq("id", firstDisc.player_id)
-          .maybeSingle(),
-      );
-      firstDiscovererHandle = discPlayer?.handle ?? null;
-    }
-  }
+  type InvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & { location_id: string };
+  type AllColonyRow = { id: string; body_id: string; system_id: string };
+  type RouteRow = Pick<ColonyRoute, "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes">;
+  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
+  type StationInvRow = { resource_type: string; quantity: number };
 
-  // ── Phase 7: Colony inventory for player's colonies in this system ─────────
-  // Used to display load actions when a ship is present.
-  const myColonyIds = systemColonies
-    .filter((c) => c.owner_id === player.id && c.status === "active")
-    .map((c) => c.id);
-
-  type InvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
-    location_id: string;
-  };
-  const colonyInvRows: InvRow[] =
+  const [
+    stewardPlayerRes,
+    ownerHandlesRes,
+    firstDiscRes,
+    colonyInvRes,
+    allColoniesRes,
+    routesRes,
+    transportsRes,
+    stationRes,
+  ] = await Promise.all([
+    stewardship
+      ? admin.from("players").select("handle").eq("id", stewardship.steward_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    otherOwnerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", otherOwnerIds)
+      : Promise.resolve({ data: [], error: null }),
+    !isSol && !myDiscovery?.is_first
+      ? admin.from("system_discoveries").select("player_id").eq("system_id", systemId).eq("is_first", true).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     myColonyIds.length > 0
-      ? (listResult<InvRow>(
-          await admin
-            .from("resource_inventory")
-            .select("location_id, resource_type, quantity")
-            .eq("location_type", "colony")
-            .in("location_id", myColonyIds)
-            .order("resource_type", { ascending: true }),
-        ).data ?? [])
-      : [];
-  const colonyInventoryById = new Map<
-    string,
-    { resource_type: string; quantity: number }[]
-  >();
+      ? admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "colony").in("location_id", myColonyIds).order("resource_type", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    admin.from("colonies").select("id, body_id, system_id").eq("owner_id", player.id).eq("status", "active"),
+    myColonyIds.length > 0
+      ? admin.from("colony_routes").select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes").eq("player_id", player.id).or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`).order("from_colony_id")
+      : Promise.resolve({ data: [], error: null }),
+    myColonyIds.length > 0
+      ? admin.from("colony_transports").select("id, colony_id, tier").in("colony_id", myColonyIds)
+      : Promise.resolve({ data: [], error: null }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin as any).from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
+
+  const stewardHandle = maybeSingleResult<{ handle: string }>(stewardPlayerRes).data?.handle ?? null;
+  const colonyOwnerHandles = new Map<string, string>(
+    (listResult<{ id: string; handle: string }>(ownerHandlesRes).data ?? []).map((r) => [r.id, r.handle]),
+  );
+  const firstDisc = maybeSingleResult<{ player_id: string }>(firstDiscRes).data;
+  const colonyInvRows: InvRow[] = listResult<InvRow>(colonyInvRes).data ?? [];
+  const allActiveColonies: AllColonyRow[] = listResult<AllColonyRow>(allColoniesRes).data ?? [];
+  const colonyRoutesRows: RouteRow[] = listResult<RouteRow>(routesRes).data ?? [];
+  const transportRows: TransportRow[] = listResult<TransportRow>(transportsRes).data ?? [];
+  const stationRow = maybeSingleResult<{ id: string }>(stationRes).data;
+
+  // ── Batch 4: first discoverer handle + station inventory (parallel) ───────
+  const [firstDiscHandleRes, stationInvFetchRes] = await Promise.all([
+    firstDisc
+      ? admin.from("players").select("handle").eq("id", firstDisc.player_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    stationRow
+      ? admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", stationRow.id).in("resource_type", ["iron", "carbon", "steel"])
+      : Promise.resolve({ data: [] as StationInvRow[], error: null }),
+  ]);
+
+  const firstDiscovererHandle = maybeSingleResult<{ handle: string }>(firstDiscHandleRes).data?.handle ?? null;
+  const stationInvRows = listResult<StationInvRow>(stationInvFetchRes).data ?? [];
+  const stationInvMap = new Map(stationInvRows.map((r) => [r.resource_type, r.quantity]));
+  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
+  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
+  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
+
+  // Build colony inventory map
+  const colonyInventoryById = new Map<string, { resource_type: string; quantity: number }[]>();
   for (const row of colonyInvRows) {
     const existing = colonyInventoryById.get(row.location_id) ?? [];
     existing.push({ resource_type: row.resource_type, quantity: row.quantity });
@@ -309,47 +310,7 @@ export default async function SystemPage({
   // Ship present here for load actions (first docked ship in system)
   const loadingShip = shipList.find((s) => s.current_system_id === systemId) ?? null;
 
-  // ── Phase 15: supply routes and transports for this system's colonies ──────
-  // Fetch all player's active colonies (for route destination selector).
-  type AllColonyRow = { id: string; body_id: string; system_id: string };
-  const { data: allPlayerColonies } = listResult<AllColonyRow>(
-    await admin
-      .from("colonies")
-      .select("id, body_id, system_id")
-      .eq("owner_id", player.id)
-      .eq("status", "active"),
-  );
-  const allActiveColonies = allPlayerColonies ?? [];
-
-  // Fetch existing routes for player's colonies in this system.
-  type RouteRow = Pick<ColonyRoute,
-    "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes"
-  >;
-  const colonyRoutesRows: RouteRow[] =
-    myColonyIds.length > 0
-      ? (listResult<RouteRow>(
-          await admin
-            .from("colony_routes")
-            .select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes")
-            .eq("player_id", player.id)
-            .or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`)
-            .order("from_colony_id"),
-        ).data ?? [])
-      : [];
-
-  // Fetch transports for player's colonies in this system.
-  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
-  const transportRows: TransportRow[] =
-    myColonyIds.length > 0
-      ? (listResult<TransportRow>(
-          await admin
-            .from("colony_transports")
-            .select("id, colony_id, tier")
-            .in("colony_id", myColonyIds),
-        ).data ?? [])
-      : [];
-
-  // Build lookup maps.
+  // Build route/transport lookup maps
   const routesByFromColonyId = new Map<string, RouteRow[]>();
   const routesByToColonyId   = new Map<string, RouteRow[]>();
   for (const r of colonyRoutesRows) {
@@ -366,31 +327,6 @@ export default async function SystemPage({
     list.push(t);
     transportsByColonyId.set(t.colony_id, list);
   }
-
-  // ── Phase 18: station inventory (for transport purchase/upgrade affordability) ──
-  const { data: stationRow } = maybeSingleResult<{ id: string }>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-
-  type StationInvRow = { resource_type: string; quantity: number };
-  const stationInvRes = stationRow
-    ? await admin
-        .from("resource_inventory")
-        .select("resource_type, quantity")
-        .eq("location_type", "station")
-        .eq("location_id", stationRow.id)
-        .in("resource_type", ["iron", "carbon", "steel"])
-    : { data: [] as StationInvRow[], error: null };
-  const { data: stationInvRows } = listResult<StationInvRow>(stationInvRes);
-  const stationInvMap = new Map((stationInvRows ?? []).map((r) => [r.resource_type, r.quantity]));
-  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
-  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
-  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
 
   // Build destination colony selector options (exclude current colony, already-routed ones per resource).
   const colonyLabelById = new Map<string, string>(
