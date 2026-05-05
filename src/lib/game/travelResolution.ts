@@ -42,95 +42,59 @@ export async function runTravelResolution(
   playerId: string,
   requestTime: Date = new Date(),
 ): Promise<TravelResolutionResult> {
-  // ── 1. Fetch player station ────────────────────────────────────────────────
-  const { data: stationRow } = await admin
-    .from("player_stations")
-    .select("id, current_system_id")
-    .eq("owner_id", playerId)
-    .maybeSingle();
-
-  const station = stationRow as PlayerStation | null;
-
-  // ── 2. Fetch all player ships ──────────────────────────────────────────────
-  const { data: shipRows } = await admin
-    .from("ships")
-    .select("*")
-    .eq("owner_id", playerId);
-
-  let ships: Ship[] = (shipRows ?? []) as Ship[];
-
-  // Resolve any completed gate/lane construction jobs (fire-and-forget, best-effort)
+  // Kick off gate/lane resolution fire-and-forget before any awaits
   void resolveGateJobs(admin, playerId, requestTime).catch(() => undefined);
   void resolveLaneJobs(admin, playerId, requestTime).catch(() => undefined);
+
+  // ── 1-4 + 7. Fetch all independent data in one parallel batch ─────────────
+  type FleetRow = { id: string; player_id: string; name: string; status: string; current_system_id: string | null; fleet_ships: { ship_id: string }[] };
+
+  const [stationRes, shipRes, jobRes, colonyRes, fleetRes] = await Promise.all([
+    admin.from("player_stations").select("id, current_system_id").eq("owner_id", playerId).maybeSingle(),
+    admin.from("ships").select("*").eq("owner_id", playerId),
+    admin.from("travel_jobs").select("*").eq("player_id", playerId).eq("status", "pending"),
+    admin.from("colonies").select("id, system_id, status").eq("owner_id", playerId).eq("status", "active"),
+    admin.from("fleets").select("id, player_id, name, status, current_system_id, fleet_ships(ship_id)").eq("player_id", playerId).neq("status", "disbanded"),
+  ]);
+
+  const station = (stationRes.data ?? null) as PlayerStation | null;
+  let ships: Ship[] = (shipRes.data ?? []) as Ship[];
+  const allTravelJobs: TravelJob[] = (jobRes.data ?? []) as TravelJob[];
+  const colonies: Pick<Colony, "id" | "system_id" | "status">[] = colonyRes.data ?? [];
+  const fleets: FleetRow[] = (fleetRes.data ?? []) as FleetRow[];
+
+  const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
 
   if (ships.length === 0) {
     return { jobsResolved: 0, shipsAutoAdvanced: 0, fleetsArrived: 0 };
   }
 
-  // ── 3. Fetch pending travel jobs ───────────────────────────────────────────
-  const { data: jobRows } = await admin
-    .from("travel_jobs")
-    .select("*")
-    .eq("player_id", playerId)
-    .eq("status", "pending");
-
-  const allTravelJobs: TravelJob[] = (jobRows ?? []) as TravelJob[];
-  const travelJobByShipId = new Map(allTravelJobs.map((j) => [j.ship_id, j]));
-
-  // ── 4. Fetch active colonies ────────────────────────────────────────────────
-  const { data: colonyRows } = await admin
-    .from("colonies")
-    .select("id, system_id, status")
-    .eq("owner_id", playerId)
-    .eq("status", "active");
-
-  const colonies: Pick<Colony, "id" | "system_id" | "status">[] = colonyRows ?? [];
-
-  // ── 5. Fetch colony inventories ────────────────────────────────────────────
+  // ── 5 + 6. Fetch colony inventories and ship cargo in parallel ─────────────
   const colonyIds = colonies.map((c) => c.id);
+  const shipIds   = ships.map((s) => s.id);
+
+  const [colonyInvRes, cargoRes] = await Promise.all([
+    colonyIds.length > 0
+      ? admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "colony").in("location_id", colonyIds)
+      : Promise.resolve({ data: [] }),
+    admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "ship").in("location_id", shipIds),
+  ]);
+
   const colonyInvByColonyId = new Map<string, { resource_type: string; quantity: number }[]>();
   const colonyInvTotals = new Map<string, number>();
-
-  if (colonyIds.length > 0) {
-    const { data: colonyInvRows } = await admin
-      .from("resource_inventory")
-      .select("location_id, resource_type, quantity")
-      .eq("location_type", "colony")
-      .in("location_id", colonyIds);
-
-    for (const row of (colonyInvRows ?? []) as { location_id: string; resource_type: string; quantity: number }[]) {
-      const list = colonyInvByColonyId.get(row.location_id) ?? [];
-      list.push({ resource_type: row.resource_type, quantity: row.quantity });
-      colonyInvByColonyId.set(row.location_id, list);
-      colonyInvTotals.set(row.location_id, (colonyInvTotals.get(row.location_id) ?? 0) + row.quantity);
-    }
+  for (const row of ((colonyInvRes.data ?? []) as { location_id: string; resource_type: string; quantity: number }[])) {
+    const list = colonyInvByColonyId.get(row.location_id) ?? [];
+    list.push({ resource_type: row.resource_type, quantity: row.quantity });
+    colonyInvByColonyId.set(row.location_id, list);
+    colonyInvTotals.set(row.location_id, (colonyInvTotals.get(row.location_id) ?? 0) + row.quantity);
   }
 
-  // ── 6. Fetch ship cargo ────────────────────────────────────────────────────
-  const shipIds = ships.map((s) => s.id);
   const cargoByShipId = new Map<string, { resource_type: string; quantity: number }[]>();
-
-  const { data: cargoRows } = await admin
-    .from("resource_inventory")
-    .select("location_id, resource_type, quantity")
-    .eq("location_type", "ship")
-    .in("location_id", shipIds);
-
-  for (const row of (cargoRows ?? []) as { location_id: string; resource_type: string; quantity: number }[]) {
+  for (const row of ((cargoRes.data ?? []) as { location_id: string; resource_type: string; quantity: number }[])) {
     const list = cargoByShipId.get(row.location_id) ?? [];
     list.push({ resource_type: row.resource_type, quantity: row.quantity });
     cargoByShipId.set(row.location_id, list);
   }
-
-  // ── 7. Fetch fleets and their member ships ─────────────────────────────────
-  type FleetRow = { id: string; player_id: string; name: string; status: string; current_system_id: string | null; fleet_ships: { ship_id: string }[] };
-  const { data: fleetRows } = await admin
-    .from("fleets")
-    .select("id, player_id, name, status, current_system_id, fleet_ships(ship_id)")
-    .eq("player_id", playerId)
-    .neq("status", "disbanded");
-
-  const fleets: FleetRow[] = (fleetRows ?? []) as FleetRow[];
   const shipIdsInFleet = new Set(fleets.flatMap((f) => f.fleet_ships.map((fs) => fs.ship_id)));
   const shipIdsByFleetId = new Map(fleets.map((f) => [f.id, f.fleet_ships.map((fs) => fs.ship_id)]));
 
@@ -154,15 +118,17 @@ export async function runTravelResolution(
       const pendingJob = travelJobByShipId.get(ship.id);
       if (pendingJob) {
         if (new Date(pendingJob.arrive_at) <= requestTime) {
-          await admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id);
           const arrivedAtStation = pendingJob.to_system_id === st.current_system_id;
-          await admin.from("ships").update({
-            current_system_id: pendingJob.to_system_id,
-            current_body_id: null,
-            ship_state: arrivedAtStation ? "idle_at_station" : "idle_in_system",
-            last_known_system_id: pendingJob.to_system_id,
-            destination_system_id: null,
-          }).eq("id", ship.id);
+          await Promise.all([
+            admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id),
+            admin.from("ships").update({
+              current_system_id: pendingJob.to_system_id,
+              current_body_id: null,
+              ship_state: arrivedAtStation ? "idle_at_station" : "idle_in_system",
+              last_known_system_id: pendingJob.to_system_id,
+              destination_system_id: null,
+            }).eq("id", ship.id),
+          ]);
           ship = {
             ...ship,
             current_system_id: pendingJob.to_system_id as SystemId,
@@ -240,14 +206,16 @@ export async function runTravelResolution(
 
       const arrivingAtStation = pendingJob.to_system_id === station.current_system_id;
 
-      await admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id);
-      await admin.from("ships").update({
-        current_system_id: pendingJob.to_system_id,
-        current_body_id: null,
-        ship_state: arrivingAtStation ? "idle_at_station" : "idle_in_system",
-        last_known_system_id: pendingJob.to_system_id,
-        destination_system_id: null,
-      }).eq("id", ship.id);
+      await Promise.all([
+        admin.from("travel_jobs").update({ status: "complete" }).eq("id", pendingJob.id),
+        admin.from("ships").update({
+          current_system_id: pendingJob.to_system_id,
+          current_body_id: null,
+          ship_state: arrivingAtStation ? "idle_at_station" : "idle_in_system",
+          last_known_system_id: pendingJob.to_system_id,
+          destination_system_id: null,
+        }).eq("id", ship.id),
+      ]);
 
       if (arrivingAtStation) {
         const landedShip: Ship = {
@@ -278,19 +246,21 @@ export async function runTravelResolution(
 
     const destSystemId = fleetJobs[0].to_system_id;
 
-    await admin.from("travel_jobs").update({ status: "complete" }).in("id", fleetJobs.map((j) => j.id));
-    await admin.from("ships").update({
-      current_system_id: destSystemId,
-      current_body_id: null,
-      ship_state: "idle_in_system",
-      last_known_system_id: destSystemId,
-      destination_system_id: null,
-    }).in("id", memberShipIds);
-    await admin.from("fleets").update({
-      status: "active",
-      current_system_id: destSystemId,
-      updated_at: requestTime.toISOString(),
-    }).eq("id", fleet.id);
+    await Promise.all([
+      admin.from("travel_jobs").update({ status: "complete" }).in("id", fleetJobs.map((j) => j.id)),
+      admin.from("ships").update({
+        current_system_id: destSystemId,
+        current_body_id: null,
+        ship_state: "idle_in_system",
+        last_known_system_id: destSystemId,
+        destination_system_id: null,
+      }).in("id", memberShipIds),
+      admin.from("fleets").update({
+        status: "active",
+        current_system_id: destSystemId,
+        updated_at: requestTime.toISOString(),
+      }).eq("id", fleet.id),
+    ]);
 
     fleets[fi] = { ...fleet, status: "active", current_system_id: destSystemId };
     jobsResolved += fleetJobs.length;
@@ -342,17 +312,35 @@ async function doLoad(
 
   if (toLoad.length === 0) return 0;
 
-  // Update colony inventory in DB
+  // Update colony inventory in DB — batch delete + upsert instead of N+1
+  const depleted: string[] = [];
+  const updatedRows: { resource_type: string; quantity: number }[] = [];
   for (const item of toLoad) {
     const leftover = leftoverInv.find((r) => r.resource_type === item.resource_type);
-    if (!leftover) {
-      await admin.from("resource_inventory").delete()
-        .eq("location_type", "colony").eq("location_id", colonyId).eq("resource_type", item.resource_type);
-    } else {
-      await admin.from("resource_inventory").update({ quantity: leftover.quantity })
-        .eq("location_type", "colony").eq("location_id", colonyId).eq("resource_type", item.resource_type);
-    }
+    if (!leftover) depleted.push(item.resource_type);
+    else updatedRows.push({ resource_type: item.resource_type, quantity: leftover.quantity });
   }
+  const invWrites: Promise<unknown>[] = [];
+  if (depleted.length > 0) {
+    invWrites.push(
+      admin.from("resource_inventory").delete()
+        .eq("location_type", "colony").eq("location_id", colonyId).in("resource_type", depleted),
+    );
+  }
+  if (updatedRows.length > 0) {
+    invWrites.push(
+      admin.from("resource_inventory").upsert(
+        updatedRows.map((r) => ({
+          location_type: "colony",
+          location_id:   colonyId,
+          resource_type: r.resource_type,
+          quantity:      r.quantity,
+        })),
+        { onConflict: "location_type,location_id,resource_type" },
+      ),
+    );
+  }
+  await Promise.all(invWrites);
 
   // Upsert ship cargo in DB
   const existingMap = new Map(currentCargo.map((r) => [r.resource_type, r.quantity]));
@@ -403,26 +391,26 @@ async function doUnload(
     ((stRows ?? []) as { resource_type: string; quantity: number }[]).map((r) => [r.resource_type, r.quantity]),
   );
 
-  await admin.from("resource_inventory").upsert(
-    cargo.map((item) => ({
-      location_type: "station",
-      location_id: stationId,
-      resource_type: item.resource_type,
-      quantity: (stMap.get(item.resource_type) ?? 0) + item.quantity,
-    })),
-    { onConflict: "location_type,location_id,resource_type" },
-  );
-
-  await admin.from("resource_inventory").delete()
-    .eq("location_type", "ship").eq("location_id", ship.id);
+  await Promise.all([
+    admin.from("resource_inventory").upsert(
+      cargo.map((item) => ({
+        location_type: "station",
+        location_id: stationId,
+        resource_type: item.resource_type,
+        quantity: (stMap.get(item.resource_type) ?? 0) + item.quantity,
+      })),
+      { onConflict: "location_type,location_id,resource_type" },
+    ),
+    admin.from("resource_inventory").delete()
+      .eq("location_type", "ship").eq("location_id", ship.id),
+    admin.from("ships").update({
+      auto_state: "idle",
+      auto_target_colony_id: null,
+      ship_state: "idle_at_station",
+    }).eq("id", ship.id),
+  ]);
 
   cargoByShipId.set(ship.id, []);
-
-  await admin.from("ships").update({
-    auto_state: "idle",
-    auto_target_colony_id: null,
-    ship_state: "idle_at_station",
-  }).eq("id", ship.id);
 }
 
 /** Start a travel job from ship's current system to targetSystemId. Returns true on success. */
@@ -448,16 +436,14 @@ async function startTravel(
 
   const arriveAt = computeArrivalTime(requestTime, dist, Number(ship.speed_ly_per_hr));
 
-  await admin.from("ships").update({
-    current_system_id: null,
-    current_body_id: null,
-    ship_state: "traveling",
-    destination_system_id: targetSystemId,
-  }).eq("id", ship.id);
-
-  const { data: newJob } = await admin
-    .from("travel_jobs")
-    .insert({
+  const [, jobResult] = await Promise.all([
+    admin.from("ships").update({
+      current_system_id: null,
+      current_body_id: null,
+      ship_state: "traveling",
+      destination_system_id: targetSystemId,
+    }).eq("id", ship.id),
+    admin.from("travel_jobs").insert({
       ship_id: ship.id,
       player_id: playerId,
       from_system_id: ship.current_system_id,
@@ -466,9 +452,9 @@ async function startTravel(
       arrive_at: arriveAt.toISOString(),
       transit_tax_paid: 0,
       status: "pending",
-    })
-    .select("*")
-    .maybeSingle();
+    }).select("*").maybeSingle(),
+  ]);
+  const { data: newJob } = jobResult;
 
   if (newJob) travelJobByShipId.set(ship.id, newJob as TravelJob);
   return true;
