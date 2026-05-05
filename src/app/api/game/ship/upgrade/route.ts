@@ -55,32 +55,21 @@ export async function POST(request: NextRequest) {
   if (!input.ok) return toErrorResponse(input.error);
   const { shipId, stat } = input.data;
 
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
-  // ── Fetch ship ────────────────────────────────────────────────────────────
-  const { data: ship } = maybeSingleResult<Ship>(
-    await admin
-      .from("ships")
-      .select("id, owner_id, hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level, cargo_cap, speed_ly_per_hr")
-      .eq("id", shipId)
-      .maybeSingle(),
-  );
+  // ── Fetch ship, research, and station in parallel ─────────────────────────
+  const [shipRes, researchRes, stationRes] = await Promise.all([
+    admin.from("ships").select("id, owner_id, hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level, cargo_cap, speed_ly_per_hr").eq("id", shipId).maybeSingle(),
+    admin.from("player_research").select("research_id").eq("player_id", player.id),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
-  if (!ship) {
-    return toErrorResponse(fail("not_found", "Ship not found.").error);
-  }
+  const { data: ship } = maybeSingleResult<Ship>(shipRes);
+  if (!ship) return toErrorResponse(fail("not_found", "Ship not found.").error);
+  if (ship.owner_id !== player.id) return toErrorResponse(fail("forbidden", "You do not own this ship.").error);
 
-  if (ship.owner_id !== player.id) {
-    return toErrorResponse(fail("forbidden", "You do not own this ship.").error);
-  }
-
-  // ── Fetch player research ──────────────────────────────────────────────────
-  const { data: researchRows } = listResult<Pick<PlayerResearch, "research_id">>(
-    await admin
-      .from("player_research")
-      .select("research_id")
-      .eq("player_id", player.id),
-  );
+  const { data: researchRows } = listResult<Pick<PlayerResearch, "research_id">>(researchRes);
   const unlockedIds = new Set((researchRows ?? []).map((r) => r.research_id));
 
   // ── Check upgrade caps ────────────────────────────────────────────────────
@@ -122,28 +111,14 @@ export async function POST(request: NextRequest) {
   // ── Compute iron cost ─────────────────────────────────────────────────────
   const ironCost = upgradeIronCost(stat as ShipStatKey, targetLevel);
 
-  // ── Fetch station + inventory ─────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<PlayerStation>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-
+  // ── Station guard + iron inventory ────────────────────────────────────────
+  const { data: station } = maybeSingleResult<PlayerStation>(stationRes);
   if (!station) {
     return toErrorResponse(fail("not_found", "Station not found — refresh the page to rebuild it automatically.").error);
   }
 
   const { data: invRow } = maybeSingleResult<Pick<ResourceInventoryRow, "quantity">>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron")
-      .maybeSingle(),
+    await admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron").maybeSingle(),
   );
 
   const currentIron = invRow?.quantity ?? 0;
@@ -156,50 +131,24 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Deduct iron ───────────────────────────────────────────────────────────
-  const remainingIron = currentIron - ironCost;
-  if (remainingIron === 0) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("resource_inventory")
-      .delete()
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron");
-  } else {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("resource_inventory")
-      .update({ quantity: remainingIron })
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron");
-  }
-
   // ── Build ship update patch ───────────────────────────────────────────────
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const patch: Record<string, any> = {
-    [`${stat}_level`]: targetLevel,
-  };
-
-  // Wire derived stats for cargo and engine.
+  const patch: Record<string, any> = { [`${stat}_level`]: targetLevel };
   let newCargoCap: number | undefined;
   let newSpeed: number | undefined;
+  if (stat === "cargo") { newCargoCap = effectiveCargoCap(targetLevel); patch.cargo_cap = newCargoCap; }
+  else if (stat === "engine") { newSpeed = effectiveSpeed(targetLevel); patch.speed_ly_per_hr = newSpeed; }
 
-  if (stat === "cargo") {
-    newCargoCap = effectiveCargoCap(targetLevel);
-    patch.cargo_cap = newCargoCap;
-  } else if (stat === "engine") {
-    newSpeed = effectiveSpeed(targetLevel);
-    patch.speed_ly_per_hr = newSpeed;
-  }
+  // ── Deduct iron + update ship in parallel ─────────────────────────────────
+  const remainingIron = currentIron - ironCost;
+  const ironWrite = remainingIron === 0
+    ? admin.from("resource_inventory").delete().eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron")
+    : admin.from("resource_inventory").update({ quantity: remainingIron }).eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron");
 
-  // ── Persist ───────────────────────────────────────────────────────────────
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
-    .from("ships")
-    .update(patch)
-    .eq("id", shipId);
+  await Promise.all([
+    ironWrite,
+    admin.from("ships").update(patch).eq("id", shipId),
+  ]);
 
   return Response.json({
     ok: true,
