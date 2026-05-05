@@ -255,9 +255,14 @@ export async function runEngineTick(
   }
 
   // ── 7. Upkeep resolution ───────────────────────────────────────────────────
+  // Resource allocation is sequential (shared station food/iron); DB writes
+  // are independent per-colony and fired in parallel after all allocation.
   let totalIronConsumed = 0;
   let totalFoodConsumed = 0;
   let totalPeriodsResolved = 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const upkeepWrites: Array<Promise<any>> = [];
 
   for (let ci = 0; ci < resolvedColonies.length; ci++) {
     const colony = resolvedColonies[ci];
@@ -300,9 +305,11 @@ export async function runEngineTick(
       upkeepPatch.next_growth_at = result.newNextGrowthAt;
     }
 
-    await admin.from("colonies").update(upkeepPatch).eq("id", colony.id);
+    upkeepWrites.push(admin.from("colonies").update(upkeepPatch).eq("id", colony.id));
     totalPeriodsResolved += periods;
   }
+
+  if (upkeepWrites.length > 0) await Promise.all(upkeepWrites);
 
   // ── 8. Persist station resource changes ───────────────────────────────────
   if (stationId) {
@@ -313,8 +320,10 @@ export async function runEngineTick(
       await persistStationResource(admin, stationId, "iron", stationIron);
     }
     if (totalBiomassConverted > 0) {
-      await persistStationResource(admin, stationId, "biomass", stationBiomass);
-      await persistStationResource(admin, stationId, "water",   stationWater);
+      await Promise.all([
+        persistStationResource(admin, stationId, "biomass", stationBiomass),
+        persistStationResource(admin, stationId, "water",   stationWater),
+      ]);
     }
   }
 
@@ -345,19 +354,14 @@ export async function runEngineTick(
 
     if (amounts.length === 0) continue;
 
-    // Reset last_extract_at first (safer: lose resources rather than double-extract).
-    await admin
-      .from("colonies")
-      .update({ last_extract_at: requestTime.toISOString() })
-      .eq("id", colony.id);
+    // Timer reset and inventory read are independent; fire in parallel.
+    // (Timer conceptually first for safety, but the read doesn't depend on it.)
+    const [, invRes] = await Promise.all([
+      admin.from("colonies").update({ last_extract_at: requestTime.toISOString() }).eq("id", colony.id),
+      admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "colony").eq("location_id", colony.id),
+    ]);
 
-    const { data: existingRows } = await admin
-      .from("resource_inventory")
-      .select("resource_type, quantity")
-      .eq("location_type", "colony")
-      .eq("location_id", colony.id);
-
-    const allExisting = ((existingRows ?? []) as { resource_type: string; quantity: number }[]);
+    const allExisting = ((invRes.data ?? []) as { resource_type: string; quantity: number }[]);
     const existing    = new Map(allExisting.map((r) => [r.resource_type, r.quantity]));
 
     const warehouseTier = getStructureTier(colonyStructures, "warehouse");
