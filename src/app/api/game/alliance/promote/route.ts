@@ -43,66 +43,34 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Caller must be founder ────────────────────────────────────────────────
-  const { data: callerMembership } = maybeSingleResult<{
-    id: string;
-    alliance_id: string;
-    role: string;
-  }>(
-    await admin
-      .from("alliance_members")
-      .select("id, alliance_id, role")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Fetch both memberships in parallel ───────────────────────────────────
+  type MemberRow = { id: string; alliance_id: string; role: string };
+  const [callerRes, targetRes] = await Promise.all([
+    admin.from("alliance_members").select("id, alliance_id, role").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliance_members").select("id, alliance_id, role").eq("player_id", targetPlayerId).maybeSingle(),
+  ]);
 
-  if (!callerMembership) {
-    return toErrorResponse(fail("not_found", "You are not in an alliance.").error);
-  }
+  const { data: callerMembership } = maybeSingleResult<MemberRow>(callerRes);
+  if (!callerMembership) return toErrorResponse(fail("not_found", "You are not in an alliance.").error);
   if (callerMembership.role !== "founder") {
-    return toErrorResponse(
-      fail("forbidden", "Only the alliance founder may change member roles.").error,
-    );
+    return toErrorResponse(fail("forbidden", "Only the alliance founder may change member roles.").error);
   }
 
-  // ── Target must be in the same alliance ───────────────────────────────────
-  const { data: targetMembership } = maybeSingleResult<{
-    id: string;
-    alliance_id: string;
-    role: string;
-  }>(
-    await admin
-      .from("alliance_members")
-      .select("id, alliance_id, role")
-      .eq("player_id", targetPlayerId)
-      .eq("alliance_id", callerMembership.alliance_id)
-      .maybeSingle(),
-  );
-
-  if (!targetMembership) {
-    return toErrorResponse(
-      fail("not_found", "Target player is not a member of your alliance.").error,
-    );
+  const { data: targetMembership } = maybeSingleResult<MemberRow>(targetRes);
+  if (!targetMembership || targetMembership.alliance_id !== callerMembership.alliance_id) {
+    return toErrorResponse(fail("not_found", "Target player is not a member of your alliance.").error);
   }
 
   // ── Apply role change ─────────────────────────────────────────────────────
-  await admin
-    .from("alliance_members")
-    .update({ role: newRole })
-    .eq("id", targetMembership.id);
-
-  // If transferring leadership, demote caller to officer
   if (newRole === "founder") {
-    await admin
-      .from("alliance_members")
-      .update({ role: "officer" })
-      .eq("id", callerMembership.id);
-
-    // Update founder_id on the alliance record
-    await admin
-      .from("alliances")
-      .update({ founder_id: targetPlayerId })
-      .eq("id", callerMembership.alliance_id);
+    // Transfer leadership: update target + caller + alliance record in parallel
+    await Promise.all([
+      admin.from("alliance_members").update({ role: "founder" }).eq("id", targetMembership.id),
+      admin.from("alliance_members").update({ role: "officer" }).eq("id", callerMembership.id),
+      admin.from("alliances").update({ founder_id: targetPlayerId }).eq("id", callerMembership.alliance_id),
+    ]);
+  } else {
+    await admin.from("alliance_members").update({ role: newRole }).eq("id", targetMembership.id);
   }
 
   return Response.json({ ok: true });

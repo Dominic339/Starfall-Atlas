@@ -45,27 +45,18 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const now   = new Date();
 
-  // ── Governance check ──────────────────────────────────────────────────────
-  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(
-    await admin
-      .from("system_stewardship")
-      .select("steward_id, has_governance")
-      .eq("system_id", systemId)
-      .maybeSingle(),
-  );
-
-  if (!stewardship || stewardship.steward_id !== player.id || !stewardship.has_governance) {
-    return toErrorResponse(
-      fail("forbidden", "Only the governance holder of this system can reclaim a gate.").error,
-    );
-  }
-
-  // ── Presence + gate check (parallel) ─────────────────────────────────────
-  const [shipsRes, stationRes, gateRes] = await Promise.all([
+  // ── Governance + presence + gate check in one parallel batch ────────────
+  const [stewardRes, shipsRes, stationRes, gateRes] = await Promise.all([
+    admin.from("system_stewardship").select("steward_id, has_governance").eq("system_id", systemId).maybeSingle(),
     admin.from("ships").select("current_system_id").eq("owner_id", player.id),
     admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
     admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
   ]);
+
+  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(stewardRes);
+  if (!stewardship || stewardship.steward_id !== player.id || !stewardship.has_governance) {
+    return toErrorResponse(fail("forbidden", "Only the governance holder of this system can reclaim a gate.").error);
+  }
 
   const { data: shipRows }  = listResult<Pick<Ship, "current_system_id">>(shipsRes);
   const { data: stationRow } = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
@@ -104,12 +95,11 @@ export async function POST(request: NextRequest) {
 
   if (existingJob) {
     if (new Date(existingJob.complete_at) <= now) {
-      // Complete the reclaim now
-      await admin
-        .from("hyperspace_gates")
-        .update({ status: "active", owner_id: player.id, reclaimed_at: now.toISOString() })
-        .eq("id", gate.id);
-      await admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", existingJob.id);
+      // Complete the reclaim now — both writes are independent
+      await Promise.all([
+        admin.from("hyperspace_gates").update({ status: "active", owner_id: player.id, reclaimed_at: now.toISOString() }).eq("id", gate.id),
+        admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", existingJob.id),
+      ]);
       void admin.from("world_events").insert({
         event_type: "gate_reclaimed",
         player_id: player.id,
@@ -124,19 +114,11 @@ export async function POST(request: NextRequest) {
   // ── Start reclaim construction job ────────────────────────────────────────
   const completeAt = new Date(now.getTime() + BALANCE.gates.reclaimHours * 60 * 60 * 1000);
 
-  // Pre-assign owner to this player (they're claiming it)
-  await admin
-    .from("hyperspace_gates")
-    .update({ owner_id: player.id })
-    .eq("id", gate.id);
-
-  await admin.from("gate_construction_jobs").insert({
-    gate_id:     gate.id,
-    player_id:   player.id,
-    started_at:  now.toISOString(),
-    complete_at: completeAt.toISOString(),
-    status:      "pending",
-  });
+  // Pre-assign owner + create job in parallel
+  await Promise.all([
+    admin.from("hyperspace_gates").update({ owner_id: player.id }).eq("id", gate.id),
+    admin.from("gate_construction_jobs").insert({ gate_id: gate.id, player_id: player.id, started_at: now.toISOString(), complete_at: completeAt.toISOString(), status: "pending" }),
+  ]);
 
   return Response.json({
     ok: true,

@@ -79,21 +79,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Deduct resources from station ─────────────────────────────────────────
-  await admin
-    .from("resource_inventory")
-    .update({ quantity: available - quantity })
-    .eq("location_type", "station")
-    .eq("location_id", station.id)
-    .eq("resource_type", resourceType);
-
-  // ── Deduct listing fee from credits ────────────────────────────────────────
-  if (listingFee > 0) {
-    await admin
-      .from("players")
-      .update({ credits: player.credits - listingFee })
-      .eq("id", player.id);
-  }
+  // ── Deduct resources + listing fee in parallel ───────────────────────────
+  await Promise.all([
+    admin.from("resource_inventory").update({ quantity: available - quantity }).eq("location_type", "station").eq("location_id", station.id).eq("resource_type", resourceType),
+    listingFee > 0
+      ? admin.from("players").update({ credits: player.credits - listingFee }).eq("id", player.id)
+      : Promise.resolve(),
+  ]);
 
   // ── Create listing ────────────────────────────────────────────────────────
   const expiresAt = new Date(Date.now() + BALANCE.market.defaultExpiryDays * 24 * 60 * 60 * 1000).toISOString();
