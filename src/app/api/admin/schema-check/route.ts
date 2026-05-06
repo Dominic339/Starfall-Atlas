@@ -72,63 +72,67 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ── Probe critical schema items ───────────────────────────────────────────
-
-  // Core tables
-  await checkTable("players");
-  await checkTable("ships");
-  await checkTable("player_stations");
-  await checkTable("colonies");
-  await checkTable("travel_jobs");
-  await checkTable("resource_inventory");
-  await checkTable("survey_results");
-  await checkTable("system_discoveries");
-  await checkTable("player_research");
-  await checkTable("fleets");
-  await checkTable("player_fleet_slots");
-  await checkTable("colony_routes");
-  await checkTable("colony_transports");
-  await checkTable("alliances");
-  await checkTable("alliance_members");
-  await checkTable("alliance_beacons");
-  await checkTable("disputes");
-
-  // Critical colony columns
-  await checkColumn("colonies", "status");
-  await checkColumn("colonies", "abandoned_at");
-  await checkColumn("colonies", "collapsed_at");
-  await checkColumn("colonies", "last_extract_at");
-  await checkColumn("colonies", "last_upkeep_at");
-  await checkColumn("colonies", "upkeep_missed_periods");
-
-  // Critical ships columns
-  await checkColumn("ships", "dispatch_mode");
-  await checkColumn("ships", "auto_state");
-  await checkColumn("ships", "auto_target_colony_id");
-  await checkColumn("ships", "hull_level");
-  await checkColumn("ships", "engine_level");
-  await checkColumn("ships", "cargo_level");
-
-  // Player profile columns
-  await checkColumn("players", "sol_stipend_last_at");
-  await checkColumn("players", "deactivated_at");
-  await checkColumn("players", "title");
-  await checkColumn("players", "first_colony_placed");
-
-  // Alliance columns
-  await checkColumn("alliances", "tag");
-  await checkColumn("alliances", "invite_code");
+  // ── Probe critical schema items (all checks run in parallel) ─────────────
+  await Promise.all([
+    // Core tables
+    checkTable("players"),
+    checkTable("ships"),
+    checkTable("player_stations"),
+    checkTable("colonies"),
+    checkTable("travel_jobs"),
+    checkTable("resource_inventory"),
+    checkTable("survey_results"),
+    checkTable("system_discoveries"),
+    checkTable("player_research"),
+    checkTable("fleets"),
+    checkTable("player_fleet_slots"),
+    checkTable("colony_routes"),
+    checkTable("colony_transports"),
+    checkTable("alliances"),
+    checkTable("alliance_members"),
+    checkTable("alliance_beacons"),
+    checkTable("disputes"),
+    // Critical colony columns
+    checkColumn("colonies", "status"),
+    checkColumn("colonies", "abandoned_at"),
+    checkColumn("colonies", "collapsed_at"),
+    checkColumn("colonies", "last_extract_at"),
+    checkColumn("colonies", "last_upkeep_at"),
+    checkColumn("colonies", "upkeep_missed_periods"),
+    // Critical ships columns
+    checkColumn("ships", "dispatch_mode"),
+    checkColumn("ships", "auto_state"),
+    checkColumn("ships", "auto_target_colony_id"),
+    checkColumn("ships", "hull_level"),
+    checkColumn("ships", "engine_level"),
+    checkColumn("ships", "cargo_level"),
+    // Player profile columns
+    checkColumn("players", "sol_stipend_last_at"),
+    checkColumn("players", "deactivated_at"),
+    checkColumn("players", "title"),
+    checkColumn("players", "first_colony_placed"),
+    // Alliance columns
+    checkColumn("alliances", "tag"),
+    checkColumn("alliances", "invite_code"),
+  ]);
 
   // ── Player/ship data stats ────────────────────────────────────────────────
   let playerStats: Record<string, unknown> = {};
   try {
-    const { count: playerCount } = await admin.from("players").select("id", { count: "exact", head: true });
-    const { count: stationCount } = await admin.from("player_stations").select("id", { count: "exact", head: true });
-    const { count: shipCount } = await admin.from("ships").select("id", { count: "exact", head: true });
+    const [
+      { count: playerCount },
+      { count: stationCount },
+      { count: shipCount },
+      { data: playerIds },
+      { data: stationOwnerIds },
+    ] = await Promise.all([
+      admin.from("players").select("id", { count: "exact", head: true }),
+      admin.from("player_stations").select("id", { count: "exact", head: true }),
+      admin.from("ships").select("id", { count: "exact", head: true }),
+      admin.from("players").select("id"),
+      admin.from("player_stations").select("owner_id"),
+    ]);
 
-    // Players without a station
-    const { data: playerIds } = await admin.from("players").select("id");
-    const { data: stationOwnerIds } = await admin.from("player_stations").select("owner_id");
     const stationSet = new Set((stationOwnerIds ?? []).map((r: { owner_id: string }) => r.owner_id));
     const playersWithoutStation = (playerIds ?? []).filter(
       (r: { id: string }) => !stationSet.has(r.id),
