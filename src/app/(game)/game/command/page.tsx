@@ -352,7 +352,7 @@ export default async function CommandPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Navigate
         </h2>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5 stagger-children">
           {[
             { href: "/game/map",      label: "Galaxy Map", color: "text-indigo-400 border-indigo-800/40" },
             { href: "/game/station",  label: "Station",    color: "text-amber-400 border-amber-800/40" },
@@ -360,14 +360,15 @@ export default async function CommandPage() {
             { href: "/game/alliance", label: "Alliance",   color: "text-violet-400 border-violet-800/40" },
             { href: "/game/auctions", label: "Auctions",   color: "text-rose-400 border-rose-800/40" },
             { href: "/game/market",   label: "Market",     color: "text-orange-400 border-orange-800/40" },
-            { href: "/game/shop",     label: "Shop",       color: "text-yellow-400 border-yellow-800/40" },
-            { href: "/game/messages", label: "Messages",   color: "text-sky-400 border-sky-800/40" },
-            { href: "/game/feed",     label: "World Feed", color: "text-zinc-400 border-zinc-700/40" },
+            { href: "/game/shop",        label: "Shop",        color: "text-yellow-400 border-yellow-800/40" },
+            { href: "/game/messages",    label: "Messages",    color: "text-sky-400 border-sky-800/40" },
+            { href: "/game/feed",        label: "World Feed",  color: "text-zinc-400 border-zinc-700/40" },
+            { href: "/game/leaderboard", label: "Leaderboard", color: "text-amber-400 border-amber-800/40" },
           ].map(({ href, label, color }) => (
             <Link
               key={href}
               href={href}
-              className={`rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-center text-xs font-medium transition-colors hover:bg-zinc-800/60 ${color}`}
+              className={`rounded-lg border bg-zinc-900/50 px-3 py-2.5 text-center text-xs font-medium card-interactive animate-fade-in-up ${color}`}
             >
               {label}
             </Link>
