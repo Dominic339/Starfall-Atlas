@@ -406,9 +406,9 @@ export default async function SystemPage({
       </div>
 
       {/* Status row */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
         {/* Discovery status */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 card-interactive animate-fade-in-up">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Discovery
           </p>
@@ -449,7 +449,7 @@ export default async function SystemPage({
         </div>
 
         {/* Stewardship status */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 card-interactive animate-fade-in-up">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Stewardship
           </p>
@@ -549,7 +549,7 @@ export default async function SystemPage({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Bodies ({system.bodyCount})
         </h2>
-        <div className="space-y-2">
+        <div className="space-y-2 stagger-children">
           {system.bodies.map((body) => {
             const survey = surveyByBodyId.get(body.id) ?? null;
             const colony = colonyByBodyId.get(body.id) ?? null;
@@ -582,7 +582,7 @@ export default async function SystemPage({
             return (
               <div
                 key={body.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up"
               >
                 {/* Body header row */}
                 <div className="flex items-start justify-between gap-3">
