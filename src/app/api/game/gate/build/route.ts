@@ -54,27 +54,20 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const now   = new Date();
 
-  // ── Governance check ──────────────────────────────────────────────────────
-  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(
-    await admin
-      .from("system_stewardship")
-      .select("steward_id, has_governance")
-      .eq("system_id", systemId)
-      .maybeSingle(),
-  );
+  // ── Governance + presence + existing-gate check in parallel ─────────────
+  const [stewardshipRes, shipsRes, stationRes, gateRes] = await Promise.all([
+    admin.from("system_stewardship").select("steward_id, has_governance").eq("system_id", systemId).maybeSingle(),
+    admin.from("ships").select("current_system_id").eq("owner_id", player.id),
+    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
+    admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
+  ]);
 
+  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(stewardshipRes);
   if (!stewardship || stewardship.steward_id !== player.id || !stewardship.has_governance) {
     return toErrorResponse(
       fail("forbidden", "Only the governance holder of this system can build a gate.").error,
     );
   }
-
-  // ── Presence + existing-gate check (parallel) ────────────────────────────
-  const [shipsRes, stationRes, gateRes] = await Promise.all([
-    admin.from("ships").select("current_system_id").eq("owner_id", player.id),
-    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
-    admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
-  ]);
 
   const { data: shipRows }    = listResult<Pick<Ship, "current_system_id">>(shipsRes);
   const { data: stationRow }  = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
