@@ -96,41 +96,24 @@ export async function POST(request: NextRequest) {
   const { data: seller } = maybeSingleResult<{ credits: number }>(sellerRes);
   const sellerCredits = seller?.credits ?? 0;
 
-  // ── Deduct buyer credits + add seller credits in parallel ─────────────────
-  await Promise.all([
+  // ── Deduct/credit players + pre-fetch buyer inventory in parallel ─────────
+  const [, , buyerInvRes] = await Promise.all([
     admin.from("players").update({ credits: player.credits - totalCost }).eq("id", player.id),
     admin.from("players").update({ credits: sellerCredits + totalCost }).eq("id", listing.seller_id),
+    admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", buyerStation.id).eq("resource_type", listing.resource_type).maybeSingle(),
   ]);
+  const { data: buyerInv } = maybeSingleResult<{ quantity: number }>(buyerInvRes);
 
-  // ── Deliver resources to buyer's station ──────────────────────────────────
-  const { data: buyerInv } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", buyerStation.id)
-      .eq("resource_type", listing.resource_type)
-      .maybeSingle(),
-  );
-  await admin
-    .from("resource_inventory")
-    .upsert(
-      {
-        location_type: "station",
-        location_id:   buyerStation.id,
-        resource_type: listing.resource_type,
-        quantity:      (buyerInv?.quantity ?? 0) + qty,
-      },
-      { onConflict: "location_type,location_id,resource_type" },
-    );
-
-  // ── Update listing status ─────────────────────────────────────────────────
+  // ── Deliver resources + update listing in parallel ────────────────────────
   const newFilled = listing.quantity_filled + qty;
   const newStatus = newFilled >= listing.quantity ? "filled" : "partially_filled";
-  await admin
-    .from("market_listings")
-    .update({ quantity_filled: newFilled, status: newStatus, buyer_id: player.id })
-    .eq("id", listingId);
+  await Promise.all([
+    admin.from("resource_inventory").upsert(
+      { location_type: "station", location_id: buyerStation.id, resource_type: listing.resource_type, quantity: (buyerInv?.quantity ?? 0) + qty },
+      { onConflict: "location_type,location_id,resource_type" },
+    ),
+    admin.from("market_listings").update({ quantity_filled: newFilled, status: newStatus, buyer_id: player.id }).eq("id", listingId),
+  ]);
 
   // Award battle pass XP for market trade (fire-and-forget)
   void awardBattlePassXp(admin, player.id, { type: "market_trades", count: 1 });
