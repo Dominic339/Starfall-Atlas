@@ -280,18 +280,14 @@ export async function runEngineTick(
 
   // ── 8. Persist station resource changes ───────────────────────────────────
   if (stationId) {
-    if (totalFoodConsumed > 0 || totalBiomassConverted > 0) {
-      await persistStationResource(admin, stationId, "food", stationFood);
-    }
-    if (totalIronConsumed > 0) {
-      await persistStationResource(admin, stationId, "iron", stationIron);
-    }
+    const resourceWrites: Promise<unknown>[] = [];
+    if (totalFoodConsumed > 0 || totalBiomassConverted > 0) resourceWrites.push(persistStationResource(admin, stationId, "food",    stationFood));
+    if (totalIronConsumed > 0)                               resourceWrites.push(persistStationResource(admin, stationId, "iron",    stationIron));
     if (totalBiomassConverted > 0) {
-      await Promise.all([
-        persistStationResource(admin, stationId, "biomass", stationBiomass),
-        persistStationResource(admin, stationId, "water",   stationWater),
-      ]);
+      resourceWrites.push(persistStationResource(admin, stationId, "biomass", stationBiomass));
+      resourceWrites.push(persistStationResource(admin, stationId, "water",   stationWater));
     }
+    if (resourceWrites.length > 0) await Promise.all(resourceWrites);
   }
 
   // ── 8.5. Passive extraction — materialise colony inventory ─────────────────
