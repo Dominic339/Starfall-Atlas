@@ -22,14 +22,30 @@ export async function GET() {
 
   const now = new Date().toISOString();
 
-  // Available shop skins — fetch all is_available rows and filter date window in JS
-  // (PostgREST .or() with ISO timestamps is unreliable due to '.' in the value)
-  const rawShopResult = await admin
-    .from("skins")
-    .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity, visual, model_path")
-    .eq("is_available", true);
+  // Phase 1: all independent fetches in parallel.
+  // Shop skins has a fallback query (in case visual/model_path columns haven't migrated yet),
+  // so it's handled separately — but the four player/package queries all run alongside it.
+  const [
+    rawShopResult,
+    playerSkinsRes,
+    equippedRes,
+    pkgRes,
+    pkgItemsRes,
+  ] = await Promise.all([
+    admin
+      .from("skins")
+      .select("id, name, description, type, price_credits, price_premium_cents, discount_pct, available_from, available_until, rarity, visual, model_path")
+      .eq("is_available", true),
+    admin.from("player_skins").select("skin_id, acquired_at").eq("player_id", player.id),
+    admin.from("player_equipped_skins").select("ship_skin_id, station_skin_id, fleet_skin_id").eq("player_id", player.id),
+    admin
+      .from("skin_packages")
+      .select("id, name, description, price_credits, price_premium_cents, discount_pct, available_from, available_until")
+      .eq("is_available", true),
+    admin.from("skin_package_items").select("package_id, skin_id"),
+  ]);
 
-  // If the visual or model_path column doesn't exist yet (migration pending), fall back without them
+  // Fallback if visual/model_path columns don't exist yet (migration pending)
   const shopQueryResult = rawShopResult.error
     ? await admin
         .from("skins")
@@ -54,25 +70,12 @@ export async function GET() {
            (!r.available_until || r.available_until >= now),
   );
 
-  // Player-owned skins
-  const { data: ownedRows } = listResult<{ skin_id: string; acquired_at: string }>(
-    await admin
-      .from("player_skins")
-      .select("skin_id, acquired_at")
-      .eq("player_id", player.id),
-  );
-
-  // Equipped skins
+  const { data: ownedRows } = listResult<{ skin_id: string; acquired_at: string }>(playerSkinsRes);
   const { data: equippedRows } = listResult<{
     ship_skin_id: string | null;
     station_skin_id: string | null;
     fleet_skin_id: string | null;
-  }>(
-    await admin
-      .from("player_equipped_skins")
-      .select("ship_skin_id, station_skin_id, fleet_skin_id")
-      .eq("player_id", player.id),
-  );
+  }>(equippedRes);
 
   const equipped = equippedRows?.[0] ?? {
     ship_skin_id: null,
@@ -82,7 +85,7 @@ export async function GET() {
 
   const ownedIds = new Set((ownedRows ?? []).map((r) => r.skin_id));
 
-  // Fetch full DB rows for all owned skins (handles DB-only skins without code definitions)
+  // Phase 2: fetch full DB rows for owned skins (depends on ownedIds from phase 1)
   const { data: ownedDbRows } = ownedIds.size > 0
     ? listResult<{ id: string; name: string; description: string; type: string; rarity: string; visual?: Record<string,string> | null; model_path?: string | null; }>(
         await (async () => {
@@ -94,33 +97,18 @@ export async function GET() {
       )
     : { data: [] };
 
-  // Available shop packages — same pattern: fetch all, filter date window in JS
   const { data: pkgRows } = listResult<{
-    id: string;
-    name: string;
-    description: string;
-    price_credits: number | null;
-    price_premium_cents: number | null;
-    discount_pct: number | null;
-    available_from: string | null;
-    available_until: string | null;
-  }>(
-    await admin
-      .from("skin_packages")
-      .select("id, name, description, price_credits, price_premium_cents, discount_pct, available_from, available_until")
-      .eq("is_available", true),
-  );
+    id: string; name: string; description: string;
+    price_credits: number | null; price_premium_cents: number | null;
+    discount_pct: number | null; available_from: string | null; available_until: string | null;
+  }>(pkgRes);
 
   const filteredPkgRows = (pkgRows ?? []).filter(
     (p) => (!p.available_from || p.available_from <= now) &&
            (!p.available_until || p.available_until >= now),
   );
 
-  const { data: pkgItemRows } = listResult<{ package_id: string; skin_id: string }>(
-    await admin
-      .from("skin_package_items")
-      .select("package_id, skin_id"),
-  );
+  const { data: pkgItemRows } = listResult<{ package_id: string; skin_id: string }>(pkgItemsRes);
 
   const pkgSkinIds = new Map<string, string[]>();
   for (const row of pkgItemRows ?? []) {
