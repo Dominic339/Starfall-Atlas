@@ -74,17 +74,10 @@ export async function POST(req: Request) {
 
     if (deductErr) return Response.json({ ok: false, error: "Failed to deduct credits" }, { status: 500 });
 
-    await admin.from("player_skins").insert({
-      player_id: player.id,
-      skin_id: skinId,
-      source: "purchase",
-    });
-
-    await admin.from("skin_purchases").insert({
-      player_id: player.id,
-      skin_id: skinId,
-      credits_paid: effectivePrice,
-    });
+    await Promise.all([
+      admin.from("player_skins").insert({ player_id: player.id, skin_id: skinId, source: "purchase" }),
+      admin.from("skin_purchases").insert({ player_id: player.id, skin_id: skinId, credits_paid: effectivePrice }),
+    ]);
 
     const def = getSkinById(skinId);
     return Response.json({ ok: true, data: { skinId, name: def?.name ?? skinId, creditsSpent: effectivePrice } });
@@ -149,18 +142,12 @@ export async function POST(req: Request) {
 
   if (deductErr) return Response.json({ ok: false, error: "Failed to deduct credits" }, { status: 500 });
 
-  // Grant new skins
-  if (newSkins.length > 0) {
-    await admin.from("player_skins").insert(
-      newSkins.map((sid) => ({ player_id: player.id, skin_id: sid, source: "package" })),
-    );
-  }
-
-  await admin.from("skin_purchases").insert({
-    player_id: player.id,
-    package_id: packageId,
-    credits_paid: effectivePrice,
-  });
+  await Promise.all([
+    newSkins.length > 0
+      ? admin.from("player_skins").insert(newSkins.map((sid) => ({ player_id: player.id, skin_id: sid, source: "package" })))
+      : Promise.resolve(null),
+    admin.from("skin_purchases").insert({ player_id: player.id, package_id: packageId, credits_paid: effectivePrice }),
+  ]);
 
   return Response.json({
     ok: true,

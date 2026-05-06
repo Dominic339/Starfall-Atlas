@@ -59,12 +59,11 @@ export async function POST(request: NextRequest) {
   if (player.credits < cost) {
     return toErrorResponse(fail("insufficient_credits", `Requires ${cost} credits`).error);
   }
-  if (cost > 0) {
-    await admin.from("players").update({ credits: player.credits - cost }).eq("id", player.id);
-  }
-
-  // Mark premium
-  await admin.from("player_battle_pass").update({ is_premium: true, updated_at: new Date().toISOString() }).eq("id", progress.id);
+  // Deduct credits (if any) + mark premium in parallel
+  await Promise.all([
+    cost > 0 ? admin.from("players").update({ credits: player.credits - cost }).eq("id", player.id) : Promise.resolve(null),
+    admin.from("player_battle_pass").update({ is_premium: true, updated_at: new Date().toISOString() }).eq("id", progress.id),
+  ]);
 
   // Retroactively deliver premium rewards for already-unlocked tiers
   if ((progress.current_tier ?? 0) > 0) {
