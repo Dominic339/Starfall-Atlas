@@ -28,17 +28,15 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  const { data: skins } = listResult<Record<string, unknown>>(
-    await admin.from("skins").select("*").order("created_at", { ascending: false }),
-  );
+  const [skinsRes, packagesRes, pkgItemsRes] = await Promise.all([
+    admin.from("skins").select("*").order("created_at", { ascending: false }),
+    admin.from("skin_packages").select("*").order("created_at", { ascending: false }),
+    admin.from("skin_package_items").select("package_id, skin_id"),
+  ]);
 
-  const { data: packages } = listResult<Record<string, unknown>>(
-    await admin.from("skin_packages").select("*").order("created_at", { ascending: false }),
-  );
-
-  const { data: pkgItems } = listResult<{ package_id: string; skin_id: string }>(
-    await admin.from("skin_package_items").select("package_id, skin_id"),
-  );
+  const { data: skins }    = listResult<Record<string, unknown>>(skinsRes);
+  const { data: packages } = listResult<Record<string, unknown>>(packagesRes);
+  const { data: pkgItems } = listResult<{ package_id: string; skin_id: string }>(pkgItemsRes);
 
   const pkgSkinMap = new Map<string, string[]>();
   for (const row of pkgItems ?? []) {

@@ -22,8 +22,6 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  await resolveExpiredAuctions(admin, new Date()).catch(() => undefined);
-
   type RawAuction = {
     id: string; seller_id: string; item_type: string; item_id: string;
     min_bid: number; current_high_bid: number; high_bidder_id: string | null;
@@ -31,31 +29,39 @@ export async function GET() {
   };
   type RawColony = { id: string; system_id: string; body_id: string; population_tier: number };
 
+  // Start expiry resolution concurrently with main data fetches
+  const expiredResolutionP = resolveExpiredAuctions(admin, new Date()).catch(() => undefined);
+
   const [auctionsRes, coloniesRes, stewardRes] = await Promise.all([
     admin.from("auctions").select("*").eq("status", "active").order("ends_at", { ascending: true }),
     admin.from("colonies").select("id, system_id, body_id, population_tier").eq("owner_id", player.id).eq("status", "active"),
     admin.from("system_stewardship").select("system_id").eq("steward_id", player.id),
   ]);
 
+  await expiredResolutionP;
+
   const rawAuctions = (listResult<RawAuction>(auctionsRes).data ?? []);
   const playerColonies = (listResult<RawColony>(coloniesRes).data ?? []);
   const playerStewardships = (listResult<{ system_id: string }>(stewardRes).data ?? []);
 
-  // Resolve seller handles
+  // Resolve seller handles + colony data in parallel
   const sellerIds = [...new Set(rawAuctions.map((a) => a.seller_id))];
-  const handleMap = new Map<string, string>();
-  if (sellerIds.length > 0) {
-    const { data: sellers } = await admin.from("players").select("id, handle").in("id", sellerIds);
-    for (const s of (sellers ?? []) as { id: string; handle: string }[]) handleMap.set(s.id, s.handle);
-  }
-
-  // Resolve colony data for colony-type auctions
   const colonyIds = rawAuctions.filter((a) => a.item_type === "colony").map((a) => a.item_id);
+
+  const [sellersRes, colsRes] = await Promise.all([
+    sellerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", sellerIds)
+      : Promise.resolve({ data: null as { id: string; handle: string }[] | null }),
+    colonyIds.length > 0
+      ? admin.from("colonies").select("id, system_id, body_id, population_tier").in("id", colonyIds)
+      : Promise.resolve({ data: null as RawColony[] | null }),
+  ]);
+
+  const handleMap = new Map<string, string>();
+  for (const s of ((sellersRes.data ?? []) as { id: string; handle: string }[])) handleMap.set(s.id, s.handle);
+
   const colonyDataMap = new Map<string, RawColony>();
-  if (colonyIds.length > 0) {
-    const { data: cols } = await admin.from("colonies").select("id, system_id, body_id, population_tier").in("id", colonyIds);
-    for (const c of (cols ?? []) as RawColony[]) colonyDataMap.set(c.id, c);
-  }
+  for (const c of ((colsRes.data ?? []) as RawColony[])) colonyDataMap.set(c.id, c);
 
   const auctions = rawAuctions.map((a) => {
     let itemLabel = a.item_id;
