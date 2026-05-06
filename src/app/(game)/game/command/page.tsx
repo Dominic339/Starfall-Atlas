@@ -40,11 +40,12 @@ export default async function CommandPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // Engine tick + travel resolution (idempotent — also runs on /game/map)

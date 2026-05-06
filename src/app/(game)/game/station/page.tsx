@@ -67,11 +67,12 @@ export default async function StationPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // Resolve colony growth, upkeep, biomass→food conversion, and passive
