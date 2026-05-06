@@ -483,7 +483,7 @@ export default async function SystemPage({
 
       {/* Travel / discover / arrive actions */}
       {!isSol && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 animate-fade-in-up">
           <h2 className="mb-3 text-sm font-semibold text-zinc-400">Actions</h2>
           <div className="space-y-3">
             {/* Arrive button — ship is in transit here */}
@@ -862,12 +862,12 @@ export default async function SystemPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Nearby systems (within {maxRangeLy} ly)
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {nearbySystems.map((nearby) => (
               <Link
                 key={nearby.id}
                 href={`/game/system/${encodeURIComponent(nearby.id)}`}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 transition-colors hover:border-zinc-700"
+                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up"
               >
                 <div>
                   <p className="text-sm font-medium text-zinc-200">
