@@ -30,6 +30,11 @@ export async function POST(req: Request) {
 
   if (skinId) {
     // ── Single skin purchase ──────────────────────────────────────────────
+    // Fetch skin metadata + ownership check in parallel
+    const [skinRaw, existingRaw] = await Promise.all([
+      admin.from("skins").select("*").eq("id", skinId).single(),
+      admin.from("player_skins").select("id").eq("player_id", player.id).eq("skin_id", skinId).maybeSingle(),
+    ]);
     const { data: skin } = singleResult<{
       id: string;
       price_credits: number;
@@ -37,7 +42,7 @@ export async function POST(req: Request) {
       is_available: boolean;
       available_from: string | null;
       available_until: string | null;
-    }>(await admin.from("skins").select("*").eq("id", skinId).single());
+    }>(skinRaw);
 
     if (!skin) return Response.json({ ok: false, error: "Skin not found" }, { status: 404 });
     if (!skin.is_available) return Response.json({ ok: false, error: "Skin not available" }, { status: 400 });
@@ -48,13 +53,7 @@ export async function POST(req: Request) {
       return Response.json({ ok: false, error: "Skin offer has expired" }, { status: 400 });
     }
 
-    // Check ownership
-    const { data: existing } = await admin
-      .from("player_skins")
-      .select("id")
-      .eq("player_id", player.id)
-      .eq("skin_id", skinId)
-      .maybeSingle();
+    const { data: existing } = existingRaw;
     if (existing) return Response.json({ ok: false, error: "You already own this skin" }, { status: 400 });
 
     const effectivePrice =
@@ -92,6 +91,11 @@ export async function POST(req: Request) {
   }
 
   // ── Package purchase ──────────────────────────────────────────────────────
+  // Fetch package metadata + package items in parallel
+  const [pkgRaw, pkgItemsRaw] = await Promise.all([
+    admin.from("skin_packages").select("*").eq("id", packageId).single(),
+    admin.from("skin_package_items").select("skin_id").eq("package_id", packageId),
+  ]);
   const { data: pkg } = singleResult<{
     id: string;
     name: string;
@@ -100,7 +104,7 @@ export async function POST(req: Request) {
     is_available: boolean;
     available_from: string | null;
     available_until: string | null;
-  }>(await admin.from("skin_packages").select("*").eq("id", packageId).single());
+  }>(pkgRaw);
 
   if (!pkg) return Response.json({ ok: false, error: "Package not found" }, { status: 404 });
   if (!pkg.is_available) return Response.json({ ok: false, error: "Package not available" }, { status: 400 });
@@ -121,11 +125,7 @@ export async function POST(req: Request) {
     return Response.json({ ok: false, error: "Insufficient credits" }, { status: 400 });
   }
 
-  // Get skins in this package
-  const { data: pkgItems } = listResult<{ skin_id: string }>(
-    await admin.from("skin_package_items").select("skin_id").eq("package_id", packageId),
-  );
-
+  const { data: pkgItems } = listResult<{ skin_id: string }>(pkgItemsRaw);
   const skinIds = (pkgItems ?? []).map((r) => r.skin_id);
   if (skinIds.length === 0) return Response.json({ ok: false, error: "Package is empty" }, { status: 400 });
 
