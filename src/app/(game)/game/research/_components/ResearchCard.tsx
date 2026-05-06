@@ -106,7 +106,7 @@ export function ResearchCard({
 
   return (
     <div
-      className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[170px] flex-1 ${cardBorder}`}
+      className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[170px] flex-1 card-interactive ${cardBorder}`}
     >
       {/* ── Header: name + tier badge ─────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-2">

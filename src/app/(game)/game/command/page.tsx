@@ -163,20 +163,20 @@ export default async function CommandPage() {
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Summary
         </h2>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center card-interactive animate-fade-in-up">
             <p className="text-xs text-zinc-600 uppercase tracking-wider">Credits</p>
             <p className="mt-1 font-mono text-lg font-semibold text-amber-300">
               {player.credits.toLocaleString()}
             </p>
           </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center card-interactive animate-fade-in-up">
             <p className="text-xs text-zinc-600 uppercase tracking-wider">Station Iron</p>
             <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
               {stationIron.toLocaleString()}
             </p>
           </div>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 text-center card-interactive animate-fade-in-up">
             <p className="text-xs text-zinc-600 uppercase tracking-wider">Ships</p>
             <p className="mt-1 font-mono text-lg font-semibold text-zinc-200">
               {dockedShips.length} docked
@@ -187,7 +187,7 @@ export default async function CommandPage() {
               )}
             </p>
           </div>
-          <div className={`rounded-lg border px-4 py-3 text-center ${
+          <div className={`rounded-lg border px-4 py-3 text-center card-interactive animate-fade-in-up ${
             neglectedColonies.length > 0
               ? "border-red-900 bg-red-950/20"
               : "border-zinc-800 bg-zinc-900"

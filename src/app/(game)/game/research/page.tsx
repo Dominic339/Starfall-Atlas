@@ -315,7 +315,7 @@ export default async function ResearchPage() {
           {/* Per-stat caps grid */}
           <div>
             <p className="text-xs text-zinc-600 mb-1.5">Per-stat level caps</p>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 stagger-children">
               {STAT_KEYS.map((stat) => {
                 const cap = statCaps[stat];
                 // Tiers: base=2, T1=4, T2=7, T3=10 → 4 states → 3 research tiers
@@ -324,7 +324,7 @@ export default async function ResearchPage() {
                 return (
                   <div
                     key={stat}
-                    className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 px-2 py-1.5"
+                    className="flex flex-col items-center gap-1 rounded-md bg-zinc-800/50 px-2 py-1.5 card-interactive animate-fade-in-up"
                   >
                     <span className="text-xs text-zinc-500 uppercase tracking-wider">
                       {stat.slice(0, 3)}
@@ -363,7 +363,7 @@ export default async function ResearchPage() {
         return (
           <section
             key={category}
-            className="rounded-xl border border-zinc-700 overflow-hidden"
+            className="rounded-xl border border-zinc-700 overflow-hidden card-interactive animate-fade-in-up"
           >
             {/* Category header */}
             <div className="bg-zinc-800/60 border-b border-zinc-700 px-4 py-3 flex items-center justify-between gap-3">

@@ -372,7 +372,7 @@ function AuctionCard({
   const hasBids      = auction.currentHighBid > 0;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 space-y-2">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 space-y-2 card-interactive animate-fade-in-up">
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -463,7 +463,7 @@ export default function AuctionClient({
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             Your Auctions
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {myAuctions.map((a) => (
               <AuctionCard key={a.id} auction={a} playerId={playerId} playerCredits={playerCredits} />
             ))}
@@ -477,7 +477,7 @@ export default function AuctionClient({
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             Open Auctions
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {otherAuctions.map((a) => (
               <AuctionCard key={a.id} auction={a} playerId={playerId} playerCredits={playerCredits} />
             ))}

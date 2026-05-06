@@ -191,9 +191,11 @@ export function FeedClient({ initialEvents }: FeedClientProps) {
         </div>
       )}
 
-      <div>
+      <div className="stagger-children">
         {events.map((e) => (
-          <EventRow key={e.id} event={e} />
+          <div key={e.id} className="animate-fade-in-up">
+            <EventRow event={e} />
+          </div>
         ))}
       </div>
 
@@ -201,7 +203,7 @@ export function FeedClient({ initialEvents }: FeedClientProps) {
         <button
           onClick={loadMore}
           disabled={loading}
-          className="w-full py-2 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50 transition-colors border border-zinc-800 rounded"
+          className="w-full py-2 text-xs text-zinc-500 hover:text-zinc-300 disabled:opacity-50 transition-colors border border-zinc-800 rounded hover:border-zinc-700 btn-glow"
         >
           {loading ? "Loading…" : "Load more"}
         </button>

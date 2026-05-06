@@ -25,7 +25,260 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
+/* ── Page / UI animations ──────────────────────────────────────────────────── */
+
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-x-in {
+  from { transform: scaleX(0); opacity: 0; }
+  to   { transform: scaleX(1); opacity: 1; }
+}
+
+@keyframes slide-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes star-drift {
+  0%, 100% { transform: translateY(0) scale(1);    opacity: 0.85; }
+  50%       { transform: translateY(-1.5px) scale(1.05); opacity: 1; }
+}
+
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.3s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.25s ease-out both;
+}
+
+.animate-scale-x-in {
+  transform-origin: left center;
+  animation: scale-x-in 0.2s ease-out both;
+}
+
+.animate-slide-down {
+  animation: slide-down 0.2s ease-out both;
+}
+
+.animate-star-drift {
+  animation: star-drift 3.5s ease-in-out infinite;
+}
+
+/* Stagger helpers — apply to parent, children get sequential delays */
+.stagger-children > *:nth-child(1)  { animation-delay:   0ms; }
+.stagger-children > *:nth-child(2)  { animation-delay:  40ms; }
+.stagger-children > *:nth-child(3)  { animation-delay:  80ms; }
+.stagger-children > *:nth-child(4)  { animation-delay: 120ms; }
+.stagger-children > *:nth-child(5)  { animation-delay: 160ms; }
+.stagger-children > *:nth-child(6)  { animation-delay: 200ms; }
+.stagger-children > *:nth-child(7)  { animation-delay: 240ms; }
+.stagger-children > *:nth-child(8)  { animation-delay: 280ms; }
+.stagger-children > *:nth-child(n+9){ animation-delay: 320ms; }
+
+/* Interactive card hover — subtle lift + border brightening */
+.card-interactive {
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+}
+.card-interactive:hover {
+  border-color: rgb(82 82 91 / 0.9);
+  box-shadow: 0 0 0 1px rgb(99 102 241 / 0.08), 0 4px 16px rgb(0 0 0 / 0.45);
+  transform: translateY(-1px);
+}
+
+/* Glow button effect */
+.btn-glow {
+  transition: box-shadow 0.18s ease, background-color 0.18s ease;
+}
+.btn-glow:hover:not(:disabled) {
+  box-shadow: 0 0 10px rgb(99 102 241 / 0.35);
+}
+
+/* Shimmer text for logo */
+.text-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgb(148 163 184) 0%,
+    rgb(224 231 255) 40%,
+    rgb(199 210 254) 55%,
+    rgb(148 163 184) 100%
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  animation: shimmer 4s linear infinite;
+}
+
+/* Nav link active underline */
+.nav-link-active-bar {
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(90deg, rgb(99 102 241 / 0), rgb(129 140 248), rgb(99 102 241 / 0));
+  transform-origin: center;
+  animation: scale-x-in 0.25s ease-out both;
+}
+
 /* ── Galaxy Map animations ─────────────────────────────────────────────── */
+
+/* Colony system: subtle breathing ring to show active life */
+@keyframes galaxy-colony-pulse {
+  0%, 100% { opacity: 0.20; }
+  50%       { opacity: 0.55; }
+}
+
+/* Station system: slightly stronger glow breathing to mark the hub */
+@keyframes galaxy-station-aura {
+  0%, 100% { opacity: 0.10; }
+  50%       { opacity: 0.28; }
+}
+
+/* Travel line: faint moving gradient of dashes from origin → destination */
+@keyframes galaxy-travel-flow {
+  from { stroke-dashoffset: 0; }
+  to   { stroke-dashoffset: -48; }
+}
+
+/* Arrival pulse: expanding ring that fades as ship reaches destination */
+@keyframes galaxy-arrival-ring {
+  0%   { transform: scale(1);   opacity: 0.75; }
+  100% { transform: scale(2.4); opacity: 0;    }
+}
+
+.galaxy-colony-pulse {
+  animation: galaxy-colony-pulse 3s ease-in-out infinite;
+}
+
+.galaxy-station-aura {
+  animation: galaxy-station-aura 2.5s ease-in-out infinite;
+}
+
+.galaxy-travel-flow {
+  animation: galaxy-travel-flow 2.5s linear infinite;
+}
+
+.galaxy-arrival-ring {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-arrival-ring 1.3s ease-out infinite;
+}
+
+/* ── Solar system view animations ─────────────────────────────────────── */
+
+/* Ship marker subtle pulse at the star */
+@keyframes solar-ship-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%       { opacity: 1;    }
+}
+
+.solar-ship-marker {
+  animation: solar-ship-pulse 2.5s ease-in-out infinite;
+}
+
+/* Fleet marker subtle pulse */
+@keyframes solar-fleet-pulse {
+  0%, 100% { opacity: 0.80; }
+  50%       { opacity: 1;    }
+}
+
+.solar-fleet-marker {
+  animation: solar-fleet-pulse 3s ease-in-out infinite;
+}
+
+/* Colony ring gentle breathing */
+@keyframes solar-colony-ring {
+  0%, 100% { opacity: 0.65; }
+  50%       { opacity: 0.95; }
+}
+
+.solar-colony-ring {
+  animation: solar-colony-ring 3.5s ease-in-out infinite;
+}
+
+/* Station marker pulsing glow */
+@keyframes solar-station-pulse {
+  0%, 100% { opacity: 0.85; }
+  50%       { opacity: 1;    }
+}
+
+.solar-station-marker {
+  animation: solar-station-pulse 2s ease-in-out infinite;
+}
+
+/* Galaxy map: undiscovered star subtle twinkle */
+@keyframes galaxy-star-twinkle {
+  0%, 100% { opacity: 0.18; }
+  45%       { opacity: 0.32; }
+  55%       { opacity: 0.24; }
+}
+
+.galaxy-star-twinkle {
+  animation: galaxy-star-twinkle 4s ease-in-out infinite;
+}
+
+/* Galaxy map: current-location animated pulse ring */
+@keyframes galaxy-current-pulse {
+  0%   { opacity: 0.55; transform: scale(1);    }
+  60%  { opacity: 0.20; transform: scale(1.18); }
+  100% { opacity: 0.55; transform: scale(1);    }
+}
+
+.galaxy-current-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-current-pulse 2.4s ease-in-out infinite;
+}
+
+/* Galaxy map: gate ring slow rotation */
+@keyframes galaxy-gate-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.galaxy-gate-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-gate-spin 12s linear infinite;
+}
+
+/* Galaxy map: selected system slowly spinning dashed ring */
+@keyframes galaxy-select-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+.galaxy-select-spin {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: galaxy-select-spin 8s linear infinite;
+}
+
+/* Galaxy map: selection pulse — the inner solid ring fades in/out */
+@keyframes galaxy-select-pulse {
+  0%, 100% { opacity: 0.60; }
+  50%       { opacity: 0.95; }
+}
+
+.galaxy-select-pulse {
+  animation: galaxy-select-pulse 2s ease-in-out infinite;
+}
 
 /* Colony system: subtle breathing ring to show active life */
 @keyframes galaxy-colony-pulse {

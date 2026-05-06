@@ -100,7 +100,7 @@ export default async function ProfilePage() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
         <StatCard label="Discoveries" value={discoveryCount} />
         <StatCard label="First discoveries" value={firstDiscoveryCount} />
         <StatCard label="Active colonies" value={colonyCount} />
@@ -167,7 +167,7 @@ function StatCard({
   sub?: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 card-interactive animate-fade-in-up">
       <p className="text-xs text-zinc-500 uppercase tracking-wider">{label}</p>
       <p className="mt-1 text-lg font-semibold text-zinc-200">{value}</p>
       {sub && <p className="text-xs text-zinc-600 capitalize">{sub}</p>}
