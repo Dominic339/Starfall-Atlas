@@ -179,18 +179,15 @@ export async function checkContestedRevert(admin: any, systemId: string): Promis
   if (new Date() < revertAt) return;
 
   // Contested too long — restore steward governance.
-  await admin.from("system_majority_control").delete().eq("system_id", systemId);
-  await admin.from("system_stewardship").update({ has_governance: true }).eq("system_id", systemId);
-
-  const { data: stewardRow } = await admin
-    .from("system_stewardship")
-    .select("steward_id")
-    .eq("system_id", systemId)
-    .maybeSingle();
+  const [, , stewardRes] = await Promise.all([
+    admin.from("system_majority_control").delete().eq("system_id", systemId),
+    admin.from("system_stewardship").update({ has_governance: true }).eq("system_id", systemId),
+    admin.from("system_stewardship").select("steward_id").eq("system_id", systemId).maybeSingle(),
+  ]);
 
   await admin.from("world_events").insert({
     event_type: "majority_control_lost",
-    player_id:  (stewardRow as { steward_id: string } | null)?.steward_id ?? null,
+    player_id:  (stewardRes?.data as { steward_id: string } | null)?.steward_id ?? null,
     system_id:  systemId,
     metadata:   { reason: "contested_revert" },
   });
