@@ -26,12 +26,12 @@ export async function GET() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const { data: passes } = listResult<Record<string, unknown>>(
-    await admin.from("battle_passes").select("*").order("season_number", { ascending: false }),
-  );
-  const { data: tiers } = listResult<Record<string, unknown>>(
-    await admin.from("battle_pass_tiers").select("*").order("tier"),
-  );
+  const [passesRes, tiersRes] = await Promise.all([
+    admin.from("battle_passes").select("*").order("season_number", { ascending: false }),
+    admin.from("battle_pass_tiers").select("*").order("tier"),
+  ]);
+  const { data: passes } = listResult<Record<string, unknown>>(passesRes);
+  const { data: tiers }  = listResult<Record<string, unknown>>(tiersRes);
 
   const tiersByPass = new Map<string, typeof tiers>();
   for (const t of tiers ?? []) {

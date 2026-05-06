@@ -60,13 +60,17 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const now   = new Date();
 
-  // ── Balance + presence + gate checks in one parallel batch ───────────────
-  const [balance, shipsRes, stationRes, fromGateRes, toGateRes] = await Promise.all([
+  // ── Balance + presence + gate checks + duplicate check in one batch ───────
+  const [balance, shipsRes, stationRes, fromGateRes, toGateRes, existingLanesRes] = await Promise.all([
     getBalanceWithOverrides(admin),
     admin.from("ships").select("current_system_id").eq("owner_id", player.id),
     admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
     admin.from("hyperspace_gates").select("*").eq("system_id", fromSystemId).maybeSingle(),
     admin.from("hyperspace_gates").select("*").eq("system_id", toSystemId).maybeSingle(),
+    admin.from("hyperspace_lanes").select("id, is_active").or(
+      `and(from_system_id.eq.${fromSystemId},to_system_id.eq.${toSystemId}),` +
+      `and(from_system_id.eq.${toSystemId},to_system_id.eq.${fromSystemId})`,
+    ),
   ]);
 
   const { data: shipRows }   = listResult<Pick<Ship, "current_system_id">>(shipsRes);
@@ -112,13 +116,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Duplicate lane check (both directions) ────────────────────────────────
-  const { data: existingLanes } = await admin
-    .from("hyperspace_lanes")
-    .select("id, is_active")
-    .or(
-      `and(from_system_id.eq.${fromSystemId},to_system_id.eq.${toSystemId}),` +
-      `and(from_system_id.eq.${toSystemId},to_system_id.eq.${fromSystemId})`,
-    );
+  const { data: existingLanes } = existingLanesRes as { data: HyperspaceLane[] | null };
 
   if (existingLanes && existingLanes.length > 0) {
     const active = existingLanes.find((l: HyperspaceLane) => l.is_active);

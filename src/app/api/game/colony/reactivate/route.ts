@@ -87,23 +87,17 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Reactivate ────────────────────────────────────────────────────────────
-  await admin
-    .from("colonies")
-    .update({ status: "active", abandoned_at: null })
-    .eq("id", colonyId);
-
-  await admin
-    .from("structures")
-    .update({ is_active: true })
-    .eq("colony_id", colonyId);
-
-  await admin.from("world_events").insert({
-    event_type: "colony_reactivated",
-    player_id:  player.id,
-    system_id:  colony.system_id,
-    body_id:    null,
-    metadata:   { colony_id: colonyId },
-  });
+  await Promise.all([
+    admin.from("colonies").update({ status: "active", abandoned_at: null }).eq("id", colonyId),
+    admin.from("structures").update({ is_active: true }).eq("colony_id", colonyId),
+    admin.from("world_events").insert({
+      event_type: "colony_reactivated",
+      player_id:  player.id,
+      system_id:  colony.system_id,
+      body_id:    null,
+      metadata:   { colony_id: colonyId },
+    }),
+  ]);
 
   // Refresh influence cache (reactivated colony contributes influence again)
   void refreshInfluenceCache(admin, colony.system_id).catch(() => undefined);
