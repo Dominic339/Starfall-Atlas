@@ -85,12 +85,13 @@ export default async function GalaxyMapPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  // ── Auth + balance in parallel ────────────────────────────────────────────
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // ── Engine tick + travel resolution ──────────────────────────────────────
@@ -356,22 +357,45 @@ export default async function GalaxyMapPage() {
     totalColonyBySystem.set(c.system_id, (totalColonyBySystem.get(c.system_id) ?? 0) + 1);
   }
 
-  // ── Collect all player IDs needing handle lookups ───────────────────────
-  // Merge body-steward, other-station-owner, and first-discoverer IDs into one
-  // batch to avoid three sequential round-trips to the players table.
+  // ── Collect IDs for all post-batch-1 lookups (all depend only on batch 1 data) ──
   const bodyStewardPlayerIds  = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
   const otherStationOwnerIds  = [...new Set(otherStationRows.map((s) => s.owner_id))];
   const firstDiscovererIds    = [...new Set(firstDiscoveries.map((d) => d.player_id))];
   const allHandleIds = [...new Set([...bodyStewardPlayerIds, ...otherStationOwnerIds, ...firstDiscovererIds])];
+  const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
+  type CargoRow = { location_id: string; resource_type: string; quantity: number };
+  const inTransitShipIds = travelJobs.map((tj) => tj.ship_id).filter(Boolean);
+  const activeAsteroidIds = new Set(asteroidRows.map((a) => a.id));
+  const asteroidsBeingHarvested = new Set(myHarvests.map((h) => h.asteroid_id));
+  const resolvedAmounts = new Map<string, number>();
+  const asteroidResolutionP = Promise.all(
+    [...asteroidsBeingHarvested]
+      .filter((id) => activeAsteroidIds.has(id))
+      .map(async (asteroidId) => {
+        const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
+        resolvedAmounts.set(asteroidId, newRemaining);
+      }),
+  );
 
+  // ── Batch 2: handles + beacon alliances + ship cargo in parallel ──────────
   type HandleRow = { id: string; handle: string };
+  type AllianceTagRow = { id: string; name: string; tag: string };
+  const [handleRes, allianceTagRes, cargoRes] = await Promise.all([
+    allHandleIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", allHandleIds)
+      : Promise.resolve({ data: null as HandleRow[] | null, error: null }),
+    beaconAllianceIds.length > 0
+      ? admin.from("alliances").select("id, name, tag").in("id", beaconAllianceIds)
+      : Promise.resolve({ data: null as AllianceTagRow[] | null, error: null }),
+    inTransitShipIds.length > 0
+      ? admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "ship").in("location_id", inTransitShipIds).gt("quantity", 0)
+      : Promise.resolve({ data: null as CargoRow[] | null, error: null }),
+  ]);
+  await asteroidResolutionP;
+
   const handleMap = new Map<string, string>();
-  if (allHandleIds.length > 0) {
-    const { data: handleRows } = listResult<HandleRow>(
-      await admin.from("players").select("id, handle").in("id", allHandleIds),
-    );
-    for (const h of handleRows ?? []) handleMap.set(h.id, h.handle);
-  }
+  const { data: handleRows } = listResult<HandleRow>(handleRes);
+  for (const h of handleRows ?? []) handleMap.set(h.id, h.handle);
 
   const otherStationHandles = handleMap;
 
@@ -396,34 +420,18 @@ export default async function GalaxyMapPage() {
   const rawGateRows       = listResult<GateRow2>(gatesRes).data ?? [];
   const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
 
-  // ── Resolve beacon alliance tags ──────────────────────────────────────────
-  const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
-  type AllianceTagRow = { id: string; name: string; tag: string };
+  // ── Process batch 2 results ───────────────────────────────────────────────
   const allianceTagMap = new Map<string, { name: string; tag: string }>();
-  if (beaconAllianceIds.length > 0) {
-    const { data: allianceTagRows } = listResult<AllianceTagRow>(
-      await admin.from("alliances").select("id, name, tag").in("id", beaconAllianceIds),
-    );
-    for (const a of allianceTagRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
+  const { data: allianceTagRows } = listResult<AllianceTagRow>(allianceTagRes);
+  for (const a of allianceTagRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
+
+  const shipCargoByShipId = new Map<string, { resourceType: string; quantity: number }[]>();
+  const { data: cargoRowsFetched } = listResult<CargoRow>(cargoRes);
+  for (const row of cargoRowsFetched ?? []) {
+    const list = shipCargoByShipId.get(row.location_id) ?? [];
+    list.push({ resourceType: row.resource_type, quantity: row.quantity });
+    shipCargoByShipId.set(row.location_id, list);
   }
-
-  // ── Lazy resolve asteroids that have active harvests ──────────────────────
-  // Find which active asteroids have ANY active harvest (not just this player's)
-  // We only resolve if there are active harvests to process.
-  const activeAsteroidIds = new Set(asteroidRows.map((a) => a.id));
-  const asteroidsBeingHarvested = new Set(myHarvests.map((h) => h.asteroid_id));
-
-  // Resolve all asteroids that have active harvests from this player.
-  // This ensures the map shows up-to-date remaining_amount.
-  const resolvedAmounts = new Map<string, number>();
-  await Promise.all(
-    [...asteroidsBeingHarvested]
-      .filter((id) => activeAsteroidIds.has(id))
-      .map(async (asteroidId) => {
-        const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
-        resolvedAmounts.set(asteroidId, newRemaining);
-      }),
-  );
 
   // ── Build lookup sets ─────────────────────────────────────────────────────
   const discoveredSystemIds = new Set(discoveries.map((d) => d.system_id));
@@ -573,26 +581,6 @@ export default async function GalaxyMapPage() {
   const fleetShipCounts = new Map<string, number>();
   for (const tj of travelJobs) {
     if (tj.fleet_id) fleetShipCounts.set(tj.fleet_id, (fleetShipCounts.get(tj.fleet_id) ?? 0) + 1);
-  }
-
-  // Fetch cargo for all in-transit ships so we can populate cargo manifests.
-  type CargoRow = { location_id: string; resource_type: string; quantity: number };
-  const inTransitShipIds = travelJobs.map((tj) => tj.ship_id).filter(Boolean);
-  const shipCargoByShipId = new Map<string, { resourceType: string; quantity: number }[]>();
-  if (inTransitShipIds.length > 0) {
-    const { data: cargoRows } = listResult<CargoRow>(
-      await admin
-        .from("resource_inventory")
-        .select("location_id, resource_type, quantity")
-        .eq("location_type", "ship")
-        .in("location_id", inTransitShipIds)
-        .gt("quantity", 0),
-    );
-    for (const row of cargoRows ?? []) {
-      const list = shipCargoByShipId.get(row.location_id) ?? [];
-      list.push({ resourceType: row.resource_type, quantity: row.quantity });
-      shipCargoByShipId.set(row.location_id, list);
-    }
   }
 
   // Deduplicate by fleet_id so fleet members don't produce N identical lines.

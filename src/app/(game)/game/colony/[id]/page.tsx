@@ -70,11 +70,13 @@ export default async function ColonyPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  // ── Auth + balance in parallel ────────────────────────────────────────────
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // Materialise colony inventory and resolve upkeep so this page always shows
@@ -154,6 +156,11 @@ export default async function ColonyPage({
   let activePermits: (PermitRow & { granteeHandle: string })[] = [];
   let myPermit: PermitRow | null = null;
 
+  // Start station iron fetch concurrently with the stewardship block below
+  const stationIronP = station
+    ? admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron").maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+
   if (stewardship) {
     if (isPlayerSteward) {
       // Steward: fetch all active permits on this body so they can be shown/revoked
@@ -208,18 +215,8 @@ export default async function ColonyPage({
     return { resourceType: rt, pricePerUnit };
   });
 
-  // Get station iron for "can afford" check
-  let stationIron = 0;
-  if (station) {
-    const { data: stationInv } = await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron")
-      .maybeSingle();
-    stationIron = (stationInv as { quantity: number } | null)?.quantity ?? 0;
-  }
+  // Get station iron for "can afford" check (was started concurrently above)
+  const stationIron = ((await stationIronP).data as { quantity: number } | null)?.quantity ?? 0;
 
   // Compute accrued tax
   const now = new Date();

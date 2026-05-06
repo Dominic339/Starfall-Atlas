@@ -67,15 +67,13 @@ export default async function SolarSystemPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin
-      .from("players")
-      .select("id, handle, credits, first_colony_placed, colony_slots")
-      .eq("auth_id", user.id)
-      .maybeSingle(),
-  );
+  // ── Auth + balance in parallel ────────────────────────────────────────────
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("id, handle, credits, first_colony_placed, colony_slots").eq("auth_id", user.id).maybeSingle(),
+  ]);
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // ── Engine tick + travel resolution + influence refresh (lazy) ───────────
@@ -240,33 +238,15 @@ export default async function SolarSystemPage({
   const gateRow = gateRes.data as GateRow | null;
   type GateInfo = { status: "none" | "inactive" | "active" | "neutral"; completeAt: string | null };
 
-  // Fetch pending gate construction job if gate is inactive
-  let gateInfo: GateInfo = { status: "none", completeAt: null };
-  if (gateRow) {
-    let completeAt: string | null = null;
-    if (gateRow.status === "inactive" || gateRow.status === "neutral") {
-      const { data: jobRow } = await admin
-        .from("gate_construction_jobs")
-        .select("complete_at")
-        .eq("gate_id", gateRow.id)
-        .eq("status", "pending")
-        .maybeSingle();
-      completeAt = (jobRow as { complete_at: string } | null)?.complete_at ?? null;
-    }
-    gateInfo = { status: gateRow.status as GateInfo["status"], completeAt };
-  }
-
   // Active lanes connected to this system
   const activeLaneRows = listResult<LaneRow>(lanesRes).data ?? [];
-  // Resolve system names for lane endpoints
-  const { getCatalogEntry: _getCE, systemDisplayName: getDisplayName } = await import("@/lib/catalog");
   type LaneInfo = { id: string; remoteSystemId: string; remoteSystemName: string; ownerId: string; isOwner: boolean; accessLevel: string; transitTaxRate: number };
   const activeLanes: LaneInfo[] = activeLaneRows.map(l => {
     const remoteId = l.from_system_id === systemId ? l.to_system_id : l.from_system_id;
     return {
       id:               l.id,
       remoteSystemId:   remoteId,
-      remoteSystemName: getDisplayName(remoteId),
+      remoteSystemName: systemDisplayName(remoteId),
       ownerId:          l.owner_id,
       isOwner:          l.owner_id === player.id,
       accessLevel:      l.access_level,
@@ -277,24 +257,50 @@ export default async function SolarSystemPage({
   // ── Build governance info ─────────────────────────────────────────────────
   const influenceCacheRows = listResult<InfluenceCacheRow>(influenceCacheRes).data ?? [];
   const majorityControlRow = majorityControlRes.data as MajorityControlRow | null;
-
   const totalInfluence = influenceCacheRows.reduce((s, r) => s + r.influence, 0);
   const playerInfluenceRow = influenceCacheRows.find((r) => r.player_id === player.id);
   const playerInfluence    = playerInfluenceRow?.influence ?? 0;
   const playerColonyCount  = playerInfluenceRow?.colony_count ?? 0;
-
-  // Determine if the player (or their alliance) can claim majority now.
   const playerInfluenceShare = totalInfluence > 0 ? playerInfluence / totalInfluence : 0;
-  const { BALANCE: _BAL } = await import("@/lib/config/balance");
-  const minColonies = _BAL.influence.majorityThresholdMinColonies;
+  const minColonies = BALANCE.influence.majorityThresholdMinColonies;
 
-  // Check alliance aggregate if player is in an alliance
+  // Compute all IDs needed for batch 2 (all derive from batch 1 results)
+  const governancePlayerIds = new Set<string>();
+  if (systemStewardRow?.steward_id) governancePlayerIds.add(systemStewardRow.steward_id);
+  if (majorityControlRow?.controller_id) governancePlayerIds.add(majorityControlRow.controller_id);
+  const otherOwnerIds = [...new Set(
+    allSystemColonies.filter(c => c.owner_id !== player.id).map(c => c.owner_id),
+  )];
+  const influencePlayerIds = influenceCacheRows.map((r) => r.player_id);
+
+  // ── Batch 2: all independent post-batch-1 lookups in parallel ─────────────
   type AMMemberRow = { player_id: string; alliance_id: string };
-  const { data: allianceMembersRaw } = await admin
-    .from("alliance_members")
-    .select("player_id, alliance_id")
-    .in("player_id", influenceCacheRows.map((r) => r.player_id));
-  const allianceMembersInSystem = (allianceMembersRaw ?? []) as AMMemberRow[];
+  type GovHandleRow = { id: string; handle: string };
+  type HandleRow = { id: string; handle: string };
+  const [allianceMembersRes, govHandlesRes, majorityAllianceRes, otherHandlesRes, gateJobRes] = await Promise.all([
+    influencePlayerIds.length > 0
+      ? admin.from("alliance_members").select("player_id, alliance_id").in("player_id", influencePlayerIds)
+      : Promise.resolve({ data: null as AMMemberRow[] | null, error: null }),
+    governancePlayerIds.size > 0
+      ? admin.from("players").select("id, handle").in("id", [...governancePlayerIds])
+      : Promise.resolve({ data: null as GovHandleRow[] | null, error: null }),
+    majorityControlRow?.alliance_id
+      ? admin.from("alliances").select("name").eq("id", majorityControlRow.alliance_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    otherOwnerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", otherOwnerIds)
+      : Promise.resolve({ data: null as HandleRow[] | null, error: null }),
+    (gateRow?.status === "inactive" || gateRow?.status === "neutral")
+      ? admin.from("gate_construction_jobs").select("complete_at").eq("gate_id", gateRow!.id).eq("status", "pending").maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  // ── Process batch 2 results ────────────────────────────────────────────────
+  const gateInfo: GateInfo = gateRow
+    ? { status: gateRow.status as GateInfo["status"], completeAt: (gateJobRes.data as { complete_at: string } | null)?.complete_at ?? null }
+    : { status: "none", completeAt: null };
+
+  const allianceMembersInSystem = (listResult<AMMemberRow>(allianceMembersRes).data ?? []) as AMMemberRow[];
   const allianceMembershipMap = new Map(allianceMembersInSystem.map((r) => [r.player_id, r.alliance_id]));
   const playerAllianceIdInSystem = allianceMembershipMap.get(player.id) ?? null;
 
@@ -314,31 +320,10 @@ export default async function SolarSystemPage({
     }
   }
 
-  // Resolve handles for steward + majority controller
-  const governancePlayerIds = new Set<string>();
-  if (systemStewardRow?.steward_id) governancePlayerIds.add(systemStewardRow.steward_id);
-  if (majorityControlRow?.controller_id) governancePlayerIds.add(majorityControlRow.controller_id);
-
-  // We'll resolve these handles from ownerHandles below, after that map is built.
-  // (ownerHandles is built a few lines down — we do a separate lookup here first.)
-  type GovHandleRow = { id: string; handle: string };
-  const govHandleRows = governancePlayerIds.size > 0
-    ? (listResult<GovHandleRow>(
-        await admin.from("players").select("id, handle").in("id", [...governancePlayerIds]),
-      ).data ?? [])
-    : [];
+  const govHandleRows = listResult<GovHandleRow>(govHandlesRes).data ?? [];
   const govHandles = new Map(govHandleRows.map((r) => [r.id, r.handle]));
 
-  // Alliance name for majority controller's alliance (if applicable)
-  let majorityAllianceName: string | null = null;
-  if (majorityControlRow?.alliance_id) {
-    const { data: allianceRow } = await admin
-      .from("alliances")
-      .select("name")
-      .eq("id", majorityControlRow.alliance_id)
-      .maybeSingle();
-    majorityAllianceName = (allianceRow as { name: string } | null)?.name ?? null;
-  }
+  const majorityAllianceName = (majorityAllianceRes.data as { name: string } | null)?.name ?? null;
 
   const governanceInfo: GovernanceInfo = {
     stewardId:            systemStewardRow?.steward_id ?? null,
@@ -362,18 +347,9 @@ export default async function SolarSystemPage({
     royaltyRate: systemStewardRow?.royalty_rate ?? 0,
   };
 
-  // Resolve handles for other colony owners
-  const otherOwnerIds = [...new Set(
-    allSystemColonies.filter(c => c.owner_id !== player.id).map(c => c.owner_id),
-  )];
   const ownerHandles = new Map<string, string>([[player.id, player.handle]]);
-  if (otherOwnerIds.length > 0) {
-    type HandleRow = { id: string; handle: string };
-    const { data: handleRows } = listResult<HandleRow>(
-      await admin.from("players").select("id, handle").in("id", otherOwnerIds),
-    );
-    for (const h of handleRows ?? []) ownerHandles.set(h.id, h.handle);
-  }
+  const { data: otherHandleRows } = listResult<HandleRow>(otherHandlesRes);
+  for (const h of otherHandleRows ?? []) ownerHandles.set(h.id, h.handle);
 
   // Map: bodyId → full steward row (steward_id + default_tax_rate_pct)
   const stewardByBodyId = new Map(stewardshipRows.map(s => [s.body_id, s]));
