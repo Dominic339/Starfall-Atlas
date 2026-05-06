@@ -33,23 +33,7 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Fetch membership ──────────────────────────────────────────────────────
-  const { data: membership } = maybeSingleResult<{
-    id: string;
-    alliance_id: string;
-    alliance_credits: number;
-  }>(
-    await admin
-      .from("alliance_members")
-      .select("id, alliance_id, alliance_credits")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
-  if (!membership) {
-    return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
-  }
-
-  // ── Fetch and validate goal ───────────────────────────────────────────────
+  // ── Fetch membership + goal + station in parallel ────────────────────────
   type GoalRow = {
     id: string;
     alliance_id: string;
@@ -60,9 +44,17 @@ export async function POST(request: NextRequest) {
     expired: boolean;
     deadline_at: string;
   };
-  const { data: goal } = maybeSingleResult<GoalRow>(
-    await admin.from("alliance_goals").select("*").eq("id", goalId).maybeSingle(),
-  );
+  const [membershipRes, goalRes, stationRes] = await Promise.all([
+    admin.from("alliance_members").select("id, alliance_id, alliance_credits").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliance_goals").select("*").eq("id", goalId).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
+
+  const { data: membership } = maybeSingleResult<{ id: string; alliance_id: string; alliance_credits: number }>(membershipRes);
+  if (!membership) {
+    return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
+  }
+  const { data: goal } = maybeSingleResult<GoalRow>(goalRes);
   if (!goal) return toErrorResponse(fail("not_found", "Goal not found.").error);
   if (goal.alliance_id !== membership.alliance_id) {
     return toErrorResponse(fail("forbidden", "Goal does not belong to your alliance.").error);
@@ -73,17 +65,13 @@ export async function POST(request: NextRequest) {
   if (goal.expired || new Date(goal.deadline_at) <= new Date()) {
     return toErrorResponse(fail("invalid_target", "Goal deadline has passed.").error);
   }
-
   const remaining = goal.quantity_target - goal.quantity_filled;
   if (remaining <= 0) {
     return toErrorResponse(fail("invalid_target", "Goal is already full.").error);
   }
   const actualQty = Math.min(quantity, remaining);
 
-  // ── Fetch player station and resource ─────────────────────────────────────
-  const { data: station } = maybeSingleResult<{ id: string }>(
-    await admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
-  );
+  const { data: station } = maybeSingleResult<{ id: string }>(stationRes);
   if (!station) {
     return toErrorResponse(fail("not_found", "Station not found.").error);
   }

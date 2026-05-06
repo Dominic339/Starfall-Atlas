@@ -96,16 +96,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch survey result ───────────────────────────────────────────────────
-  const { data: survey } = maybeSingleResult<
-    Pick<SurveyResult, "resource_nodes">
-  >(
-    await admin
-      .from("survey_results")
-      .select("resource_nodes")
-      .eq("body_id", colony.body_id)
-      .maybeSingle(),
-  );
+  // ── Fetch survey + structures + research in parallel ─────────────────────
+  const [surveyRes, structuresRes, researchRes] = await Promise.all([
+    admin.from("survey_results").select("resource_nodes").eq("body_id", colony.body_id).maybeSingle(),
+    admin.from("structures").select("type, tier, is_active").eq("colony_id", colonyId).eq("is_active", true),
+    admin.from("player_research").select("research_id").eq("player_id", player.id),
+  ]);
+
+  const { data: survey } = maybeSingleResult<Pick<SurveyResult, "resource_nodes">>(surveyRes);
 
   if (!survey || survey.resource_nodes.length === 0) {
     return toErrorResponse(
@@ -115,19 +113,6 @@ export async function POST(request: NextRequest) {
       ).error,
     );
   }
-
-  // ── Fetch colony structures and player research for extraction bonus ────────
-  const [structuresRes, researchRes] = await Promise.all([
-    admin
-      .from("structures")
-      .select("type, tier, is_active")
-      .eq("colony_id", colonyId)
-      .eq("is_active", true),
-    admin
-      .from("player_research")
-      .select("research_id")
-      .eq("player_id", player.id),
-  ]);
 
   type StructureRow = Pick<Structure, "type" | "tier" | "is_active">;
   const colonyStructures = ((structuresRes.data ?? []) as StructureRow[]);

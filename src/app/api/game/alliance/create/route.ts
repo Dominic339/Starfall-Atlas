@@ -48,59 +48,38 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  // ── Player must not already be in an alliance ─────────────────────────────
-  const { data: existingMembership } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliance_members")
-      .select("id")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Fetch balance, membership check, name/tag uniqueness, station in parallel ──
+  const [balance, membershipRes, nameTakenRes, tagTakenRes, stationRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("alliance_members").select("id").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliances").select("id").ilike("name", name).maybeSingle(),
+    admin.from("alliances").select("id").ilike("tag", tagUpper).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
+  const { data: existingMembership } = maybeSingleResult<{ id: string }>(membershipRes);
   if (existingMembership) {
     return toErrorResponse(
       fail("invalid_target", "You are already a member of an alliance. Leave it first.").error,
     );
   }
 
-  // ── Name uniqueness ───────────────────────────────────────────────────────
-  const { data: nameTaken } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliances")
-      .select("id")
-      .ilike("name", name)
-      .maybeSingle(),
-  );
+  const { data: nameTaken } = maybeSingleResult<{ id: string }>(nameTakenRes);
   if (nameTaken) {
     return toErrorResponse(
       fail("invalid_target", "An alliance with that name already exists.").error,
     );
   }
 
-  // ── Tag uniqueness ────────────────────────────────────────────────────────
-  const { data: tagTaken } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("alliances")
-      .select("id")
-      .ilike("tag", tagUpper)
-      .maybeSingle(),
-  );
+  const { data: tagTaken } = maybeSingleResult<{ id: string }>(tagTakenRes);
   if (tagTaken) {
     return toErrorResponse(
       fail("invalid_target", "An alliance with that tag already exists.").error,
     );
   }
 
-  // ── Station and iron check ────────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<PlayerStation>(
-    await admin
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  const { data: station } = maybeSingleResult<PlayerStation>(stationRes);
   if (!station) {
     // Station should always exist (created by bootstrap on first login).
     // If missing, the player likely logged in before migration 00016/00030
