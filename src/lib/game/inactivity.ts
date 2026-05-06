@@ -57,28 +57,19 @@ export async function resolvePlayerInactivity(admin: any, playerId: string, now:
       // abandoned_at is retrospective: when they actually crossed the threshold
       const abandonedAt = new Date(lastActive.getTime() + THRESHOLD_MS).toISOString();
       const ids = active.map((c) => c.id);
-
-      await admin
-        .from("colonies")
-        .update({ status: "abandoned", abandoned_at: abandonedAt })
-        .in("id", ids);
-
-      // Deactivate all structures in these colonies
-      await admin
-        .from("structures")
-        .update({ is_active: false })
-        .in("colony_id", ids);
-
-      // Log world events
-      await admin.from("world_events").insert(
-        active.map((c) => ({
-          event_type: "colony_abandoned",
-          player_id:  playerId,
-          system_id:  c.system_id,
-          body_id:    null,
-          metadata:   { colony_id: c.id, population_tier: c.population_tier },
-        })),
-      );
+      await Promise.all([
+        admin.from("colonies").update({ status: "abandoned", abandoned_at: abandonedAt }).in("id", ids),
+        admin.from("structures").update({ is_active: false }).in("colony_id", ids),
+        admin.from("world_events").insert(
+          active.map((c) => ({
+            event_type: "colony_abandoned",
+            player_id:  playerId,
+            system_id:  c.system_id,
+            body_id:    null,
+            metadata:   { colony_id: c.id, population_tier: c.population_tier },
+          })),
+        ),
+      ]);
     }
   }
 
