@@ -40,31 +40,28 @@ export async function GET() {
       .limit(25),
   ]);
 
-  // Enrich colony counts with handles
+  // Enrich colony + discovery counts with handles (parallel)
   type ColonyCountRow = { owner_id: string; count: number };
-  const colonyRows = (coloniesRes.data ?? []) as ColonyCountRow[];
-  const colonyOwnerIds = [...new Set(colonyRows.map((r) => r.owner_id))];
-  let colonyHandles = new Map<string, string>();
-  if (colonyOwnerIds.length > 0) {
-    const { data: handleRows } = await admin
-      .from("players")
-      .select("id, handle")
-      .in("id", colonyOwnerIds) as { data: { id: string; handle: string }[] | null };
-    for (const h of handleRows ?? []) colonyHandles.set(h.id, h.handle);
-  }
-
-  // Enrich discovery counts with handles
   type DiscoveryCountRow = { player_id: string; count: number };
+  const colonyRows    = (coloniesRes.data ?? []) as ColonyCountRow[];
   const discoveryRows = (discoveriesRes.data ?? []) as DiscoveryCountRow[];
+  const colonyOwnerIds    = [...new Set(colonyRows.map((r) => r.owner_id))];
   const discoveryPlayerIds = [...new Set(discoveryRows.map((r) => r.player_id))];
-  let discoveryHandles = new Map<string, string>();
-  if (discoveryPlayerIds.length > 0) {
-    const { data: handleRows } = await admin
-      .from("players")
-      .select("id, handle")
-      .in("id", discoveryPlayerIds) as { data: { id: string; handle: string }[] | null };
-    for (const h of handleRows ?? []) discoveryHandles.set(h.id, h.handle);
-  }
+
+  type HandleRow = { id: string; handle: string };
+  const [colonyHandleRes, discoveryHandleRes] = await Promise.all([
+    colonyOwnerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", colonyOwnerIds) as Promise<{ data: HandleRow[] | null }>
+      : Promise.resolve({ data: [] as HandleRow[] }),
+    discoveryPlayerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", discoveryPlayerIds) as Promise<{ data: HandleRow[] | null }>
+      : Promise.resolve({ data: [] as HandleRow[] }),
+  ]);
+
+  const colonyHandles    = new Map<string, string>();
+  const discoveryHandles = new Map<string, string>();
+  for (const h of colonyHandleRes.data ?? [])    colonyHandles.set(h.id, h.handle);
+  for (const h of discoveryHandleRes.data ?? []) discoveryHandles.set(h.id, h.handle);
 
   type CreditsRow = { id: string; handle: string; credits: number };
   const creditsRows = (creditsRes.data ?? []) as CreditsRow[];
