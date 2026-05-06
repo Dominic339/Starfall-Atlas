@@ -484,7 +484,7 @@ export function AlliancePanel({
     <div className="space-y-4">
 
       {/* ── Alliance Identity Panel ──────────────────────────────────────── */}
-      <div className="rounded-xl border border-indigo-900/60 bg-gradient-to-br from-indigo-950/40 via-zinc-900 to-zinc-900 px-6 py-5 shadow-lg shadow-black/30">
+      <div className="rounded-xl border border-indigo-900/60 bg-gradient-to-br from-indigo-950/40 via-zinc-900 to-zinc-900 px-6 py-5 shadow-lg shadow-black/30 animate-fade-in-up">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             {/* Tag + name */}
@@ -553,7 +553,7 @@ export function AlliancePanel({
       {actionError && <p className="text-sm text-red-400 px-1">{actionError}</p>}
 
       {/* ── Members ───────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading title="Members" meta={String(members.length)} />
         <div className="divide-y divide-zinc-800/60">
           {members.map((m) => (
