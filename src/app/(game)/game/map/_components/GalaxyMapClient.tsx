@@ -3379,7 +3379,7 @@ export function GalaxyMapClient({
                           void handleDispatch(fid || undefined);
                         }}
                         disabled={dispatchLoading || (eligibleFleets.length > 1 && !dispatchFleetId)}
-                        className="w-full rounded border border-yellow-700 bg-yellow-950/60 px-3 py-2 text-xs font-medium text-yellow-300 hover:bg-yellow-900/60 hover:text-yellow-200 transition-colors disabled:opacity-50"
+                        className="w-full rounded border border-yellow-700 bg-yellow-950/60 px-3 py-2 text-xs font-medium text-yellow-300 hover:bg-yellow-900/60 hover:text-yellow-200 transition-colors disabled:opacity-50 btn-glow-amber"
                       >
                         {dispatchLoading ? "Dispatching…" : "Dispatch to Harvest"}
                       </button>
@@ -3400,7 +3400,7 @@ export function GalaxyMapClient({
                             <button
                               onClick={() => handleFormFleet(a.systemId)}
                               disabled={formFleetLoading}
-                              className="w-full rounded border border-teal-700/50 bg-teal-950/30 px-3 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-900/40 disabled:opacity-50 transition-colors"
+                              className="w-full rounded border border-teal-700/50 bg-teal-950/30 px-3 py-2 text-xs font-semibold text-teal-300 hover:bg-teal-900/40 disabled:opacity-50 transition-colors btn-glow-teal"
                             >
                               {formFleetLoading ? "Forming…" : `Form Fleet (${dockedHere.length} ships)`}
                             </button>
@@ -3572,7 +3572,7 @@ export function GalaxyMapClient({
                   {selectedSystem.myColonyCount > 0 && (
                     <button
                       onClick={() => setColonyPanelSystemId(selectedSystem.id)}
-                      className="mt-2 w-full rounded border border-emerald-800/60 bg-emerald-950/30 px-2 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-900/40 hover:text-emerald-300 transition-colors"
+                      className="mt-2 w-full rounded border border-emerald-800/60 bg-emerald-950/30 px-2 py-1.5 text-xs font-medium text-emerald-400 hover:bg-emerald-900/40 hover:text-emerald-300 transition-colors btn-glow-emerald"
                     >
                       Manage {selectedSystem.myColonyCount === 1 ? "Colony" : `${selectedSystem.myColonyCount} Colonies`} →
                     </button>
@@ -3642,7 +3642,7 @@ export function GalaxyMapClient({
                               <button
                                 onClick={() => handleDispatchFleetFromPanel(fleet.id)}
                                 disabled={fleetDispatchLoading === fleet.id}
-                                className="shrink-0 rounded border border-violet-700 bg-violet-950/50 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-900/60 hover:text-violet-200 disabled:opacity-50 transition-colors"
+                                className="shrink-0 rounded border border-violet-700 bg-violet-950/50 px-2.5 py-1 text-xs font-medium text-violet-300 hover:bg-violet-900/60 hover:text-violet-200 disabled:opacity-50 transition-colors btn-glow"
                               >
                                 {fleetDispatchLoading === fleet.id ? "…" : "Send"}
                               </button>
@@ -3731,7 +3731,7 @@ export function GalaxyMapClient({
                       <button
                         onClick={() => handlePlaceBeacon(selectedSystem.id)}
                         disabled={beaconLoading}
-                        className="mt-2 w-full text-xs rounded border border-indigo-700/60 bg-indigo-950/40 px-2 py-1.5 text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors"
+                        className="mt-2 w-full text-xs rounded border border-indigo-700/60 bg-indigo-950/40 px-2 py-1.5 text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 disabled:cursor-wait transition-colors btn-glow"
                       >
                         {beaconLoading ? "Placing…" : "Place Beacon (50 iron)"}
                       </button>
@@ -4176,7 +4176,7 @@ export function GalaxyMapClient({
                 <button
                   onClick={handleTravel}
                   disabled={travelLoading}
-                  className="w-full rounded border border-indigo-700 bg-indigo-950/60 px-3 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 transition-colors disabled:opacity-50"
+                  className="w-full rounded border border-indigo-700 bg-indigo-950/60 px-3 py-2 text-xs font-medium text-indigo-300 hover:bg-indigo-900/60 hover:text-indigo-200 transition-colors disabled:opacity-50 btn-glow"
                 >
                   {travelLoading
                     ? "Dispatching…"
@@ -4238,7 +4238,7 @@ export function GalaxyMapClient({
                             }).catch(() => { setTravelLoading(false); setTravelError("Network error."); });
                           }}
                           disabled={travelLoading}
-                          className="w-full rounded border border-indigo-700/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 transition-colors disabled:opacity-50"
+                          className="w-full rounded border border-indigo-700/60 bg-indigo-950/40 px-3 py-1.5 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 transition-colors disabled:opacity-50 btn-glow"
                         >
                           {travelLoading
                             ? "Dispatching…"

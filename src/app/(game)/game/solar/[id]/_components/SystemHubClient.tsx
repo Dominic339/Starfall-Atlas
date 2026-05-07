@@ -524,7 +524,7 @@ function ShipPanel({
             <>
               <button
                 onClick={onStartAssign}
-                className="w-full rounded bg-indigo-800/50 border border-indigo-700/40 px-3 py-1.5 font-medium text-indigo-300 hover:bg-indigo-700/50 transition-colors"
+                className="w-full rounded bg-indigo-800/50 border border-indigo-700/40 px-3 py-1.5 font-medium text-indigo-300 hover:bg-indigo-700/50 transition-colors btn-glow"
               >
                 Click planet to assign →
               </button>
@@ -706,7 +706,7 @@ function SystemOverviewPanel({
                 "System discovered!",
               )}
               disabled={discover.loading}
-              className="w-full rounded bg-emerald-800/50 border border-emerald-700/40 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/50 transition-colors disabled:opacity-50"
+              className="w-full rounded bg-emerald-800/50 border border-emerald-700/40 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/50 transition-colors disabled:opacity-50 btn-glow-emerald"
             >
               {discover.loading ? "Discovering…" : "Discover this system →"}
             </button>
