@@ -846,11 +846,11 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
 
           {/* Skins shop */}
           {!loading && !error && tab === "skins" && skinsData && (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-fade-in-up">
               {skinsData.shopSkins.length === 0 ? (
                 <p className="py-12 text-center text-sm text-zinc-600">No skins in the shop right now.</p>
               ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
                   {skinsData.shopSkins.map((s) => (
                     <SkinCard key={s.id} skin={s}
                       onBuy={handleBuySkin} buying={buying === s.id} />
@@ -862,7 +862,7 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
 
           {/* Bundles */}
           {!loading && !error && tab === "packages" && skinsData && (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-fade-in-up stagger-children">
               {skinsData.shopPackages.length === 0 ? (
                 <p className="py-12 text-center text-sm text-zinc-600">No bundles available right now.</p>
               ) : (
@@ -884,10 +884,10 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
 
           {/* Premium items */}
           {!loading && !error && tab === "premium" && premiumData && (
-            <div className="space-y-5">
+            <div className="space-y-5 animate-fade-in-up">
               <div className="space-y-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-violet-500">Cosmetics</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
                   {premiumData.catalog.filter((i) => i.category === "cosmetic").map((item) => (
                     <PremiumItemCard key={item.type} item={item} />
                   ))}
@@ -895,7 +895,7 @@ export function ShopMapPanel({ onClose, onEquippedChange }: ShopMapPanelProps) {
               </div>
               <div className="space-y-3">
                 <p className="text-[10px] font-bold uppercase tracking-widest text-sky-500">Utility</p>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
                   {premiumData.catalog.filter((i) => i.category === "utility").map((item) => (
                     <PremiumItemCard key={item.type} item={item} />
                   ))}

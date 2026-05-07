@@ -341,7 +341,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
               {!inboxLoading && inbox.length === 0 && (
                 <p className="text-sm text-zinc-600 text-center py-4">No messages.</p>
               )}
-              <div className="space-y-1">
+              <div className="space-y-1 stagger-children">
                 {inbox.map((m) => (
                   <button
                     key={m.id}
@@ -369,7 +369,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
 
           {/* ── Alliance chat tab ──────────────────────────────────────────── */}
           {tab === "chat" && (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-fade-in-up">
               {chatInAlliance === null && <p className="text-xs text-zinc-600 text-center py-4">Loading…</p>}
               {chatInAlliance === false && (
                 <p className="text-sm text-zinc-500 text-center py-4">You are not in an alliance.</p>
@@ -417,7 +417,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
           )}
           {/* ── Alliance HQ tab ───────────────────────────────────────────── */}
           {tab === "alliance" && (
-            <div className="space-y-5">
+            <div className="space-y-5 animate-fade-in-up">
               {allianceLoading && <p className="text-xs text-zinc-600 text-center py-8 animate-pulse">Loading…</p>}
 
               {/* Not in alliance: create + join forms */}

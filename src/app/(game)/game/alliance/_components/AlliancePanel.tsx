@@ -375,7 +375,7 @@ export function AlliancePanel({
     return (
       <div className="space-y-5">
         {/* Atmospheric intro */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center animate-fade-in-up">
           <div className="mb-3 font-mono text-3xl font-black tracking-widest text-zinc-800 select-none">
             ◉
           </div>
@@ -391,7 +391,7 @@ export function AlliancePanel({
         {actionSuccess && <p className="text-sm text-emerald-400 px-1">{actionSuccess}</p>}
 
         {/* Found */}
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 animate-fade-in-up" style={{ animationDelay: "60ms" }}>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-indigo-700" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -440,7 +440,7 @@ export function AlliancePanel({
         </section>
 
         {/* Join */}
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 animate-fade-in-up" style={{ animationDelay: "120ms" }}>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-zinc-600" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -587,7 +587,7 @@ export function AlliancePanel({
 
       {/* ── Manage Roles (founder only) ───────────────────────────────────── */}
       {isFounder && otherMembers.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
           <SectionHeading title="Manage Roles" />
           {promoteError && <p className="mb-3 text-xs text-red-400">{promoteError}</p>}
           <div className="flex flex-wrap gap-2">
@@ -624,7 +624,7 @@ export function AlliancePanel({
       )}
 
       {/* ── Beacons ───────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Territory Beacons"
           meta={`${activeBeaconCount} / 20 active`}
@@ -696,7 +696,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Territory ─────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading title="Territory Control" />
 
         {activeBeaconCount < 3 ? (
@@ -770,7 +770,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Goals ─────────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Alliance Goals"
           meta={goals.length > 0 ? `${goals.length} active` : undefined}
@@ -845,7 +845,7 @@ export function AlliancePanel({
               const contribErr = goalContribError[g.id];
               const hoursLeft = Math.max(0, (new Date(g.deadlineAt).getTime() - Date.now()) / 3_600_000);
               return (
-                <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 space-y-2">
+                <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 space-y-2 card-interactive">
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-medium text-zinc-200">{g.title}</p>
@@ -902,7 +902,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Alliance Storage ───────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Alliance Storage"
           meta={`${playerAllianceCredits} ✦ credits`}
@@ -1019,7 +1019,7 @@ export function AlliancePanel({
 
       {/* ── Disputes ──────────────────────────────────────────────────────── */}
       {disputes.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
           <SectionHeading title="Disputes" meta={String(disputes.length)} />
           {disputeError && <p className="mb-3 text-xs text-red-400">{disputeError}</p>}
           <div className="space-y-3">
