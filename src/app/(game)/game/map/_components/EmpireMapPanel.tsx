@@ -85,22 +85,24 @@ function FeedTab() {
 
   return (
     <div>
-      {events.map((e) => {
-        const color = EVENT_COLOR[e.eventType] ?? "text-zinc-500";
-        return (
-          <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0">
-            <span className={`mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-current ${color}`} />
-            <div className="flex-1 min-w-0">
-              <p className="text-sm text-zinc-400">
-                {e.playerHandle && <span className="font-semibold text-zinc-200">{e.playerHandle} </span>}
-                <span className={color}>{e.label}</span>
-                {e.systemName && <span className="text-zinc-600"> · {e.systemName}</span>}
-              </p>
+      <div className="stagger-children">
+        {events.map((e) => {
+          const color = EVENT_COLOR[e.eventType] ?? "text-zinc-500";
+          return (
+            <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0 animate-fade-in-up">
+              <span className={`mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-current ${color}`} />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-zinc-400">
+                  {e.playerHandle && <span className="font-semibold text-zinc-200">{e.playerHandle} </span>}
+                  <span className={color}>{e.label}</span>
+                  {e.systemName && <span className="text-zinc-600"> · {e.systemName}</span>}
+                </p>
+              </div>
+              <span className="shrink-0 text-[10px] text-zinc-700">{timeAgo(e.occurredAt)}</span>
             </div>
-            <span className="shrink-0 text-[10px] text-zinc-700">{timeAgo(e.occurredAt)}</span>
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
       {hasMore && (
         <button
           onClick={loadMore} disabled={loadingMore}

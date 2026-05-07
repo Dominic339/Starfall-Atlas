@@ -136,13 +136,33 @@ function bodyDisplayLabel(type: string): string {
 // Stylized procedural planet — sphere + optional atmosphere + optional rings
 // ---------------------------------------------------------------------------
 
+const PLANET_SPIN_SPEED: Record<string, number> = {
+  gas_giant:    0.08,
+  ice_giant:    0.07,
+  lush:         0.15,
+  habitable:    0.14,
+  ocean:        0.16,
+  desert:       0.10,
+  rocky:        0.09,
+  barren:       0.07,
+  frozen:       0.11,
+  ice_planet:   0.10,
+  volcanic:     0.12,
+  toxic:        0.13,
+};
+
 function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: number }) {
   const mat   = PLANET_MAT[bodyType]   ?? PLANET_MAT.rocky;
   const atmo  = PLANET_ATMO[bodyType];
   const rings = PLANET_RINGS[bodyType];
+  const selfRef = useRef<THREE.Group>(null!);
+  const spinSpeed = PLANET_SPIN_SPEED[bodyType] ?? 0.10;
+  useFrame(({ clock }) => {
+    if (selfRef.current) selfRef.current.rotation.y = clock.elapsedTime * spinSpeed;
+  });
 
   return (
-    <group>
+    <group ref={selfRef}>
       {/* Core sphere */}
       <mesh>
         <sphereGeometry args={[radius, 48, 32]} />
