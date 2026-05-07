@@ -217,7 +217,7 @@ export function ResearchMapPanel({ onClose }: ResearchMapPanelProps) {
                 <span className="text-xs text-zinc-700">/ {data.maxTotalUpgrades}</span>
                 <div className="flex-1 min-w-[60px] h-1 rounded-full bg-zinc-800 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-indigo-600"
+                    className="h-full rounded-full bg-indigo-600 progress-fill"
                     style={{ width: `${Math.round((data.totalUpgradeCap / data.maxTotalUpgrades) * 100)}%` }}
                   />
                 </div>

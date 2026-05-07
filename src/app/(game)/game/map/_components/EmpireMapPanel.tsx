@@ -270,7 +270,7 @@ function ResearchTab() {
             <span className="font-mono text-xs text-zinc-300">{data.totalUpgradeCap}</span>
             <span className="text-[10px] text-zinc-700">/ {data.maxTotalUpgrades}</span>
             <div className="w-16 h-1 rounded-full bg-zinc-800 overflow-hidden">
-              <div className="h-full rounded-full bg-indigo-600"
+              <div className="h-full rounded-full bg-indigo-600 progress-fill"
                 style={{ width: `${Math.round((data.totalUpgradeCap / data.maxTotalUpgrades) * 100)}%` }} />
             </div>
           </div>

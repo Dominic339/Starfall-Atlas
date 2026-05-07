@@ -518,7 +518,7 @@ function ColoniesTab({ data }: { data: PanelData }) {
               </div>
               <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-teal-600/70"
+                  className="h-full rounded-full bg-teal-600/70 progress-fill"
                   style={{ width: `${fillPct}%` }}
                 />
               </div>
