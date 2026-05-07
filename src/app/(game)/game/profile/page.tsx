@@ -83,7 +83,7 @@ export default async function ProfilePage() {
         <span className="text-zinc-400">Profile & Settings</span>
       </nav>
 
-      <div className="flex items-start gap-4">
+      <div className="flex items-start gap-4 animate-fade-in-up">
         <div>
           <h1 className="text-2xl font-semibold text-zinc-50">{player.handle}</h1>
           {player.title && (
