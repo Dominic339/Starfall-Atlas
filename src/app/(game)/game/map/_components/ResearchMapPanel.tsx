@@ -72,7 +72,7 @@ function ItemCard({
     isReady ? "bg-indigo-900/60 text-indigo-300" : "bg-zinc-800 text-zinc-500";
 
   return (
-    <div className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[160px] flex-1 ${cardCls}`}>
+    <div className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[160px] flex-1 card-interactive ${cardCls}`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <p className={`text-xs font-semibold leading-snug ${nameCls}`}>{item.name}</p>
@@ -253,7 +253,7 @@ export function ResearchMapPanel({ onClose }: ResearchMapPanelProps) {
         )}
 
         {/* Body */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5 stagger-children">
           {loading && <p className="text-xs text-zinc-600 text-center py-12">Loading research…</p>}
           {fetchError && <p className="text-xs text-red-400 text-center py-12">{fetchError}</p>}
           {purchaseError && <p className="text-xs text-red-400 mb-2">{purchaseError}</p>}
