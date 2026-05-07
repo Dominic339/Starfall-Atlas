@@ -716,7 +716,7 @@ export function RouteMapClient({
       </div>
 
       {/* ── Right: Route table panel ───────────────────────────────────────── */}
-      <div className="flex w-96 flex-col overflow-hidden bg-zinc-950">
+      <div className="flex w-96 flex-col overflow-hidden bg-zinc-950 animate-fade-in-up">
         <div className="shrink-0 border-b border-zinc-800 px-4 py-2.5 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-300">
             Routes
@@ -749,7 +749,7 @@ export function RouteMapClient({
               </p>
             </div>
           ) : (
-            <div className="divide-y divide-zinc-800/60">
+            <div className="divide-y divide-zinc-800/60 stagger-children">
               {routes.map((route) => {
                 const fromColony = colonyById.get(route.fromColonyId);
                 const toColony   = colonyById.get(route.toColonyId);

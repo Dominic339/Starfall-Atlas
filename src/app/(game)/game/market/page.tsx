@@ -138,7 +138,7 @@ export default async function MarketPage() {
               Resource Market
             </span>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between animate-fade-in-up">
             <div>
               <h1 className="text-sm font-semibold text-zinc-200">Resource Market</h1>
               <p className="mt-0.5 text-xs text-zinc-600">

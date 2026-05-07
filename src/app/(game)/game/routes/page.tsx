@@ -148,7 +148,7 @@ export default async function RoutesPage() {
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950 text-zinc-200">
       {/* Header bar */}
-      <header className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2">
+      <header className="flex shrink-0 items-center gap-4 border-b border-zinc-800 px-4 py-2 animate-fade-in-up">
         <Link
           href="/game/command"
           className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
