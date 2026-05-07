@@ -452,7 +452,7 @@ export default async function SolarSystemPage({
     <div className="flex h-full flex-col overflow-hidden bg-[#06060a]">
 
       {/* Top nav bar */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800/60 bg-zinc-950 px-4 py-2 text-xs">
+      <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800/60 bg-zinc-950 px-4 py-2 text-xs animate-fade-in-up">
         <Link
           href="/game/map"
           className="flex items-center gap-1.5 text-zinc-500 hover:text-zinc-300 transition-colors"

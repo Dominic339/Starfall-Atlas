@@ -136,12 +136,12 @@ export function AuthForm() {
 
       {/* Status messages */}
       {error && (
-        <div className="mb-4 rounded border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300">
+        <div className="mb-4 rounded border border-red-800 bg-red-950/50 px-3 py-2 text-sm text-red-300 animate-fade-in">
           {error}
         </div>
       )}
       {info && (
-        <div className="mb-4 rounded border border-emerald-800 bg-emerald-950/50 px-3 py-2 text-sm text-emerald-300">
+        <div className="mb-4 rounded border border-emerald-800 bg-emerald-950/50 px-3 py-2 text-sm text-emerald-300 animate-fade-in">
           {info}
         </div>
       )}
@@ -149,7 +149,7 @@ export function AuthForm() {
       <form onSubmit={handleSubmit} className="space-y-4">
         {/* Handle — sign-up only */}
         {mode === "signup" && (
-          <div>
+          <div className="animate-slide-down">
             <label
               htmlFor="handle"
               className="mb-1 block text-xs font-medium text-zinc-400"
@@ -220,7 +220,7 @@ export function AuthForm() {
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+          className="w-full rounded bg-indigo-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50 btn-glow"
         >
           {loading
             ? mode === "signin"
