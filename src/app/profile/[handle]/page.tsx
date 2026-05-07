@@ -101,7 +101,7 @@ export default async function PublicProfilePage({
 
       <main className="mx-auto max-w-2xl p-6 space-y-8">
         {/* Profile header */}
-        <div>
+        <div className="animate-fade-in-up">
           <h1 className="text-2xl font-semibold text-zinc-50">{profile.handle}</h1>
           {profile.title && (
             <p className="mt-0.5 text-sm text-zinc-400">{profile.title}</p>
@@ -121,7 +121,7 @@ export default async function PublicProfilePage({
 
         {/* Bio */}
         {profile.bio && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 animate-fade-in-up">
             <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">
               Bio
             </p>
@@ -130,11 +130,11 @@ export default async function PublicProfilePage({
         )}
 
         {/* Stats */}
-        <div>
+        <div className="animate-fade-in-up">
           <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
             Achievements
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
             <StatCard label="Systems found" value={discoveryCount} />
             <StatCard label="First discovered" value={firstDiscCount} />
             <StatCard label="Active colonies" value={colonyCount} />
@@ -154,7 +154,7 @@ function StatCard({
   value: string | number;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 card-interactive animate-fade-in-up">
       <p className="text-xs text-zinc-500 uppercase tracking-wider">{label}</p>
       <p className="mt-1 text-lg font-semibold text-zinc-200">{value}</p>
     </div>

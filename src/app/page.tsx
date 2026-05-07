@@ -129,29 +129,29 @@ export default function HomePage() {
       {/* Hero */}
       <main className="relative z-10 flex flex-1 flex-col items-center justify-center px-8 py-24 text-center">
         {/* Pre-title badge */}
-        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-indigo-800/50 bg-indigo-950/40 px-3 py-1 text-xs text-indigo-400">
+        <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-indigo-800/50 bg-indigo-950/40 px-3 py-1 text-xs text-indigo-400 animate-fade-in-up">
           <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse" />
           Persistent multiplayer · Real star catalog
         </div>
 
-        <h1 className="text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl lg:text-6xl leading-tight">
+        <h1 className="text-4xl font-semibold tracking-tight text-zinc-50 sm:text-5xl lg:text-6xl leading-tight animate-fade-in-up" style={{ animationDelay: "60ms" }}>
           A galaxy to explore.
           <br />
           <span className="text-shimmer" style={{ fontWeight: 600 }}>One universe, all players.</span>
         </h1>
 
-        <p className="mt-6 max-w-lg text-base leading-relaxed text-zinc-400">
+        <p className="mt-6 max-w-lg text-base leading-relaxed text-zinc-400 animate-fade-in-up" style={{ animationDelay: "120ms" }}>
           Starfall Atlas is a persistent multiplayer strategy game built on a
           real star catalog. Discover systems, found colonies, and compete in
           a fully player-driven economy — no real-time combat required.
         </p>
 
         {/* Feature grid */}
-        <ul className="mt-10 grid grid-cols-1 gap-2.5 text-left sm:grid-cols-2 max-w-2xl w-full">
+        <ul className="mt-10 grid grid-cols-1 gap-2.5 text-left sm:grid-cols-2 max-w-2xl w-full stagger-children">
           {FEATURES.map((f) => (
             <li
               key={f.label}
-              className={`flex items-center gap-3 rounded-lg border px-3.5 py-2.5 ${f.bg} card-interactive`}
+              className={`flex items-center gap-3 rounded-lg border px-3.5 py-2.5 ${f.bg} card-interactive animate-fade-in-up`}
             >
               <span className={`shrink-0 ${f.color}`}>{f.icon}</span>
               <span className="text-sm text-zinc-300">{f.label}</span>
@@ -160,7 +160,7 @@ export default function HomePage() {
         </ul>
 
         {/* CTA */}
-        <div className="mt-12 flex flex-col items-center gap-3 sm:flex-row">
+        <div className="mt-12 flex flex-col items-center gap-3 sm:flex-row animate-fade-in-up" style={{ animationDelay: "280ms" }}>
           <Link
             href="/login?mode=signup"
             className="relative rounded-lg bg-indigo-600 px-8 py-3 text-sm font-semibold text-white transition-all hover:bg-indigo-500 hover:shadow-lg hover:shadow-indigo-900/50 btn-glow"
