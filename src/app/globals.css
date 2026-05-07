@@ -101,12 +101,21 @@ body {
   transform: translateY(-1px);
 }
 
-/* Glow button effect */
-.btn-glow {
+/* Glow button effects */
+.btn-glow, .btn-glow-emerald, .btn-glow-amber, .btn-glow-teal {
   transition: box-shadow 0.18s ease, background-color 0.18s ease;
 }
 .btn-glow:hover:not(:disabled) {
   box-shadow: 0 0 10px rgb(99 102 241 / 0.35);
+}
+.btn-glow-emerald:hover:not(:disabled) {
+  box-shadow: 0 0 10px rgb(52 211 153 / 0.30);
+}
+.btn-glow-amber:hover:not(:disabled) {
+  box-shadow: 0 0 10px rgb(251 191 36 / 0.30);
+}
+.btn-glow-teal:hover:not(:disabled) {
+  box-shadow: 0 0 10px rgb(45 212 191 / 0.28);
 }
 
 /* Shimmer text for logo */

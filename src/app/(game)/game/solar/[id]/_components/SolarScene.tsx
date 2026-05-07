@@ -209,6 +209,52 @@ function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: numb
         </mesh>
       )}
 
+      {/* Volcanic heat glow ring */}
+      {bodyType === "volcanic" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.08, radius * 0.025, 6, 64]} />
+          <meshBasicMaterial color="#ff4400" transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Atmospheric band rings for gas/ice giants */}
+      {bodyType === "gas_giant" && (
+        <>
+          {([-0.32, -0.08, 0.10, 0.30] as number[]).map((frac, i) => {
+            const h = frac * radius;
+            const bandR = Math.sqrt(Math.max(0, radius * radius - h * h)) + radius * 0.003;
+            return (
+              <mesh key={i} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[bandR, radius * 0.011, 5, 60]} />
+                <meshBasicMaterial
+                  color={i % 2 === 0 ? "#7a420e" : "#c8781e"}
+                  transparent opacity={0.30 + i * 0.035}
+                  depthWrite={false}
+                />
+              </mesh>
+            );
+          })}
+        </>
+      )}
+      {bodyType === "ice_giant" && (
+        <>
+          {([-0.22, 0.06, 0.26] as number[]).map((frac, i) => {
+            const h = frac * radius;
+            const bandR = Math.sqrt(Math.max(0, radius * radius - h * h)) + radius * 0.003;
+            return (
+              <mesh key={i} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[bandR, radius * 0.009, 5, 60]} />
+                <meshBasicMaterial
+                  color={i % 2 === 0 ? "#1a6878" : "#58c8d8"}
+                  transparent opacity={0.25}
+                  depthWrite={false}
+                />
+              </mesh>
+            );
+          })}
+        </>
+      )}
+
       {/* Rings (gas/ice giants) */}
       {rings && (
         <mesh rotation={[rings.tilt, 0, 0.18]}>
