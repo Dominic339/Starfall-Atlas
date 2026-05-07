@@ -14,7 +14,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
+import { maybeSingleResult } from "@/lib/supabase/utils";
 import type { Player } from "@/lib/types/game";
 import { ProfileEditForm } from "./_components/ProfileEditForm";
 import { DeleteAccountForm } from "./_components/DeleteAccountForm";
@@ -41,7 +41,7 @@ export default async function ProfilePage() {
   if (!player) redirect("/login");
 
   // ── Stats ──────────────────────────────────────────────────────────────────
-  const [discoveriesRes, coloniesRes, allianceRes] = await Promise.all([
+  const [discoveriesRes, coloniesRes, allianceRes, firstDiscRes] = await Promise.all([
     admin
       .from("system_discoveries")
       .select("id", { count: "exact", head: true })
@@ -56,25 +56,21 @@ export default async function ProfilePage() {
       .select("alliance_id, role, alliances(name, tag)")
       .eq("player_id", player.id)
       .maybeSingle(),
+    admin
+      .from("system_discoveries")
+      .select("id", { count: "exact", head: true })
+      .eq("player_id", player.id)
+      .eq("is_first", true),
   ]);
 
-  const discoveryCount = discoveriesRes.count ?? 0;
-  const colonyCount    = coloniesRes.count ?? 0;
+  const discoveryCount      = discoveriesRes.count ?? 0;
+  const colonyCount         = coloniesRes.count ?? 0;
+  const firstDiscoveryCount = firstDiscRes.count ?? 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allianceData   = allianceRes.data as any;
   const allianceName   = allianceData?.alliances?.name ?? null;
   const allianceTag    = allianceData?.alliances?.tag  ?? null;
   const allianceRole   = allianceData?.role            ?? null;
-
-  // First-discovered count
-  const { data: firstDiscRows } = listResult<{ id: string }>(
-    await admin
-      .from("system_discoveries")
-      .select("id")
-      .eq("player_id", player.id)
-      .eq("is_first", true),
-  );
-  const firstDiscoveryCount = firstDiscRows?.length ?? 0;
 
   return (
     <div className="space-y-8">
@@ -113,7 +109,7 @@ export default async function ProfilePage() {
 
       {/* Bio */}
       {player.bio && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 animate-fade-in-up">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1">
             Bio
           </p>
@@ -122,7 +118,7 @@ export default async function ProfilePage() {
       )}
 
       {/* Edit form */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-5 animate-fade-in-up">
         <h2 className="text-sm font-semibold text-zinc-300 mb-4">Edit Profile</h2>
         <ProfileEditForm
           currentHandle={player.handle}
@@ -132,7 +128,7 @@ export default async function ProfilePage() {
       </div>
 
       {/* Public profile link */}
-      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 animate-fade-in-up">
         <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1">
           Public Profile
         </p>
@@ -145,7 +141,7 @@ export default async function ProfilePage() {
       </div>
 
       {/* Danger zone */}
-      <div className="rounded-lg border border-red-900/40 bg-zinc-950 p-5">
+      <div className="rounded-lg border border-red-900/40 bg-zinc-950 p-5 animate-fade-in-up">
         <h2 className="text-sm font-semibold text-red-400 mb-2">Danger Zone</h2>
         <p className="text-xs text-zinc-500 mb-4">
           Deleting your account is a soft-delete — your data is retained for 30 days

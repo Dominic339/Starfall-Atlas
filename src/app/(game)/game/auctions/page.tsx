@@ -7,6 +7,7 @@
  */
 
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getUser } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
@@ -168,7 +169,21 @@ export default async function AuctionsPage() {
 
   return (
     <div className="mx-auto max-w-3xl p-6 space-y-6">
-      <div>
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2">
+        <Link
+          href="/game/command"
+          className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+        >
+          ← Command
+        </Link>
+        <span className="text-zinc-800 text-xs">/</span>
+        <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+          Auction Board
+        </span>
+      </div>
+
+      <div className="animate-fade-in-up">
         <h1 className="text-xl font-semibold text-zinc-100">Auction Board</h1>
         <p className="mt-0.5 text-sm text-zinc-600">
           Buy and sell colonies and stewardship rights via blind ascending auctions. Anti-snipe:{" "}

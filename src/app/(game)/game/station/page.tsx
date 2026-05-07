@@ -253,7 +253,7 @@ export default async function StationPage() {
     <div className="mx-auto max-w-5xl p-6 space-y-6">
 
       {/* ── Station Identity Panel ───────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-700/50 bg-gradient-to-br from-zinc-800/50 via-zinc-900 to-zinc-900 px-6 py-5 shadow-lg shadow-black/20">
+      <div className="rounded-xl border border-zinc-700/50 bg-gradient-to-br from-zinc-800/50 via-zinc-900 to-zinc-900 px-6 py-5 shadow-lg shadow-black/20 animate-fade-in-up">
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap mb-1">
@@ -354,15 +354,15 @@ export default async function StationPage() {
       </div>
 
       {/* ── Station inventory ────────────────────────────────────────────────── */}
-      <section>
+      <section className="animate-fade-in-up">
         <SectionHeading title="Inventory" />
         {stationInventory.length > 0 ? (
           <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
-            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 stagger-children">
               {stationInventory.map((row) => (
                 <div
                   key={row.resource_type}
-                  className="flex items-center justify-between rounded-lg border border-zinc-700/40 bg-zinc-800/50 px-3 py-2"
+                  className="flex items-center justify-between rounded-lg border border-zinc-700/40 bg-zinc-800/50 px-3 py-2 animate-fade-in-up"
                 >
                   <span className="text-xs text-zinc-500 capitalize">
                     {row.resource_type.replace(/_/g, " ")}
@@ -518,7 +518,7 @@ export default async function StationPage() {
 
       {/* ── Ships away ───────────────────────────────────────────────────────── */}
       {allShipsAway > 0 && (
-        <section>
+        <section className="animate-fade-in-up">
           <SectionHeading title="Ships Away" meta={<span className="text-zinc-600">{allShipsAway}</span>} />
           <div className="space-y-2.5">
             {[...awayShips, ...travelingShips].map((ship) => {
@@ -629,7 +629,7 @@ export default async function StationPage() {
 
       {/* ── Colonies ─────────────────────────────────────────────────────────── */}
       {colonies.length > 0 && (
-        <section>
+        <section className="animate-fade-in-up">
           <SectionHeading
             title={`Colonies (${colonies.length})`}
             meta={
@@ -717,7 +717,7 @@ export default async function StationPage() {
       )}
 
       {/* ── Refining ─────────────────────────────────────────────────────────── */}
-      <section>
+      <section className="animate-fade-in-up">
         <SectionHeading title="Refining" />
         <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
           <p className="text-xs text-zinc-600 mb-4">
