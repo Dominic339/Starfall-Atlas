@@ -3210,7 +3210,7 @@ export function GalaxyMapClient({
             {legendOpen ? "Legend ▾" : "Legend ▸"}
           </button>
           {legendOpen && (
-            <div className="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm">
+            <div className="flex flex-col gap-1 rounded border border-zinc-800 bg-zinc-900/80 px-2.5 py-2 text-xs text-zinc-600 backdrop-blur-sm animate-slide-down">
               <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400 opacity-80" />Current location</span>
               <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-emerald-400" />Colony</span>
               <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full bg-violet-400" />Fleet</span>

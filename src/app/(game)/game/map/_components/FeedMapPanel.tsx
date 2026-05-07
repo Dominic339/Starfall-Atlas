@@ -124,10 +124,11 @@ export function FeedMapPanel({ onClose }: FeedMapPanelProps) {
             <p className="text-xs text-zinc-600 text-center py-12">No events yet.</p>
           )}
 
+          <div className="stagger-children">
           {!loading && events.map((e) => {
             const color = EVENT_COLOR[e.eventType] ?? "text-zinc-400";
             return (
-              <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0">
+              <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0 animate-fade-in-up">
                 <span className={`mt-1 w-1.5 h-1.5 shrink-0 rounded-full bg-current ${color}`} />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm text-zinc-300">
@@ -144,6 +145,7 @@ export function FeedMapPanel({ onClose }: FeedMapPanelProps) {
               </div>
             );
           })}
+          </div>
 
           {hasMore && (
             <button
