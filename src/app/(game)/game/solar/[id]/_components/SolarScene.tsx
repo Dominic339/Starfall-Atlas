@@ -112,6 +112,11 @@ const PLANET_CLOUDS: Record<string, { color: string; opacity: number; speed: num
   lush:      { color: "#e8f4e0", opacity: 0.11, speed: 0.09 },
   habitable: { color: "#dde8d5", opacity: 0.09, speed: 0.08 },
   ocean:     { color: "#d0e8f8", opacity: 0.13, speed: 0.07 },
+  toxic:     { color: "#c8e850", opacity: 0.15, speed: 0.12 },
+  volcanic:  { color: "#3a1510", opacity: 0.18, speed: 0.06 },
+  frozen:    { color: "#e8f4ff", opacity: 0.07, speed: 0.05 },
+  gas_giant: { color: "#e8c090", opacity: 0.10, speed: 0.18 },
+  ice_giant: { color: "#a8e0f0", opacity: 0.12, speed: 0.14 },
 };
 
 // Sidebar colour (for SystemHubClient to consume — keep in sync with PLANET_MAT)
@@ -278,19 +283,23 @@ function OrbitalRing({ radius, dashed = false }: { radius: number; dashed?: bool
 
 function AsteroidBelt({ orbitRadius, period, index }: { orbitRadius: number; period: number; index: number }) {
   const groupRef = useRef<THREE.Group>(null!);
-  const rocks = useMemo(() => Array.from({ length: 30 }, (_, i) => {
-    const a = (i / 30) * Math.PI * 2;
-    const r = orbitRadius * (0.97 + (Math.sin(i * 7.31) * 0.5 + 0.5) * 0.06);
-    const y = (Math.sin(i * 2.17) * 0.5 - 0.25) * 0.08;
-    return { x: Math.cos(a) * r, y, z: Math.sin(a) * r };
+  const rocks = useMemo(() => Array.from({ length: 48 }, (_, i) => {
+    const a = (i / 48) * Math.PI * 2;
+    const spread = Math.sin(i * 7.31) * 0.5 + 0.5;
+    const r = orbitRadius * (0.95 + spread * 0.10);
+    const y = (Math.sin(i * 2.17) * 0.5 - 0.25) * 0.14;
+    const size = 0.025 + (Math.sin(i * 3.71 + 1.2) * 0.5 + 0.5) * 0.045;
+    const shade = Math.floor(80 + spread * 30);
+    const color = `rgb(${shade},${shade - 6},${shade - 10})`;
+    return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, size, color };
   }), [orbitRadius]);
   useFrame(({ clock }) => { groupRef.current.rotation.y = (clock.elapsedTime / period) * Math.PI * 2; });
   return (
     <group ref={groupRef}>
       {rocks.map((p, i) => (
         <mesh key={i} position={[p.x, p.y, p.z]}>
-          <sphereGeometry args={[0.04, 4, 4]} />
-          <meshStandardMaterial color="#6b7280" roughness={1} metalness={0} />
+          <sphereGeometry args={[p.size, 4, 4]} />
+          <meshStandardMaterial color={p.color} roughness={1} metalness={0} />
         </mesh>
       ))}
       <Html position={[orbitRadius * 0.72, 0.15, orbitRadius * 0.72]} center style={{ pointerEvents: "none" }}>
