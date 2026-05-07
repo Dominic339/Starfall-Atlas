@@ -107,6 +107,13 @@ const PLANET_RINGS: Record<string, { color: string; opacity: number; inner: numb
   ice_giant: { color: "#70c8d8", opacity: 0.36, inner: 1.40, outer: 2.10, tilt: Math.PI / 5 },
 };
 
+// Cloud/haze layer — rotates independently of the planet body
+const PLANET_CLOUDS: Record<string, { color: string; opacity: number; speed: number }> = {
+  lush:      { color: "#e8f4e0", opacity: 0.11, speed: 0.09 },
+  habitable: { color: "#dde8d5", opacity: 0.09, speed: 0.08 },
+  ocean:     { color: "#d0e8f8", opacity: 0.13, speed: 0.07 },
+};
+
 // Sidebar colour (for SystemHubClient to consume — keep in sync with PLANET_MAT)
 const PLANET_COLOR: Record<string, string> = {
   lush: "#2a6b35", habitable: "#46955a", ocean: "#1a4f9a",
@@ -152,13 +159,17 @@ const PLANET_SPIN_SPEED: Record<string, number> = {
 };
 
 function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: number }) {
-  const mat   = PLANET_MAT[bodyType]   ?? PLANET_MAT.rocky;
-  const atmo  = PLANET_ATMO[bodyType];
-  const rings = PLANET_RINGS[bodyType];
-  const selfRef = useRef<THREE.Group>(null!);
+  const mat    = PLANET_MAT[bodyType]    ?? PLANET_MAT.rocky;
+  const atmo   = PLANET_ATMO[bodyType];
+  const rings  = PLANET_RINGS[bodyType];
+  const clouds = PLANET_CLOUDS[bodyType];
+  const selfRef   = useRef<THREE.Group>(null!);
+  const cloudRef  = useRef<THREE.Group>(null!);
   const spinSpeed = PLANET_SPIN_SPEED[bodyType] ?? 0.10;
   useFrame(({ clock }) => {
-    if (selfRef.current) selfRef.current.rotation.y = clock.elapsedTime * spinSpeed;
+    const t = clock.elapsedTime;
+    if (selfRef.current)  selfRef.current.rotation.y  = t * spinSpeed;
+    if (cloudRef.current) cloudRef.current.rotation.y = t * (clouds?.speed ?? 0);
   });
 
   return (
@@ -174,6 +185,16 @@ function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: numb
           emissiveIntensity={mat.emissiveIntensity ?? 0}
         />
       </mesh>
+
+      {/* Cloud / haze layer — independent rotation */}
+      {clouds && (
+        <group ref={cloudRef}>
+          <mesh>
+            <sphereGeometry args={[radius * 1.03, 32, 20]} />
+            <meshBasicMaterial color={clouds.color} transparent opacity={clouds.opacity} depthWrite={false} />
+          </mesh>
+        </group>
+      )}
 
       {/* Atmosphere glow — large backside shell */}
       {atmo && (
@@ -202,13 +223,26 @@ function Star({ spectralClass }: { spectralClass: string }) {
   const r = STAR_RADIUS[spectralClass] ?? 0.80;
   const color  = STAR_COLOR[spectralClass]    ?? "#fde68a";
   const emissv = STAR_EMISSIVE[spectralClass] ?? "#b45309";
+  const outerRef = useRef<THREE.Mesh>(null!);
+  const innerRef = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (outerRef.current) {
+      const mat = outerRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.04 + Math.sin(t * 0.7) * 0.016;
+    }
+    if (innerRef.current) {
+      const mat = innerRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.09 + Math.sin(t * 1.1 + 1.2) * 0.022;
+    }
+  });
   return (
     <group>
-      <mesh renderOrder={-2}>
+      <mesh ref={outerRef} renderOrder={-2}>
         <sphereGeometry args={[r * 3.8, 16, 16]} />
         <meshBasicMaterial color={emissv} transparent opacity={0.04} depthWrite={false} side={THREE.BackSide} />
       </mesh>
-      <mesh renderOrder={-1}>
+      <mesh ref={innerRef} renderOrder={-1}>
         <sphereGeometry args={[r * 2.2, 16, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.09} depthWrite={false} side={THREE.BackSide} />
       </mesh>
