@@ -108,7 +108,7 @@ function CargoBar({ used, cap }: { used: number; cap: number }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full transition-all progress-fill ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs font-mono tabular-nums shrink-0 ${used > 0 ? "text-teal-400" : "text-zinc-600"}`}>
         {used}/{cap}

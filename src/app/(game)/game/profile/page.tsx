@@ -75,7 +75,7 @@ export default async function ProfilePage() {
   return (
     <div className="space-y-8">
       {/* Breadcrumb */}
-      <nav className="text-xs text-zinc-600">
+      <nav className="text-xs text-zinc-600 animate-fade-in-up">
         <Link href="/game/command" className="hover:text-zinc-400">
           Command Centre
         </Link>

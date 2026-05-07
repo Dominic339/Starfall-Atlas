@@ -170,7 +170,7 @@ export default async function AuctionsPage() {
   return (
     <div className="mx-auto max-w-3xl p-6 space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 animate-fade-in-up">
         <Link
           href="/game/command"
           className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
