@@ -319,7 +319,7 @@ export default async function ColonyPage({
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-6">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 animate-fade-in-up">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-xl font-semibold text-zinc-100">
