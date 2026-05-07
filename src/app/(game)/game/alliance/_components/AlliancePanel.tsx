@@ -859,7 +859,7 @@ export function AlliancePanel({
                   </div>
                   <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                     <div
-                      className="h-full bg-indigo-600 transition-all"
+                      className="h-full bg-indigo-600 transition-all progress-fill"
                       style={{ width: `${pct}%` }}
                     />
                   </div>

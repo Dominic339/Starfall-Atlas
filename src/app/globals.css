@@ -281,3 +281,26 @@ body {
 .solar-station-marker {
   animation: solar-station-pulse 2s ease-in-out infinite;
 }
+
+/* ── Progress bar fills ────────────────────────────────────────────────────── */
+
+/* Moving highlight sweep for active fill bars */
+@keyframes progress-sweep {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(400%); }
+}
+
+.progress-fill {
+  position: relative;
+  overflow: hidden;
+}
+
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.18) 50%, transparent 100%);
+  width: 25%;
+  animation: progress-sweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}

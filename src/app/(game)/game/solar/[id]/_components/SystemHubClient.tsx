@@ -1025,7 +1025,7 @@ function SystemOverviewPanel({
               </div>
               <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-violet-600 transition-all"
+                  className="h-full rounded-full bg-violet-600 transition-all progress-fill"
                   style={{
                     width: `${Math.min(100, (governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100)}%`,
                   }}

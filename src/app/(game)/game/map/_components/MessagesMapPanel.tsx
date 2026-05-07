@@ -496,7 +496,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
                                 <span>{timeAgo(goal.deadlineAt)}</span>
                               </div>
                               <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                                <div className={`h-full rounded-full ${goal.pct >= 100 ? "bg-emerald-500" : goal.pct >= 50 ? "bg-indigo-500" : "bg-violet-600"}`} style={{ width: `${Math.min(100, goal.pct)}%` }} />
+                                <div className={`h-full rounded-full progress-fill ${goal.pct >= 100 ? "bg-emerald-500" : goal.pct >= 50 ? "bg-indigo-500" : "bg-violet-600"}`} style={{ width: `${Math.min(100, goal.pct)}%` }} />
                               </div>
                             </div>
                           </div>

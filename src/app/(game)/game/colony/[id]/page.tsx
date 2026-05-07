@@ -362,7 +362,7 @@ export default async function ColonyPage({
             <div className="mt-2 flex items-center gap-2 max-w-xs">
               <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                 <div
-                  className={`h-full rounded-full transition-all ${
+                  className={`h-full rounded-full transition-all progress-fill ${
                     health === "neglected"  ? "bg-red-600"
                     : health === "struggling" ? "bg-amber-500"
                     : "bg-emerald-600"
