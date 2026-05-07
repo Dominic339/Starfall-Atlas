@@ -385,7 +385,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                 )}
 
                 {/* Stockpile */}
-                <section>
+                <section className="animate-fade-in-up">
                   <div className="mb-2 flex items-baseline justify-between">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Stockpile</h3>
                     <span className="text-xs text-zinc-700">
@@ -415,10 +415,10 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Output + Tax */}
                 {colony.status === "active" && (
-                  <section>
+                  <section className="animate-fade-in-up">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Output</h3>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 card-interactive">
                         <p className="text-xs text-zinc-600">Production</p>
                         <p className="mt-1 text-sm font-medium text-teal-300">
                           {colony.totalRatePerHr > 0 ? `${colony.totalRatePerHr} u/hr` : <span className="text-zinc-500">Paused</span>}
@@ -431,7 +431,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                           <p className="mt-1 text-xs text-amber-500">Cap reached — haul soon</p>
                         )}
                       </div>
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 card-interactive">
                         <p className="text-xs text-zinc-600">Tax accrued</p>
                         {colony.accruedTax > 0 ? (
                           <>
@@ -457,7 +457,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Structures */}
                 {colony.status === "active" && (
-                  <section>
+                  <section className="animate-fade-in-up">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Structures</h3>
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-3">
                       {colony.buildOptions.map((opt) => (
@@ -499,7 +499,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Emergency Supply */}
                 {colony.status === "active" && colony.health !== "well_supplied" && (
-                  <section>
+                  <section className="animate-fade-in-up">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Emergency Supply</h3>
                     <div className="rounded-lg border border-orange-900/50 bg-orange-950/20 px-4 py-3 space-y-2">
                       <p className="text-xs text-zinc-500">
@@ -540,7 +540,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Ships in system */}
                 {colony.shipsInSystem.length > 0 && (
-                  <section>
+                  <section className="animate-fade-in-up">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
                       Ships in System ({colony.shipsInSystem.length})
                     </h3>

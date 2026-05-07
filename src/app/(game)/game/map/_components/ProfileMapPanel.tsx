@@ -22,7 +22,7 @@ interface ProfileMapPanelProps { onClose: () => void; }
 
 function StatTile({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+    <div className="flex flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 card-interactive animate-fade-in-up">
       <span className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</span>
       <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">{label}</span>
     </div>
@@ -131,7 +131,7 @@ export function ProfileMapPanel({ onClose }: ProfileMapPanelProps) {
           {!loading && data && (
             <>
               {/* Stats grid */}
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 stagger-children">
                 <StatTile label="Systems found"   value={data.stats.systemsDiscovered} color="text-indigo-400" />
                 <StatTile label="First contact"   value={data.stats.firstDiscoveries}  color="text-amber-400" />
                 <StatTile label="Colonies"        value={data.stats.activeColonies}    color="text-emerald-400" />

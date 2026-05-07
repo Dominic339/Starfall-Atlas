@@ -264,7 +264,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.65)" }}
     >
-      <div className="relative w-full max-w-3xl max-h-[88vh] flex flex-col rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-3xl max-h-[88vh] flex flex-col rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl overflow-hidden animate-fade-in-up">
 
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-5 py-3 shrink-0">
@@ -323,8 +323,9 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                 </p>
               )}
 
+              <div className="stagger-children space-y-4">
               {[...grouped.entries()].map(([rt, group]) => (
-                <div key={rt}>
+                <div key={rt} className="animate-fade-in-up">
                   <p className="mb-1.5 text-xs font-medium text-zinc-500">{resLabel(rt)}</p>
                   <div className="overflow-hidden rounded border border-zinc-800/60">
                     <table className="w-full text-xs">
@@ -376,6 +377,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                   </div>
                 </div>
               ))}
+              </div>
             </div>
           )}
 
