@@ -250,7 +250,7 @@ export default async function LeaderboardPage() {
       </div>
 
       {/* Page title */}
-      <div>
+      <div className="animate-fade-in-up">
         <h1 className="text-lg font-bold tracking-tight text-zinc-100">Leaderboard</h1>
         <p className="mt-1 text-xs text-zinc-600">
           Rankings update on every page load · top 25 players per category

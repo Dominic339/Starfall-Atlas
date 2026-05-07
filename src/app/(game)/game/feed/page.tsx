@@ -93,7 +93,7 @@ export default async function FeedPage() {
         </span>
       </div>
 
-      <div>
+      <div className="animate-fade-in-up">
         <h1 className="text-lg font-bold tracking-tight text-zinc-100">World Changes</h1>
         <p className="mt-1 text-xs text-zinc-500">
           Major events across the galaxy — discoveries, colony events, governance changes,
