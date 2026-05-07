@@ -275,7 +275,7 @@ function CreateAuctionForm({
   }
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 animate-fade-in-up">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-2 text-sm font-medium text-zinc-300 hover:text-zinc-100 transition-colors"

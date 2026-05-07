@@ -84,7 +84,7 @@ function FeedTab() {
   if (events.length === 0) return <p className="text-sm text-zinc-600 text-center py-12">No events yet.</p>;
 
   return (
-    <div>
+    <div className="animate-fade-in-up">
       <div className="stagger-children">
         {events.map((e) => {
           const color = EVENT_COLOR[e.eventType] ?? "text-zinc-500";
@@ -152,7 +152,7 @@ function ResearchCard({
   const isScaffold    = item.scaffoldOnly;
 
   return (
-    <div className={`flex flex-col rounded-xl border px-3 py-2.5 gap-2 min-w-[150px] flex-1 ${
+    <div className={`flex flex-col rounded-xl border px-3 py-2.5 gap-2 min-w-[150px] flex-1 card-interactive ${
       isUnlocked  ? "border-emerald-800/60 bg-emerald-950/15" :
       isReady     ? "border-indigo-700/80 bg-indigo-950/20" :
       isPurchasable ? "border-amber-800/40 bg-zinc-900" :
@@ -257,7 +257,7 @@ function ResearchTab() {
   const cat = data.categories[activeCat] ?? null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 animate-fade-in-up">
       {/* Progression summary */}
       <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 space-y-2">
         <div className="flex items-center gap-3 flex-wrap">
