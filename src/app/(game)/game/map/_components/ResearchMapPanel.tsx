@@ -123,7 +123,7 @@ function ItemCard({
               <button
                 onClick={() => onPurchase(item.id)}
                 disabled={!item.canAfford || purchaseLoading === item.id}
-                className={`mt-1 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+                className={`mt-1 rounded px-3 py-1.5 text-xs font-semibold transition-colors btn-glow ${
                   !item.canAfford
                     ? "bg-zinc-700/60 text-zinc-500 cursor-not-allowed"
                     : purchaseLoading === item.id

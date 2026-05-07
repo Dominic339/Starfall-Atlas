@@ -401,7 +401,7 @@ export function UnloadButton({ shipId, summary }: UnloadButtonProps) {
       <button
         onClick={handleUnload}
         disabled={loading}
-        className="rounded bg-indigo-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded bg-indigo-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-indigo-600 disabled:cursor-not-allowed disabled:opacity-50 btn-glow"
       >
         {loading ? "Unloading…" : `Unload to Station (${summary})`}
       </button>

@@ -200,7 +200,7 @@ function ResearchCard({
           <button
             onClick={() => onPurchase(item.id)}
             disabled={!item.canAfford || purchaseLoading === item.id}
-            className={`shrink-0 rounded px-2.5 py-1 text-[10px] font-bold transition-colors ${
+            className={`shrink-0 rounded px-2.5 py-1 text-[10px] font-bold transition-colors btn-glow ${
               !item.canAfford ? "bg-zinc-800 text-zinc-600 cursor-not-allowed" :
               purchaseLoading === item.id ? "bg-indigo-800 text-indigo-300 opacity-60 cursor-wait" :
               "bg-indigo-600 hover:bg-indigo-500 text-white"
