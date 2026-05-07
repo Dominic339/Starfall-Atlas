@@ -358,7 +358,7 @@ function ShipCard({
           </p>
           <div className="w-20 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
+              className={`h-full rounded-full transition-all progress-fill ${
                 budgetPct >= 100 ? "bg-amber-600" :
                 budgetPct >= 70  ? "bg-indigo-500" : "bg-teal-600"
               }`}

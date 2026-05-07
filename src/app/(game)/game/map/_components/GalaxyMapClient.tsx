@@ -3325,7 +3325,7 @@ export function GalaxyMapClient({
                   <div className="py-2">
                     <div className="h-1.5 w-full rounded-full bg-zinc-800">
                       <div
-                        className="h-1.5 rounded-full transition-all"
+                        className="h-1.5 rounded-full transition-all progress-fill"
                         style={{ width: `${pct}%`, background: color }}
                       />
                     </div>

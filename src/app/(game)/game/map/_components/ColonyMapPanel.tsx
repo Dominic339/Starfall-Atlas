@@ -95,7 +95,7 @@ function HealthBar({ pct, health }: { pct: number; health: string }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full progress-fill ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs font-mono shrink-0 ${textColor}`}>{pct}%</span>
     </div>
