@@ -209,6 +209,14 @@ function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: numb
         </mesh>
       )}
 
+      {/* Ocean reflective shimmer — thin bright equatorial disc */}
+      {bodyType === "ocean" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.02, radius * 0.018, 6, 80]} />
+          <meshBasicMaterial color="#60a8e0" transparent opacity={0.20} depthWrite={false} />
+        </mesh>
+      )}
+
       {/* Volcanic heat glow ring */}
       {bodyType === "volcanic" && (
         <mesh rotation={[Math.PI / 2, 0, 0]}>
@@ -249,6 +257,38 @@ function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: numb
                   transparent opacity={0.25}
                   depthWrite={false}
                 />
+              </mesh>
+            );
+          })}
+        </>
+      )}
+
+      {/* Desert dust haze — thin equatorial disc */}
+      {bodyType === "desert" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[radius * 1.04, radius * 1.22, 64]} />
+          <meshBasicMaterial color="#d0904a" transparent opacity={0.08} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Toxic gas glow ring */}
+      {bodyType === "toxic" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.10, radius * 0.030, 6, 64]} />
+          <meshBasicMaterial color="#88dd00" transparent opacity={0.18} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Frozen / ice — polar ice-cap rings at top and bottom */}
+      {(bodyType === "frozen" || bodyType === "ice_planet") && (
+        <>
+          {([1, -1] as number[]).map((sign) => {
+            const h = sign * radius * 0.72;
+            const capR = Math.sqrt(Math.max(0, radius * radius - h * h));
+            return (
+              <mesh key={sign} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0, capR, 48]} />
+                <meshBasicMaterial color="#e8f4ff" transparent opacity={0.22} side={THREE.DoubleSide} depthWrite={false} />
               </mesh>
             );
           })}
