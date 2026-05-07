@@ -228,8 +228,9 @@ function Star({ spectralClass }: { spectralClass: string }) {
   const r = STAR_RADIUS[spectralClass] ?? 0.80;
   const color  = STAR_COLOR[spectralClass]    ?? "#fde68a";
   const emissv = STAR_EMISSIVE[spectralClass] ?? "#b45309";
-  const outerRef = useRef<THREE.Mesh>(null!);
-  const innerRef = useRef<THREE.Mesh>(null!);
+  const outerRef  = useRef<THREE.Mesh>(null!);
+  const innerRef  = useRef<THREE.Mesh>(null!);
+  const coronaRef = useRef<THREE.Mesh>(null!);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     if (outerRef.current) {
@@ -239,6 +240,11 @@ function Star({ spectralClass }: { spectralClass: string }) {
     if (innerRef.current) {
       const mat = innerRef.current.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.09 + Math.sin(t * 1.1 + 1.2) * 0.022;
+    }
+    if (coronaRef.current) {
+      coronaRef.current.rotation.z = t * 0.06;
+      const mat = coronaRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.12 + Math.sin(t * 0.5 + 0.8) * 0.04;
     }
   });
   return (
@@ -254,6 +260,11 @@ function Star({ spectralClass }: { spectralClass: string }) {
       <mesh>
         <sphereGeometry args={[r, 64, 32]} />
         <meshStandardMaterial color={color} emissive={emissv} emissiveIntensity={2.2} roughness={0.45} metalness={0.00} />
+      </mesh>
+      {/* Slow-rotating equatorial corona ring */}
+      <mesh ref={coronaRef} renderOrder={-1}>
+        <torusGeometry args={[r * 1.55, r * 0.055, 6, 80]} />
+        <meshBasicMaterial color={color} transparent opacity={0.12} depthWrite={false} />
       </mesh>
       <pointLight color={color} intensity={5} distance={28} decay={1.8} />
     </group>

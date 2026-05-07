@@ -4276,9 +4276,9 @@ export function GalaxyMapClient({
           <div className="flex flex-1 flex-col overflow-y-auto">
             {/* Ships summary */}
             {ships.length > 0 && (
-              <div className="border-b border-zinc-800/50 px-4 py-3">
+              <div className="border-b border-zinc-800/50 px-4 py-3 animate-fade-in-up">
                 <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">Your Ships</p>
-                <div className="space-y-2">
+                <div className="space-y-2 stagger-children">
                   {ships.map((ship) => {
                     const loc = ship.systemId ? systemMap.get(ship.systemId) : null;
                     const dest = ship.destinationSystemId ? systemMap.get(ship.destinationSystemId) : null;
@@ -4324,9 +4324,9 @@ export function GalaxyMapClient({
                 .slice(0, 6);
               if (nearby.length === 0) return null;
               return (
-                <div className="border-b border-zinc-800/50 px-4 py-3">
+                <div className="border-b border-zinc-800/50 px-4 py-3 animate-fade-in-up" style={{ animationDelay: "60ms" }}>
                   <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-zinc-600">In Range from {currentSystem.name}</p>
-                  <div className="space-y-1.5">
+                  <div className="space-y-1.5 stagger-children">
                     {nearby.map((sys) => {
                       const d = dist3D(sys, currentSystem);
                       return (
@@ -4352,7 +4352,7 @@ export function GalaxyMapClient({
             })()}
 
             {/* Hints */}
-            <div className="px-4 py-3 mt-auto">
+            <div className="px-4 py-3 mt-auto animate-fade-in-up" style={{ animationDelay: "120ms" }}>
               <div className="space-y-1 text-[10px] text-zinc-700">
                 <p>Click a star to inspect &amp; act on it.</p>
                 <p>Shift+click to open the system detail page.</p>
@@ -4393,7 +4393,7 @@ export function GalaxyMapClient({
 
       {/* ── Cargo Manifest panel ──────────────────────────────────────── */}
       {manifestOpen && (
-        <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-80 bg-zinc-950/95 border-l border-emerald-900/40 shadow-2xl backdrop-blur-md">
+        <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-80 bg-zinc-950/95 border-l border-emerald-900/40 shadow-2xl backdrop-blur-md animate-fade-in-up">
           {/* Header */}
           <div className="flex items-center justify-between px-4 py-3 border-b border-emerald-900/30">
             <span className="text-sm font-semibold text-emerald-300 uppercase tracking-widest">Cargo Manifest</span>
@@ -4413,7 +4413,7 @@ export function GalaxyMapClient({
           )}
 
           {/* Body */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          <div className="flex-1 overflow-y-auto p-3 space-y-3 stagger-children">
             {travelLines.length === 0 ? (
               <p className="text-xs text-zinc-600 text-center mt-8">No ships in transit.</p>
             ) : (
@@ -4425,7 +4425,7 @@ export function GalaxyMapClient({
                 const isArriving = msLeft !== null && msLeft <= 0;
                 const isLoading  = speedupLoading === tl.key;
                 return (
-                  <div key={tl.key} className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 p-3 space-y-2">
+                  <div key={tl.key} className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 p-3 space-y-2 card-interactive animate-fade-in-up">
                     {/* Route + ETA header */}
                     <div className="flex items-center justify-between gap-2">
                       <span className="text-xs font-semibold text-zinc-200 truncate">

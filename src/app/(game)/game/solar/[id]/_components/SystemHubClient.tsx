@@ -836,7 +836,7 @@ function SystemOverviewPanel({
           <p className="mb-1.5 text-xs text-zinc-600 uppercase tracking-wider">
             Ships ({ships.length})
           </p>
-          <div className="space-y-1">
+          <div className="space-y-1 stagger-children">
             {ships.map((ship) => (
               <div
                 key={ship.id}
@@ -885,7 +885,7 @@ function SystemOverviewPanel({
       {/* Bodies list — click to select */}
       <div className="px-4 py-2 flex-1">
         <p className="mb-1.5 text-xs text-zinc-600 uppercase tracking-wider">Bodies</p>
-        <div className="space-y-1">
+        <div className="space-y-1 stagger-children">
           {bodies.map((body, i) => (
             <button
               key={i}
