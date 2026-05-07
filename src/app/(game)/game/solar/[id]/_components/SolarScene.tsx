@@ -314,9 +314,10 @@ function Star({ spectralClass }: { spectralClass: string }) {
   const r = STAR_RADIUS[spectralClass] ?? 0.80;
   const color  = STAR_COLOR[spectralClass]    ?? "#fde68a";
   const emissv = STAR_EMISSIVE[spectralClass] ?? "#b45309";
-  const outerRef  = useRef<THREE.Mesh>(null!);
-  const innerRef  = useRef<THREE.Mesh>(null!);
-  const coronaRef = useRef<THREE.Mesh>(null!);
+  const outerRef   = useRef<THREE.Mesh>(null!);
+  const innerRef   = useRef<THREE.Mesh>(null!);
+  const coronaRef  = useRef<THREE.Mesh>(null!);
+  const corona2Ref = useRef<THREE.Mesh>(null!);
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
     if (outerRef.current) {
@@ -331,6 +332,11 @@ function Star({ spectralClass }: { spectralClass: string }) {
       coronaRef.current.rotation.z = t * 0.06;
       const mat = coronaRef.current.material as THREE.MeshBasicMaterial;
       mat.opacity = 0.12 + Math.sin(t * 0.5 + 0.8) * 0.04;
+    }
+    if (corona2Ref.current) {
+      corona2Ref.current.rotation.y = -t * 0.04;
+      const mat = corona2Ref.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.07 + Math.sin(t * 0.38 + 2.1) * 0.025;
     }
   });
   return (
@@ -351,6 +357,11 @@ function Star({ spectralClass }: { spectralClass: string }) {
       <mesh ref={coronaRef} renderOrder={-1}>
         <torusGeometry args={[r * 1.55, r * 0.055, 6, 80]} />
         <meshBasicMaterial color={color} transparent opacity={0.12} depthWrite={false} />
+      </mesh>
+      {/* Second tilted corona ring — counter-rotating for depth */}
+      <mesh ref={corona2Ref} rotation={[Math.PI / 3, 0, 0]} renderOrder={-1}>
+        <torusGeometry args={[r * 1.70, r * 0.035, 6, 80]} />
+        <meshBasicMaterial color={emissv} transparent opacity={0.07} depthWrite={false} />
       </mesh>
       <pointLight color={color} intensity={5} distance={28} decay={1.8} />
     </group>
