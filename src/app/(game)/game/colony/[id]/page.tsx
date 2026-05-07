@@ -58,6 +58,36 @@ function bodyTypeLabel(type: string): string {
   return labels[type] ?? type;
 }
 
+function SectionHead({ icon, label, accent = "bg-indigo-600" }: {
+  icon: React.ReactNode; label: string; accent?: string;
+}) {
+  return (
+    <div className="flex items-center gap-3 mb-3">
+      <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded ${accent.replace("bg-", "bg-").replace("600", "950/80")} border ${accent.replace("bg-", "border-").replace("600", "800/50")}`}>
+        {icon}
+      </span>
+      <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-400">{label}</h2>
+      <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+    </div>
+  );
+}
+
+function planetTypeTheme(type: string | null) {
+  if (type === "lush" || type === "habitable" || type === "ocean")
+    return { gradient: "from-emerald-950/50 via-zinc-900 to-zinc-900", border: "border-emerald-900/40", accentLine: "via-emerald-500/50", deco: "text-emerald-900/40" };
+  if (type === "volcanic")
+    return { gradient: "from-red-950/50 via-zinc-900 to-zinc-900", border: "border-red-900/40", accentLine: "via-red-500/50", deco: "text-red-900/40" };
+  if (type === "toxic")
+    return { gradient: "from-violet-950/50 via-zinc-900 to-zinc-900", border: "border-violet-900/40", accentLine: "via-violet-500/50", deco: "text-violet-900/40" };
+  if (type === "desert")
+    return { gradient: "from-amber-950/50 via-zinc-900 to-zinc-900", border: "border-amber-900/40", accentLine: "via-amber-500/50", deco: "text-amber-900/40" };
+  if (type === "ice_planet" || type === "frozen" || type === "ice_giant")
+    return { gradient: "from-sky-950/50 via-zinc-900 to-zinc-900", border: "border-sky-900/40", accentLine: "via-sky-400/50", deco: "text-sky-900/40" };
+  if (type === "gas_giant")
+    return { gradient: "from-orange-950/40 via-zinc-900 to-zinc-900", border: "border-orange-900/30", accentLine: "via-orange-500/40", deco: "text-orange-900/30" };
+  return { gradient: "from-zinc-900/80 via-zinc-900 to-zinc-900", border: "border-zinc-800", accentLine: "via-zinc-600/40", deco: "text-zinc-800/50" };
+}
+
 export default async function ColonyPage({
   params,
 }: {
@@ -316,82 +346,82 @@ export default async function ColonyPage({
 
   const inventoryTotal = colonyInventory.reduce((s, r) => s + r.quantity, 0);
 
+  const theme = planetTypeTheme(planetType);
+  const planetTypeBadgeCls = isHarsh
+    ? "bg-red-950/60 text-red-400 border-red-900/40"
+    : (planetType === "lush" || planetType === "ocean" || planetType === "habitable")
+      ? "bg-emerald-950/60 text-emerald-500 border-emerald-900/40"
+      : (planetType === "desert")
+        ? "bg-amber-950/60 text-amber-400 border-amber-900/40"
+        : (planetType === "ice_planet" || planetType === "frozen" || planetType === "ice_giant")
+          ? "bg-sky-950/60 text-sky-400 border-sky-900/40"
+          : (planetType === "toxic")
+            ? "bg-violet-950/60 text-violet-400 border-violet-900/40"
+            : (planetType === "gas_giant")
+              ? "bg-orange-950/60 text-orange-400 border-orange-900/40"
+              : "bg-zinc-800 text-zinc-400 border-zinc-700";
+
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4 animate-fade-in-up">
-        <div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-xl font-semibold text-zinc-100">
-              <Link
-                href={`/game/system/${encodeURIComponent(colony.system_id)}`}
-                className="hover:text-zinc-300 transition-colors"
-              >
-                {systemName}
-              </Link>
-              <span className="ml-2 text-sm text-zinc-600">· Body {bodyIndexStr}</span>
-            </h1>
-            {planetType && (
-              <span className={`rounded-full px-2 py-0.5 text-xs border ${
-                isHarsh
-                  ? "bg-red-950/60 text-red-400 border-red-900/40"
-                  : planetType === "lush" || planetType === "ocean" || planetType === "habitable"
-                    ? "bg-emerald-950/60 text-emerald-500 border-emerald-900/40"
-                    : "bg-zinc-800 text-zinc-400 border-zinc-700"
-              }`}>
-                {bodyTypeLabel(planetType)}
-              </span>
-            )}
-            <span className={`rounded-full px-2 py-0.5 text-xs border ${badge.classes}`}>
-              {badge.label}
+      {/* ── Hero panel ─────────────────────────────────────────────────────── */}
+      <div className={`relative rounded-xl border ${theme.border} bg-gradient-to-br ${theme.gradient} px-6 py-5 overflow-hidden shadow-lg shadow-black/30 animate-fade-in-up`}>
+        {/* Top accent line */}
+        <div className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent ${theme.accentLine} to-transparent`} />
+        {/* Decorative planet orb */}
+        <svg className={`absolute right-5 top-3 w-24 h-24 pointer-events-none select-none ${theme.deco}`} viewBox="0 0 96 96" fill="none" aria-hidden>
+          <circle cx="48" cy="48" r="38" stroke="currentColor" strokeWidth="1.5" />
+          <ellipse cx="48" cy="48" rx="60" ry="14" stroke="currentColor" strokeWidth="0.8" />
+          <circle cx="48" cy="48" r="22" stroke="currentColor" strokeWidth="0.5" strokeDasharray="3 4" />
+          <circle cx="48" cy="48" r="8" stroke="currentColor" strokeWidth="0.4" />
+        </svg>
+        {/* Nav buttons */}
+        <div className="absolute top-4 right-4 flex items-center gap-2">
+          <Link href="/game/map" className="rounded border border-zinc-700/50 bg-black/20 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors backdrop-blur-sm">Map →</Link>
+          <Link href="/game/command" className="rounded border border-zinc-700/50 bg-black/20 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors backdrop-blur-sm">← Command</Link>
+        </div>
+        {/* Badges */}
+        <div className="flex items-center gap-2 mb-2 flex-wrap pr-44">
+          {planetType && (
+            <span className={`rounded-full px-2 py-0.5 text-xs border ${planetTypeBadgeCls}`}>
+              {bodyTypeLabel(planetType)}
+            </span>
+          )}
+          <span className={`rounded-full px-2 py-0.5 text-xs border ${badge.classes}`}>{badge.label}</span>
+          <span className="text-xs text-zinc-700 font-mono">Body {bodyIndexStr}</span>
+        </div>
+        {/* System name heading */}
+        <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600 mb-0.5">Colony</p>
+        <h1 className="text-2xl font-bold text-zinc-100 tracking-tight">
+          <Link href={`/game/system/${encodeURIComponent(colony.system_id)}`} className="hover:text-zinc-300 transition-colors">
+            {systemName}
+          </Link>
+        </h1>
+        {/* Status line */}
+        <p className="mt-1 text-sm text-zinc-400">
+          Tier {colony.population_tier}{" "}
+          <span className={`font-medium ${statusColor[colony.status]}`}>{colony.status}</span>
+          {growthLabel && (
+            <span className={`ml-2 text-xs ${colony.upkeep_missed_periods >= 1 ? "text-amber-500" : "text-zinc-600"}`}>
+              · {growthLabel}
+            </span>
+          )}
+        </p>
+        {/* Health bar */}
+        {colony.status === "active" && (
+          <div className="mt-3 flex items-center gap-2 max-w-xs">
+            <div className="flex-1 h-1.5 rounded-full bg-zinc-800/80 overflow-hidden">
+              <div
+                className={`h-full rounded-full progress-fill ${
+                  health === "neglected" ? "bg-red-600" : health === "struggling" ? "bg-amber-500" : "bg-emerald-600"
+                }`}
+                style={{ width: `${Math.round(healthMult * 100)}%` }}
+              />
+            </div>
+            <span className={`text-xs font-mono shrink-0 ${health === "neglected" ? "text-red-500" : health === "struggling" ? "text-amber-500" : "text-emerald-600"}`}>
+              {Math.round(healthMult * 100)}%
             </span>
           </div>
-          <p className="mt-0.5 text-sm text-zinc-500">
-            Tier {colony.population_tier}{" "}
-            <span className={`font-medium ${statusColor[colony.status]}`}>
-              {colony.status}
-            </span>
-            {growthLabel && (
-              <span className={`ml-2 text-xs ${colony.upkeep_missed_periods >= 1 ? "text-amber-500" : "text-zinc-600"}`}>
-                · {growthLabel}
-              </span>
-            )}
-          </p>
-          {/* Colony health bar */}
-          {colony.status === "active" && (
-            <div className="mt-2 flex items-center gap-2 max-w-xs">
-              <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                <div
-                  className={`h-full rounded-full transition-all progress-fill ${
-                    health === "neglected"  ? "bg-red-600"
-                    : health === "struggling" ? "bg-amber-500"
-                    : "bg-emerald-600"
-                  }`}
-                  style={{ width: `${Math.round(healthMult * 100)}%` }}
-                />
-              </div>
-              <span className={`text-xs font-mono shrink-0 ${
-                health === "neglected" ? "text-red-500" : health === "struggling" ? "text-amber-500" : "text-emerald-600"
-              }`}>
-                {Math.round(healthMult * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/game/map"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            Map →
-          </Link>
-          <Link
-            href="/game/command"
-            className="rounded-lg border border-zinc-700 bg-zinc-900/50 px-3 py-1.5 text-xs font-medium text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200 transition-colors"
-          >
-            ← Command
-          </Link>
-        </div>
+        )}
       </div>
 
       {/* ── Abandoned banner ──────────────────────────────────────────────── */}
@@ -457,12 +487,14 @@ export default async function ColonyPage({
 
       {/* ── Stockpile (primary focus) ──────────────────────────────────────── */}
       <section>
-        <div className="mb-3 flex items-baseline justify-between gap-2">
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Stockpile
-          </h2>
-          <span className="text-xs text-zinc-600">
-            {inventoryTotal > 0 ? `${inventoryTotal.toLocaleString()} units ready to haul` : "empty"}
+        <div className="flex items-center justify-between gap-2">
+          <SectionHead
+            accent="bg-teal-600"
+            label="Stockpile"
+            icon={<svg className="w-3 h-3 text-teal-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" aria-hidden><path d="M2 5.5L8 3L14 5.5V10.5L8 13L2 10.5V5.5Z"/><path d="M8 3V13M2 5.5L8 8L14 5.5"/></svg>}
+          />
+          <span className="text-xs text-zinc-600 shrink-0 -mt-3">
+            {inventoryTotal > 0 ? `${inventoryTotal.toLocaleString()} u ready` : "empty"}
           </span>
         </div>
         {colonyInventory.length > 0 ? (
@@ -506,9 +538,11 @@ export default async function ColonyPage({
       {/* ── Output — production rate + tax ─────────────────────────────────── */}
       {colony.status === "active" && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Output
-          </h2>
+          <SectionHead
+            accent="bg-amber-600"
+            label="Output"
+            icon={<svg className="w-3 h-3 text-amber-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 13V3M4 7L8 3L12 7"/><path d="M3 13H13" strokeWidth="1"/></svg>}
+          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
 
             {/* Production rate */}
@@ -572,9 +606,11 @@ export default async function ColonyPage({
       {/* ── Ships ──────────────────────────────────────────────────────────── */}
       {shipsAtSystem.length > 0 && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Ships in System ({shipsAtSystem.length})
-          </h2>
+          <SectionHead
+            accent="bg-indigo-600"
+            label={`Ships in System (${shipsAtSystem.length})`}
+            icon={<svg className="w-3 h-3 text-indigo-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M8 2L5 8H3V10H13V8H11L8 2Z"/><path d="M5 13H11"/></svg>}
+          />
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2 animate-fade-in-up">
             {shipsAtSystem.map((ship) => {
               const isAssigned = ship.pinned_colony_id === colony.id;
@@ -627,9 +663,11 @@ export default async function ColonyPage({
       {/* Upkeep */}
       {colony.status === "active" && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Upkeep
-          </h2>
+          <SectionHead
+            accent="bg-zinc-600"
+            label="Upkeep"
+            icon={<svg className="w-3 h-3 text-zinc-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden><circle cx="8" cy="8" r="2.5"/><path d="M8 2V4M8 12V14M14 8H12M4 8H2M12.2 3.8L10.8 5.2M5.2 10.8L3.8 12.2M12.2 12.2L10.8 10.8M5.2 5.2L3.8 3.8"/></svg>}
+          />
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 animate-fade-in-up">
             <p className="text-sm text-zinc-400">{upkeepDesc}</p>
             {isHarsh && (
@@ -649,9 +687,11 @@ export default async function ColonyPage({
       {/* Emergency Universal Exchange */}
       {colony.status === "active" && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Emergency Supply
-          </h2>
+          <SectionHead
+            accent="bg-orange-600"
+            label="Emergency Supply"
+            icon={<svg className="w-3 h-3 text-orange-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M9 2L4 9H8L7 14L12 7H8L9 2Z"/></svg>}
+          />
           <div className={`rounded-lg border px-4 py-3 animate-fade-in-up ${
             health !== "well_supplied"
               ? "border-orange-900/50 bg-orange-950/20"
@@ -686,9 +726,11 @@ export default async function ColonyPage({
       {/* Stewardship / Permit */}
       {stewardship && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Stewardship
-          </h2>
+          <SectionHead
+            accent="bg-yellow-600"
+            label="Stewardship"
+            icon={<svg className="w-3 h-3 text-yellow-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 13H14M2 13L4 7L7 10L10 5L13 10L14 7V13"/></svg>}
+          />
           {isPlayerSteward ? (
             <div className="rounded-lg border border-yellow-900/40 bg-yellow-950/20 px-4 py-3 space-y-3">
               <div className="flex items-center justify-between gap-2">
@@ -746,9 +788,11 @@ export default async function ColonyPage({
       {/* Structures */}
       {colony.status === "active" && (
         <section>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
-            Structures
-          </h2>
+          <SectionHead
+            accent="bg-zinc-600"
+            label="Structures"
+            icon={<svg className="w-3 h-3 text-zinc-400" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M2 14V5L8 2L14 5V14"/><path d="M6 14V10H10V14"/><path d="M2 14H14"/></svg>}
+          />
           <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-4 animate-fade-in-up">
             {buildOptions.map(({ type, currentTier, targetTier, cost, canAfford, atMax }) => {
               const label =

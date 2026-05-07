@@ -751,7 +751,8 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
       <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl shadow-black/60 overflow-hidden animate-fade-in-up">
 
         {/* Header */}
-        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5">
+        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5 relative overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-600/40 to-transparent" />
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -797,15 +798,15 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
         </div>
 
         {/* Tab bar */}
-        <div className="shrink-0 flex border-b border-zinc-800 px-4 pt-2 gap-1">
+        <div className="shrink-0 flex items-center gap-1 border-b border-zinc-800/60 px-4 py-2">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                 tab === t.id
-                  ? "bg-zinc-800 text-zinc-200 border-b-2 border-indigo-600"
-                  : "text-zinc-600 hover:text-zinc-400"
+                  ? "bg-indigo-900/60 text-indigo-200 border border-indigo-800/50"
+                  : "text-zinc-600 hover:text-zinc-300 border border-transparent"
               }`}
             >
               {t.label}
