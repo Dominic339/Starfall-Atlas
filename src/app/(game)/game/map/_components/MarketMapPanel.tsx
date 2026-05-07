@@ -434,7 +434,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                     <button
                       onClick={handleList}
                       disabled={listLoading || listAvailable === 0}
-                      className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:opacity-50 transition-colors"
+                      className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:opacity-50 transition-colors btn-glow-amber"
                     >
                       {listLoading ? "Listing…" : "Create Listing"}
                     </button>
@@ -541,7 +541,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                                 <button
                                   onClick={() => handleBid(a.id)}
                                   disabled={bidLoading === a.id}
-                                  className="rounded-lg px-3 py-1 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                                  className="rounded-lg px-3 py-1 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber"
                                 >
                                   {bidLoading === a.id ? "…" : "Bid"}
                                 </button>
@@ -588,7 +588,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                       </div>
                       <div className="flex items-center gap-3">
                         <button onClick={handleCreateAuction} disabled={createLoading || !createItemId}
-                          className="rounded-lg px-4 py-1.5 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors">
+                          className="rounded-lg px-4 py-1.5 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber">
                           {createLoading ? "Creating…" : "List Auction"}
                         </button>
                         {createMsg && <span className={`text-xs ${createMsg.ok ? "text-emerald-400" : "text-red-400"}`}>{createMsg.text}</span>}

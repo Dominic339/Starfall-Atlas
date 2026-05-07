@@ -136,7 +136,7 @@ export default async function CommandPage() {
                   </div>
                   <Link
                     href={`/game/colony/${colony.id}`}
-                    className="shrink-0 rounded border border-amber-700/60 bg-amber-900/30 px-2.5 py-0.5 text-xs font-medium text-amber-300 hover:bg-amber-800/40 transition-colors"
+                    className="shrink-0 rounded border border-amber-700/60 bg-amber-900/30 px-2.5 py-0.5 text-xs font-medium text-amber-300 hover:bg-amber-800/40 transition-colors btn-glow-amber"
                   >
                     Reactivate →
                   </Link>
@@ -226,7 +226,7 @@ export default async function CommandPage() {
             </div>
             <Link
               href="/game/station"
-              className="rounded border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 transition-colors"
+              className="rounded border border-amber-700/60 bg-amber-950/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 transition-colors btn-glow-amber"
             >
               Manage Station →
             </Link>

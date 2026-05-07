@@ -881,7 +881,7 @@ export function AlliancePanel({
                       <button
                         onClick={() => handleContribute(g.id, g.resourceType)}
                         disabled={goalContribLoading[g.id] || contrib < 1}
-                        className="rounded border border-teal-700/60 bg-teal-950/40 px-2.5 py-0.5 text-xs font-medium text-teal-300 hover:bg-teal-900/50 disabled:opacity-50 transition-colors"
+                        className="rounded border border-teal-700/60 bg-teal-950/40 px-2.5 py-0.5 text-xs font-medium text-teal-300 hover:bg-teal-900/50 disabled:opacity-50 transition-colors btn-glow-teal"
                       >
                         {goalContribLoading[g.id] ? "…" : "Contribute"}
                       </button>
@@ -992,7 +992,7 @@ export function AlliancePanel({
                 <button
                   onClick={handleWithdraw}
                   disabled={withdrawLoading || storage.length === 0 || playerAllianceCredits < withdrawQty}
-                  className="w-full rounded border border-amber-800/60 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                  className="w-full rounded border border-amber-800/60 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber"
                 >
                   {withdrawLoading ? "Withdrawing…" : "Withdraw"}
                 </button>

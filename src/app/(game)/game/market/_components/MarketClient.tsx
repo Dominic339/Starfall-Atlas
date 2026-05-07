@@ -343,7 +343,7 @@ function CreateListingForm({
         <button
           onClick={handleList}
           disabled={loading || available === 0}
-          className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+          className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors btn-glow-amber"
         >
           {loading ? "Listing…" : "Create Listing"}
         </button>

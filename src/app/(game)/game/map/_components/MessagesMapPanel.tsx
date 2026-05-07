@@ -534,7 +534,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
                           <input type="number" min="1" placeholder="Qty" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)}
                             className="w-20 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs font-mono text-zinc-200 text-center focus:outline-none focus:border-zinc-500" />
                           <button onClick={handleDeposit} disabled={actionLoading || !depositResource || !depositAmount}
-                            className="shrink-0 rounded px-3 py-1.5 text-xs font-semibold border border-teal-700/50 bg-teal-950/20 text-teal-400 hover:bg-teal-900/30 disabled:opacity-50 transition-colors">
+                            className="shrink-0 rounded px-3 py-1.5 text-xs font-semibold border border-teal-700/50 bg-teal-950/20 text-teal-400 hover:bg-teal-900/30 disabled:opacity-50 transition-colors btn-glow-teal">
                             {actionLoading ? "…" : "Deposit"}
                           </button>
                         </div>

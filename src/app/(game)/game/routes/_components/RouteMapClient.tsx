@@ -944,7 +944,7 @@ export function RouteMapClient({
                           <button
                             onClick={() => saveEdit(route)}
                             disabled={actionLoading}
-                            className="rounded bg-indigo-800 px-2.5 py-1 text-xs font-medium text-indigo-100 hover:bg-indigo-700 transition-colors disabled:opacity-60"
+                            className="rounded bg-indigo-800 px-2.5 py-1 text-xs font-medium text-indigo-100 hover:bg-indigo-700 transition-colors disabled:opacity-60 btn-glow"
                           >
                             {actionLoading ? "Saving…" : "Save"}
                           </button>

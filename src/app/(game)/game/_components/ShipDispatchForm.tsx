@@ -84,7 +84,7 @@ export function ShipDispatchForm({ shipId, targetSystems }: ShipDispatchFormProp
         <button
           onClick={handleDispatch}
           disabled={!destId || loading}
-          className="shrink-0 rounded-lg border border-indigo-700 bg-indigo-950/70 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-900/70 hover:border-indigo-600 disabled:opacity-40 transition-colors"
+          className="shrink-0 rounded-lg border border-indigo-700 bg-indigo-950/70 px-4 py-2 text-sm font-semibold text-indigo-300 hover:bg-indigo-900/70 hover:border-indigo-600 disabled:opacity-40 transition-colors btn-glow"
         >
           {loading ? "…" : "Send"}
         </button>

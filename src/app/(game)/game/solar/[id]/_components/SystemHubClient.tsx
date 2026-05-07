@@ -347,7 +347,7 @@ function PlanetPanel({
                 "Survey complete!",
               )}
               disabled={survey.loading}
-              className="w-full rounded bg-teal-800/60 border border-teal-700/50 px-3 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-700/60 transition-colors disabled:opacity-50"
+              className="w-full rounded bg-teal-800/60 border border-teal-700/50 px-3 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-700/60 transition-colors disabled:opacity-50 btn-glow-teal"
             >
               {survey.loading ? "Surveying…" : "Survey this body"}
             </button>
@@ -375,7 +375,7 @@ function PlanetPanel({
                       found.run("/api/game/colony/found", { bodyId: body.bodyId }, "Colony founded!");
                     }}
                     disabled={found.loading}
-                    className="flex-1 rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50"
+                    className="flex-1 rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50 btn-glow-emerald"
                   >
                     Confirm →
                   </button>
@@ -427,7 +427,7 @@ function PlanetPanel({
                   "Taxes collected!",
                 )}
                 disabled={collect.loading}
-                className="w-full rounded bg-amber-800/50 border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-700/50 transition-colors disabled:opacity-50"
+                className="w-full rounded bg-amber-800/50 border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-700/50 transition-colors disabled:opacity-50 btn-glow-amber"
               >
                 {collect.loading ? "Collecting…" : "Collect Taxes"}
               </button>
@@ -614,7 +614,7 @@ function LaneBuildPanel({ systemId }: { systemId: string }) {
             "Lane construction started!",
           )}
           disabled={lane.loading || !toSystemId}
-          className="rounded bg-violet-800/50 border border-violet-700/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+          className="rounded bg-violet-800/50 border border-violet-700/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50 btn-glow"
         >
           {lane.loading ? "…" : `(${LANE_BUILD_HOURS}h)`}
         </button>

@@ -488,7 +488,7 @@ function PackageCard({ pkg, onBuy, buying }: {
           <button
             onClick={() => onBuy(pkg.id)}
             disabled={buying}
-            className="rounded-lg px-2.5 py-1 text-xs font-bold transition-all disabled:opacity-50 border border-amber-700/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40"
+            className="rounded-lg px-2.5 py-1 text-xs font-bold transition-all disabled:opacity-50 border border-amber-700/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 btn-glow-amber"
           >
             {buying ? "…" : "Buy Bundle"}
           </button>

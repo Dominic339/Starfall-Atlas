@@ -66,7 +66,7 @@ export function CollectButton({ colonyId, accrued }: CollectButtonProps) {
       <button
         onClick={handleCollect}
         disabled={loading || accrued === 0}
-        className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:cursor-not-allowed disabled:opacity-50 btn-glow-amber"
       >
         {loading ? "Collecting…" : `Collect ${accrued} ¢`}
       </button>
@@ -140,7 +140,7 @@ export function ExtractButton({ colonyId, summary }: ExtractButtonProps) {
       <button
         onClick={handleExtract}
         disabled={loading}
-        className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50"
+        className="rounded bg-teal-700 px-2.5 py-1 text-xs font-semibold text-white transition-colors hover:bg-teal-600 disabled:cursor-not-allowed disabled:opacity-50 btn-glow-teal"
       >
         {loading ? "Extracting…" : `Extract (${summary})`}
       </button>
@@ -450,7 +450,7 @@ export function ReactivateButton({ colonyId }: { colonyId: string }) {
       <button
         onClick={handleReactivate}
         disabled={loading}
-        className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50"
+        className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-amber-600 disabled:opacity-50 btn-glow-amber"
       >
         {loading ? "Reactivating…" : "Reactivate Colony"}
       </button>

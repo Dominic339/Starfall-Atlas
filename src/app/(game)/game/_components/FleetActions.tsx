@@ -91,7 +91,7 @@ export function CreateFleetForm({ dockedShips }: CreateFleetFormProps) {
         disabled={state === "loading" || selected.size < 2}
         className="rounded bg-indigo-700 px-3 py-1 text-xs font-medium text-white
                    hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed
-                   transition-colors"
+                   transition-colors btn-glow"
       >
         {state === "loading" ? "Forming…" : `Form Fleet (${selected.size})`}
       </button>
@@ -172,7 +172,7 @@ export function DispatchFleetForm({ fleetId, nearbySystems }: DispatchFleetFormP
           disabled={state === "loading" || !destinationId}
           className="rounded bg-indigo-700 px-3 py-1 text-xs font-medium text-white
                      hover:bg-indigo-600 disabled:opacity-40 disabled:cursor-not-allowed
-                     transition-colors whitespace-nowrap"
+                     transition-colors whitespace-nowrap btn-glow"
         >
           {state === "loading" ? "Dispatching…" : "Dispatch →"}
         </button>

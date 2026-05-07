@@ -64,7 +64,7 @@ export function BuildStructureButton({
         onClick={handleBuild}
         disabled={loading || !canAfford}
         title={`Build ${label} (tier ${targetTier}): costs ${ironCost} iron, ${carbonCost} carbon`}
-        className={`rounded px-2 py-0.5 text-xs font-medium transition-colors
+        className={`rounded px-2 py-0.5 text-xs font-medium transition-colors btn-glow-teal
           ${canAfford && !loading
             ? "bg-teal-900/60 text-teal-300 hover:bg-teal-800/60 cursor-pointer"
             : "bg-zinc-800 text-zinc-600 cursor-not-allowed"

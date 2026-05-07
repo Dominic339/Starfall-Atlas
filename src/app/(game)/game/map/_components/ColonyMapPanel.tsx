@@ -355,7 +355,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                           <button
                             onClick={() => handleReactivate(colony.id)}
                             disabled={reactivateLoading}
-                            className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                            className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors btn-glow-amber"
                           >
                             {reactivateLoading ? "Reactivating…" : "Reactivate Colony"}
                           </button>
@@ -440,7 +440,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                               <button
                                 onClick={() => handleCollect(colony.id)}
                                 disabled={collectLoading}
-                                className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                                className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors btn-glow-amber"
                               >
                                 {collectLoading ? "Collecting…" : `Collect ${colony.accruedTax} ¢`}
                               </button>

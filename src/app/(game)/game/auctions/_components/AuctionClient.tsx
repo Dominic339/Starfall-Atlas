@@ -127,7 +127,7 @@ function BidForm({
         onClick={handleBid}
         disabled={loading || !canBid}
         title={!canBid ? `Need ${amount} ¢` : undefined}
-        className="rounded border border-indigo-700/60 bg-indigo-950/40 px-3 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+        className="rounded border border-indigo-700/60 bg-indigo-950/40 px-3 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors btn-glow"
       >
         {loading ? "Bidding…" : "Place Bid"}
       </button>
@@ -337,7 +337,7 @@ function CreateAuctionForm({
               <button
                 onClick={handleCreate}
                 disabled={loading}
-                className="rounded border border-indigo-700/60 bg-indigo-950/40 px-4 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 transition-colors"
+                className="rounded border border-indigo-700/60 bg-indigo-950/40 px-4 py-1 text-xs font-medium text-indigo-300 hover:bg-indigo-900/50 disabled:opacity-50 transition-colors btn-glow"
               >
                 {loading ? "Creating…" : "Start Auction"}
               </button>
