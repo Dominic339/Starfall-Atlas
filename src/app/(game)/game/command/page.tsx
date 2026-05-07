@@ -90,7 +90,7 @@ export default async function CommandPage() {
   return (
     <div className="mx-auto max-w-5xl p-6 space-y-8">
       {/* Header */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 animate-fade-in-up">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Command</h1>
           <p className="mt-0.5 text-sm text-zinc-600">
@@ -217,7 +217,7 @@ export default async function CommandPage() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Station
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 flex items-center justify-between gap-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 flex items-center justify-between gap-3 card-interactive animate-fade-in-up">
             <div>
               <p className="text-sm font-medium text-zinc-200">{station.name}</p>
               <p className="text-xs text-zinc-600">
@@ -240,11 +240,11 @@ export default async function CommandPage() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Ships
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {ships.map((ship) => (
               <div
                 key={ship.id}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5"
+                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/70 px-4 py-2.5 card-interactive animate-fade-in-up"
               >
                 <div>
                   <p className="text-sm text-zinc-300">{ship.name}</p>
@@ -281,7 +281,7 @@ export default async function CommandPage() {
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Colonies
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {colonies.map((colony) => {
               const bodyIdx = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
               const isNeglected = colony.upkeep_missed_periods >= 3;
@@ -289,7 +289,7 @@ export default async function CommandPage() {
               return (
                 <div
                   key={colony.id}
-                  className={`flex items-center justify-between rounded-lg border px-4 py-2.5 ${
+                  className={`flex items-center justify-between rounded-lg border px-4 py-2.5 card-interactive animate-fade-in-up ${
                     colony.status === "abandoned"
                       ? "border-amber-800 bg-amber-950/20"
                       : colony.status === "collapsed"
