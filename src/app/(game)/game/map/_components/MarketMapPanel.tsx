@@ -300,7 +300,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
           {/* ── Buy tab ─────────────────────────────────────────────────── */}
           {!loading && !fetchError && tab === "buy" && (
-            <div className="space-y-4">
+            <div className="space-y-4 animate-fade-in-up">
               {/* Filter */}
               {allTypes.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -383,7 +383,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
           {/* ── Sell tab ─────────────────────────────────────────────────── */}
           {!loading && !fetchError && tab === "sell" && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fade-in-up">
 
               {/* Create listing form */}
               {data && data.inventory.length > 0 ? (
@@ -494,7 +494,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
           {/* ── Auctions tab ──────────────────────────────────────────────── */}
           {tab === "auctions" && (
-            <div className="space-y-4">
+            <div className="space-y-4 animate-fade-in-up">
               {auctionLoading && <p className="text-xs text-zinc-600 text-center py-8 animate-pulse">Loading auctions…</p>}
 
               {auctionLoaded && auctionData && (
@@ -503,12 +503,12 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                   {auctionData.auctions.length === 0 ? (
                     <p className="text-sm text-zinc-600 text-center py-6">No active auctions.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-2 stagger-children">
                       {auctionData.auctions.map((a) => {
                         const minNext = Math.max(a.minBid, a.currentHighBid + 1);
                         const msg = bidMsg?.id === a.id ? bidMsg : null;
                         return (
-                          <div key={a.id} className={`rounded-xl border px-4 py-3 space-y-2 ${
+                          <div key={a.id} className={`rounded-xl border px-4 py-3 space-y-2 card-interactive animate-fade-in-up ${
                             a.isOwnAuction ? "border-amber-900/40 bg-amber-950/10" :
                             a.isHighBidder ? "border-emerald-900/40 bg-emerald-950/10" :
                             "border-zinc-800 bg-zinc-900/40"

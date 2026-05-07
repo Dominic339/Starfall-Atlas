@@ -157,10 +157,10 @@ function StoresTab({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-fade-in-up">
 
       {/* Credits hero */}
-      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
+      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700/80">Credits</p>
           <p className="mt-0.5 font-mono text-2xl font-bold text-amber-300 tabular-nums">
@@ -460,7 +460,7 @@ function FleetTab({ data, onRefresh }: { data: PanelData; onRefresh: () => void 
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-fade-in-up">
       <ShipGroup label="At Station" ships={docked} dot="bg-emerald-500" />
       <ShipGroup label="In Transit" ships={traveling} dot="bg-sky-500" />
       <ShipGroup label="Away" ships={away} dot="bg-indigo-500" />
@@ -484,11 +484,11 @@ function ColoniesTab({ data }: { data: PanelData }) {
   const maxStock = Math.max(...data.colonies.map((c) => c.stockpileTotal), 1);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 animate-fade-in-up stagger-children">
       {data.colonies.map((col) => {
         const fillPct = Math.round((col.stockpileTotal / maxStock) * 100);
         return (
-          <div key={col.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 space-y-2">
+          <div key={col.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 space-y-2 card-interactive animate-fade-in-up">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-amber-400 truncate">{col.systemName}</p>
