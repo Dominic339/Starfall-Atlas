@@ -33,75 +33,42 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Fetch listing ─────────────────────────────────────────────────────────
-  const { data: listing } = maybeSingleResult<{
-    id: string;
-    seller_id: string;
-    resource_type: string;
-    quantity: number;
-    quantity_filled: number;
-    status: string;
-  }>(
-    await admin
-      .from("market_listings")
-      .select("id, seller_id, resource_type, quantity, quantity_filled, status")
-      .eq("id", listingId)
-      .maybeSingle(),
-  );
+  // ── Fetch listing + station in parallel ──────────────────────────────────
+  const [listingRes, stationRes] = await Promise.all([
+    admin.from("market_listings").select("id, seller_id, resource_type, quantity, quantity_filled, status").eq("id", listingId).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
-  if (!listing) {
-    return toErrorResponse(fail("not_found", "Listing not found.").error);
-  }
-  if (listing.seller_id !== player.id) {
-    return toErrorResponse(fail("forbidden", "You can only cancel your own listings.").error);
-  }
+  const { data: listing } = maybeSingleResult<{
+    id: string; seller_id: string; resource_type: string; quantity: number; quantity_filled: number; status: string;
+  }>(listingRes);
+  if (!listing) return toErrorResponse(fail("not_found", "Listing not found.").error);
+  if (listing.seller_id !== player.id) return toErrorResponse(fail("forbidden", "You can only cancel your own listings.").error);
   if (listing.status !== "open" && listing.status !== "partially_filled") {
     return toErrorResponse(fail("invalid_target", "This listing cannot be cancelled.").error);
   }
 
-  const toReturn = listing.quantity - listing.quantity_filled;
+  const { data: station } = maybeSingleResult<{ id: string }>(stationRes);
+  if (!station) return toErrorResponse(fail("not_found", "Station not found.").error);
 
-  // ── Fetch seller's station ────────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-  if (!station) {
-    return toErrorResponse(fail("not_found", "Station not found.").error);
-  }
+  const toReturn = listing.quantity - listing.quantity_filled;
 
   // ── Return resources to station ───────────────────────────────────────────
   if (toReturn > 0) {
-    const { data: invRow } = maybeSingleResult<{ quantity: number }>(
-      await admin
-        .from("resource_inventory")
-        .select("quantity")
-        .eq("location_type", "station")
-        .eq("location_id", station.id)
-        .eq("resource_type", listing.resource_type)
-        .maybeSingle(),
+    // Fetch existing inv + cancel listing in parallel
+    const [invRes] = await Promise.all([
+      admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", listing.resource_type).maybeSingle(),
+      admin.from("market_listings").update({ status: "cancelled" }).eq("id", listingId),
+    ]);
+    const { data: invRow } = maybeSingleResult<{ quantity: number }>(invRes);
+    await admin.from("resource_inventory").upsert(
+      { location_type: "station", location_id: station.id, resource_type: listing.resource_type, quantity: (invRow?.quantity ?? 0) + toReturn },
+      { onConflict: "location_type,location_id,resource_type" },
     );
-    await admin
-      .from("resource_inventory")
-      .upsert(
-        {
-          location_type: "station",
-          location_id:   station.id,
-          resource_type: listing.resource_type,
-          quantity:      (invRow?.quantity ?? 0) + toReturn,
-        },
-        { onConflict: "location_type,location_id,resource_type" },
-      );
+  } else {
+    // ── Mark listing as cancelled ───────────────────────────────────────────
+    await admin.from("market_listings").update({ status: "cancelled" }).eq("id", listingId);
   }
-
-  // ── Mark listing as cancelled ─────────────────────────────────────────────
-  await admin
-    .from("market_listings")
-    .update({ status: "cancelled" })
-    .eq("id", listingId);
 
   return Response.json({
     ok: true,

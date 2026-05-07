@@ -26,12 +26,12 @@ export async function GET() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const { data: events } = listResult<Record<string, unknown>>(
-    await admin.from("live_events").select("*").order("starts_at", { ascending: false }),
-  );
-  const { data: nodes } = listResult<{ id: string; event_id: string; resource_type: string; remaining_amount: number; status: string }>(
-    await admin.from("live_event_nodes").select("id, event_id, resource_type, remaining_amount, status"),
-  );
+  const [eventsRes, nodesRes] = await Promise.all([
+    admin.from("live_events").select("*").order("starts_at", { ascending: false }),
+    admin.from("live_event_nodes").select("id, event_id, resource_type, remaining_amount, status"),
+  ]);
+  const { data: events } = listResult<Record<string, unknown>>(eventsRes);
+  const { data: nodes }  = listResult<{ id: string; event_id: string; resource_type: string; remaining_amount: number; status: string }>(nodesRes);
 
   const nodesByEvent = new Map<string, typeof nodes>();
   for (const n of nodes ?? []) {

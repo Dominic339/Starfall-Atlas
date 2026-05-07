@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,5 +237,63 @@ export function DisbandFleetButton({ fleetId }: DisbandFleetButtonProps) {
         {state === "loading" ? "Disbanding…" : "Disband"}
       </button>
     </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// RenameFleetButton
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function RenameFleetButton({ fleetId, currentName }: { fleetId: string; currentName: string }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(currentName);
+  const [loading, setLoading] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  async function submit() {
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === currentName) { setEditing(false); return; }
+    setLoading(true);
+    try {
+      const res = await fetch("/api/game/fleet/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fleetId, name: trimmed }),
+      });
+      const json = await res.json();
+      if (json.ok) { router.refresh(); setEditing(false); }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        autoFocus
+        value={value}
+        maxLength={32}
+        disabled={loading}
+        onChange={(e) => setValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") submit();
+          if (e.key === "Escape") { setEditing(false); setValue(currentName); }
+        }}
+        onBlur={submit}
+        className="rounded border border-zinc-600 bg-zinc-900 px-2 py-0.5 text-sm font-semibold text-zinc-200 focus:outline-none focus:border-indigo-500 w-40"
+      />
+    );
+  }
+
+  return (
+    <button
+      onClick={() => setEditing(true)}
+      className="text-zinc-600 hover:text-zinc-400 transition-colors text-xs px-1"
+      title="Rename fleet"
+    >
+      ✎
+    </button>
   );
 }

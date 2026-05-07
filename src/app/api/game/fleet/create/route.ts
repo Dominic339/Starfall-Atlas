@@ -44,29 +44,24 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  // ── Fetch ships ───────────────────────────────────────────────────────────
-  const { data: ships } = listResult<Ship>(
-    await admin
-      .from("ships")
-      .select("id, owner_id, current_system_id, current_body_id, dispatch_mode")
-      .in("id", shipIds),
-  );
+  // ── Fetch ships + existing fleet memberships + fleet count (parallel) ──────
+  const [shipsRes, existingFleetRes, fleetCountRes] = await Promise.all([
+    admin.from("ships").select("id, owner_id, current_system_id, current_body_id, dispatch_mode").in("id", shipIds),
+    admin.from("fleet_ships").select("ship_id, fleet_id").in("ship_id", shipIds),
+    admin.from("fleets").select("id", { count: "exact", head: true }).eq("player_id", player.id),
+  ]);
 
-  const foundShips = ships ?? [];
+  const foundShips = listResult<Ship>(shipsRes).data ?? [];
 
   // Verify all requested ships were found
   if (foundShips.length !== shipIds.length) {
-    return toErrorResponse(
-      fail("not_found", "One or more ships were not found.").error,
-    );
+    return toErrorResponse(fail("not_found", "One or more ships were not found.").error);
   }
 
   // Verify ownership
   const unowned = foundShips.find((s) => s.owner_id !== player.id);
   if (unowned) {
-    return toErrorResponse(
-      fail("forbidden", "You do not own all the specified ships.").error,
-    );
+    return toErrorResponse(fail("forbidden", "You do not own all the specified ships.").error);
   }
 
   // Verify all docked (not in transit)
@@ -80,32 +75,20 @@ export async function POST(request: NextRequest) {
   // Verify co-location (all in same system)
   const systems = new Set(foundShips.map((s) => s.current_system_id!));
   if (systems.size > 1) {
-    return toErrorResponse(
-      fail("invalid_target", "All ships must be in the same system to form a fleet.").error,
-    );
+    return toErrorResponse(fail("invalid_target", "All ships must be in the same system to form a fleet.").error);
   }
   const systemId = [...systems][0]!;
 
   // Verify no ship is already in an active fleet
-  const { data: existingRows } = listResult<FleetShip>(
-    await admin
-      .from("fleet_ships")
-      .select("ship_id, fleet_id")
-      .in("ship_id", shipIds),
-  );
-
-  if ((existingRows ?? []).length > 0) {
+  const existingRows = listResult<FleetShip>(existingFleetRes).data ?? [];
+  if (existingRows.length > 0) {
     return toErrorResponse(
       fail("invalid_target", "One or more ships are already members of an active fleet.").error,
     );
   }
 
   // ── Determine fleet name ──────────────────────────────────────────────────
-  const { count: fleetCount } = await admin
-    .from("fleets")
-    .select("id", { count: "exact", head: true })
-    .eq("player_id", player.id);
-  const fleetName = `Fleet ${(fleetCount ?? 0) + 1}`;
+  const fleetName = `Fleet ${((fleetCountRes as { count: number | null }).count ?? 0) + 1}`;
 
   // ── Create fleet ──────────────────────────────────────────────────────────
   const { data: fleet } = maybeSingleResult<Fleet>(

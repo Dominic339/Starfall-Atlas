@@ -73,14 +73,15 @@ export async function runEngineTick(
   // ── 0. Inactivity resolution (lazy, before activity timestamp update) ────────
   await resolvePlayerInactivity(admin, playerId, requestTime).catch(() => undefined);
 
-  // ── 1. Fetch colonies ──────────────────────────────────────────────────────
-  const { data: rawColonies } = await admin
-    .from("colonies")
-    .select("*")
-    .eq("owner_id", playerId)
-    .eq("status", "active");
+  // ── 1+2. Fetch colonies + station in parallel ─────────────────────────────
+  const [coloniesRes, stationRes] = await Promise.all([
+    admin.from("colonies").select("*").eq("owner_id", playerId).eq("status", "active"),
+    admin.from("player_stations").select("id").eq("owner_id", playerId).maybeSingle(),
+  ]);
 
-  const colonies: Colony[] = rawColonies ?? [];
+  const colonies: Colony[] = coloniesRes?.data ?? [];
+  const stationId: string | null = (stationRes?.data as { id: string } | null)?.id ?? null;
+
   if (colonies.length === 0) {
     // Still run sol stipend and touch activity for players with no active colonies.
     const { creditsCollected, stipendGranted } = await applyCreditsTick(
@@ -93,93 +94,59 @@ export async function runEngineTick(
     };
   }
 
-  // ── 2. Fetch station ───────────────────────────────────────────────────────
-  const { data: stationRow } = await admin
-    .from("player_stations")
-    .select("id")
-    .eq("owner_id", playerId)
-    .maybeSingle();
+  const colonyIds = colonies.map((c) => c.id);
+  const bodyIds   = colonies.map((c) => c.body_id);
 
-  const stationId: string | null = stationRow?.id ?? null;
+  // ── 3–5.6. Fetch station resources + structures + research + surveys + stewardship ──
+  type StewardRow = { body_id: string; steward_id: string };
+  type PermitRow  = { body_id: string; steward_id: string; tax_rate_pct: number };
 
-  // ── 3. Fetch station resources (iron, food, biomass, water) ────────────────
+  const [invRowsRes, structureRowsRes, researchRowsRes, surveyRowsRes, stewardshipRowsRes] = await Promise.all([
+    stationId
+      ? admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", stationId).in("resource_type", ["iron", "food", "biomass", "water"])
+      : Promise.resolve({ data: null }),
+    admin.from("structures").select("id, colony_id, type, tier, is_active").in("colony_id", colonyIds).eq("is_active", true),
+    admin.from("player_research").select("research_id").eq("player_id", playerId),
+    admin.from("survey_results").select("body_id, resource_nodes").in("body_id", bodyIds),
+    admin.from("body_stewardship").select("body_id, steward_id").in("body_id", bodyIds),
+  ]);
+
+  // ── Process batch results ──────────────────────────────────────────────────
   let stationIron = 0;
   let stationFood = 0;
   let stationBiomass = 0;
   let stationWater = 0;
-
-  if (stationId) {
-    const { data: invRows } = await admin
-      .from("resource_inventory")
-      .select("resource_type, quantity")
-      .eq("location_type", "station")
-      .eq("location_id", stationId)
-      .in("resource_type", ["iron", "food", "biomass", "water"]);
-
-    for (const row of (invRows ?? []) as { resource_type: string; quantity: number }[]) {
-      if (row.resource_type === "iron")    stationIron    = row.quantity;
-      if (row.resource_type === "food")    stationFood    = row.quantity;
-      if (row.resource_type === "biomass") stationBiomass = row.quantity;
-      if (row.resource_type === "water")   stationWater   = row.quantity;
-    }
+  for (const row of ((invRowsRes?.data ?? []) as { resource_type: string; quantity: number }[])) {
+    if (row.resource_type === "iron")    stationIron    = row.quantity;
+    if (row.resource_type === "food")    stationFood    = row.quantity;
+    if (row.resource_type === "biomass") stationBiomass = row.quantity;
+    if (row.resource_type === "water")   stationWater   = row.quantity;
   }
 
-  // ── 4. Fetch active structures per colony ──────────────────────────────────
-  const colonyIds = colonies.map((c) => c.id);
-  const { data: structureRows } = await admin
-    .from("structures")
-    .select("id, colony_id, type, tier, is_active")
-    .in("colony_id", colonyIds)
-    .eq("is_active", true);
-
   const structuresByColonyId = new Map<string, Pick<Structure, "id" | "colony_id" | "type" | "tier" | "is_active">[]>();
-  for (const row of (structureRows ?? []) as Pick<Structure, "id" | "colony_id" | "type" | "tier" | "is_active">[]) {
+  for (const row of ((structureRowsRes?.data ?? []) as Pick<Structure, "id" | "colony_id" | "type" | "tier" | "is_active">[])) {
     const list = structuresByColonyId.get(row.colony_id) ?? [];
     list.push(row);
     structuresByColonyId.set(row.colony_id, list);
   }
 
-  // ── 5. Fetch player research ───────────────────────────────────────────────
-  const { data: researchRows } = await admin
-    .from("player_research")
-    .select("research_id")
-    .eq("player_id", playerId);
-
   const unlockedResearchIds = new Set(
-    ((researchRows ?? []) as { research_id: string }[]).map((r) => r.research_id),
+    ((researchRowsRes?.data ?? []) as { research_id: string }[]).map((r) => r.research_id),
   );
   const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
   const extractionResearchLvl    = researchLevel(unlockedResearchIds, "extraction");
   const storageResearchLvl       = researchLevel(unlockedResearchIds, "storage");
 
-  // ── 5.5. Batch-fetch survey results for all colony body ids ────────────────
-  const bodyIds = colonies.map((c) => c.body_id);
-  const { data: surveyRows } = await admin
-    .from("survey_results")
-    .select("body_id, resource_nodes")
-    .in("body_id", bodyIds);
-
   const surveyByBodyId = new Map<string, { resource_nodes: ResourceNodeRecord[] }>();
-  for (const row of (surveyRows ?? []) as { body_id: string; resource_nodes: ResourceNodeRecord[] }[]) {
+  for (const row of ((surveyRowsRes?.data ?? []) as { body_id: string; resource_nodes: ResourceNodeRecord[] }[])) {
     surveyByBodyId.set(row.body_id, row);
   }
 
-  // ── 5.6. Fetch stewardship and permits for permit tax enforcement ──────────
-  // For colonies where another player is the steward, check if this player
-  // has an active permit and what tax rate applies.
-  type StewardRow = { body_id: string; steward_id: string };
-  type PermitRow  = { body_id: string; steward_id: string; tax_rate_pct: number };
-
-  const { data: stewardshipRows } = await admin
-    .from("body_stewardship")
-    .select("body_id, steward_id")
-    .in("body_id", bodyIds);
-
   const stewardByBodyId = new Map<string, string>(
-    ((stewardshipRows ?? []) as StewardRow[]).map((r) => [r.body_id, r.steward_id]),
+    ((stewardshipRowsRes?.data ?? []) as StewardRow[]).map((r) => [r.body_id, r.steward_id]),
   );
 
-  // Colonies where someone else is the steward (this player is a grantee)
+  // ── Permits (conditional, depends on stewardship results) ─────────────────
   const permittedBodyIds = colonies
     .filter((c) => {
       const stewardId = stewardByBodyId.get(c.body_id);
@@ -255,9 +222,14 @@ export async function runEngineTick(
   }
 
   // ── 7. Upkeep resolution ───────────────────────────────────────────────────
+  // Resource allocation is sequential (shared station food/iron); DB writes
+  // are independent per-colony and fired in parallel after all allocation.
   let totalIronConsumed = 0;
   let totalFoodConsumed = 0;
   let totalPeriodsResolved = 0;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const upkeepWrites: Array<Promise<any>> = [];
 
   for (let ci = 0; ci < resolvedColonies.length; ci++) {
     const colony = resolvedColonies[ci];
@@ -300,22 +272,22 @@ export async function runEngineTick(
       upkeepPatch.next_growth_at = result.newNextGrowthAt;
     }
 
-    await admin.from("colonies").update(upkeepPatch).eq("id", colony.id);
+    upkeepWrites.push(admin.from("colonies").update(upkeepPatch).eq("id", colony.id));
     totalPeriodsResolved += periods;
   }
 
+  if (upkeepWrites.length > 0) await Promise.all(upkeepWrites);
+
   // ── 8. Persist station resource changes ───────────────────────────────────
   if (stationId) {
-    if (totalFoodConsumed > 0 || totalBiomassConverted > 0) {
-      await persistStationResource(admin, stationId, "food", stationFood);
-    }
-    if (totalIronConsumed > 0) {
-      await persistStationResource(admin, stationId, "iron", stationIron);
-    }
+    const resourceWrites: Promise<unknown>[] = [];
+    if (totalFoodConsumed > 0 || totalBiomassConverted > 0) resourceWrites.push(persistStationResource(admin, stationId, "food",    stationFood));
+    if (totalIronConsumed > 0)                               resourceWrites.push(persistStationResource(admin, stationId, "iron",    stationIron));
     if (totalBiomassConverted > 0) {
-      await persistStationResource(admin, stationId, "biomass", stationBiomass);
-      await persistStationResource(admin, stationId, "water",   stationWater);
+      resourceWrites.push(persistStationResource(admin, stationId, "biomass", stationBiomass));
+      resourceWrites.push(persistStationResource(admin, stationId, "water",   stationWater));
     }
+    if (resourceWrites.length > 0) await Promise.all(resourceWrites);
   }
 
   // ── 8.5. Passive extraction — materialise colony inventory ─────────────────
@@ -345,19 +317,14 @@ export async function runEngineTick(
 
     if (amounts.length === 0) continue;
 
-    // Reset last_extract_at first (safer: lose resources rather than double-extract).
-    await admin
-      .from("colonies")
-      .update({ last_extract_at: requestTime.toISOString() })
-      .eq("id", colony.id);
+    // Timer reset and inventory read are independent; fire in parallel.
+    // (Timer conceptually first for safety, but the read doesn't depend on it.)
+    const [, invRes] = await Promise.all([
+      admin.from("colonies").update({ last_extract_at: requestTime.toISOString() }).eq("id", colony.id),
+      admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "colony").eq("location_id", colony.id),
+    ]);
 
-    const { data: existingRows } = await admin
-      .from("resource_inventory")
-      .select("resource_type, quantity")
-      .eq("location_type", "colony")
-      .eq("location_id", colony.id);
-
-    const allExisting = ((existingRows ?? []) as { resource_type: string; quantity: number }[]);
+    const allExisting = ((invRes.data ?? []) as { resource_type: string; quantity: number }[]);
     const existing    = new Map(allExisting.map((r) => [r.resource_type, r.quantity]));
 
     const warehouseTier = getStructureTier(colonyStructures, "warehouse");

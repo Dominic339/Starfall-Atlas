@@ -57,28 +57,19 @@ export async function resolvePlayerInactivity(admin: any, playerId: string, now:
       // abandoned_at is retrospective: when they actually crossed the threshold
       const abandonedAt = new Date(lastActive.getTime() + THRESHOLD_MS).toISOString();
       const ids = active.map((c) => c.id);
-
-      await admin
-        .from("colonies")
-        .update({ status: "abandoned", abandoned_at: abandonedAt })
-        .in("id", ids);
-
-      // Deactivate all structures in these colonies
-      await admin
-        .from("structures")
-        .update({ is_active: false })
-        .in("colony_id", ids);
-
-      // Log world events
-      await admin.from("world_events").insert(
-        active.map((c) => ({
-          event_type: "colony_abandoned",
-          player_id:  playerId,
-          system_id:  c.system_id,
-          body_id:    null,
-          metadata:   { colony_id: c.id, population_tier: c.population_tier },
-        })),
-      );
+      await Promise.all([
+        admin.from("colonies").update({ status: "abandoned", abandoned_at: abandonedAt }).in("id", ids),
+        admin.from("structures").update({ is_active: false }).in("colony_id", ids),
+        admin.from("world_events").insert(
+          active.map((c) => ({
+            event_type: "colony_abandoned",
+            player_id:  playerId,
+            system_id:  c.system_id,
+            body_id:    null,
+            metadata:   { colony_id: c.id, population_tier: c.population_tier },
+          })),
+        ),
+      ]);
     }
   }
 
@@ -107,54 +98,37 @@ export async function resolvePlayerInactivity(admin: any, playerId: string, now:
   // ── Collapse ─────────────────────────────────────────────────────────────
   if (toCollapse.length > 0) {
     const collapseIds = toCollapse.map((c) => c.id);
-
-    await admin
-      .from("colonies")
-      .update({ status: "collapsed", collapsed_at: now.toISOString() })
-      .in("id", collapseIds);
-
-    // Clear colony resource inventory (inventory is lost on collapse)
-    await admin
-      .from("resource_inventory")
-      .delete()
-      .eq("location_type", "colony")
-      .in("location_id", collapseIds);
-
-    await admin.from("world_events").insert(
-      toCollapse.map((c) => ({
-        event_type: "colony_collapsed",
-        player_id:  playerId,
-        system_id:  c.system_id,
-        body_id:    null,
-        metadata:   { colony_id: c.id },
-      })),
-    );
+    await Promise.all([
+      admin.from("colonies").update({ status: "collapsed", collapsed_at: now.toISOString() }).in("id", collapseIds),
+      admin.from("resource_inventory").delete().eq("location_type", "colony").in("location_id", collapseIds),
+      admin.from("world_events").insert(
+        toCollapse.map((c) => ({
+          event_type: "colony_collapsed",
+          player_id:  playerId,
+          system_id:  c.system_id,
+          body_id:    null,
+          metadata:   { colony_id: c.id },
+        })),
+      ),
+    ]);
   }
 
   // ── Reactivate (player is back within the window) ─────────────────────────
   if (toReactivate.length > 0) {
     const reactivateIds = toReactivate.map((c) => c.id);
-
-    await admin
-      .from("colonies")
-      .update({ status: "active", abandoned_at: null })
-      .in("id", reactivateIds);
-
-    // Re-enable structures
-    await admin
-      .from("structures")
-      .update({ is_active: true })
-      .in("colony_id", reactivateIds);
-
-    await admin.from("world_events").insert(
-      toReactivate.map((c) => ({
-        event_type: "colony_reactivated",
-        player_id:  playerId,
-        system_id:  c.system_id,
-        body_id:    null,
-        metadata:   { colony_id: c.id },
-      })),
-    );
+    await Promise.all([
+      admin.from("colonies").update({ status: "active", abandoned_at: null }).in("id", reactivateIds),
+      admin.from("structures").update({ is_active: true }).in("colony_id", reactivateIds),
+      admin.from("world_events").insert(
+        toReactivate.map((c) => ({
+          event_type: "colony_reactivated",
+          player_id:  playerId,
+          system_id:  c.system_id,
+          body_id:    null,
+          metadata:   { colony_id: c.id },
+        })),
+      ),
+    ]);
   }
 
   // ── Refresh influence caches for all affected systems ─────────────────────

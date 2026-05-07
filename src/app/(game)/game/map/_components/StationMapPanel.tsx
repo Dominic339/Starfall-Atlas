@@ -92,7 +92,7 @@ function eta(iso: string): string {
 function ResourceCard({ item }: { item: InventoryItem }) {
   const r = item.resource;
   return (
-    <div className={`relative flex flex-col gap-1 rounded-lg border px-3 py-2.5 overflow-hidden ${resBg(r)} ${resBorder(r)}`}>
+    <div className={`relative flex flex-col gap-1 rounded-lg border px-3 py-2.5 overflow-hidden card-interactive animate-fade-in-up ${resBg(r)} ${resBorder(r)}`}>
       <div className={`absolute left-0 top-0 bottom-0 w-0.5 ${resColor(r).replace("text-", "bg-")}`} />
       <span className={`text-[10px] font-bold uppercase tracking-widest ${resColor(r)}`}>{resLabel(r)}</span>
       <span className="font-mono text-lg font-bold text-zinc-100 tabular-nums leading-none">
@@ -160,7 +160,7 @@ function StoresTab({
     <div className="space-y-5">
 
       {/* Credits hero */}
-      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4">
+      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700/80">Credits</p>
           <p className="mt-0.5 font-mono text-2xl font-bold text-amber-300 tabular-nums">
@@ -181,7 +181,7 @@ function StoresTab({
       {data.inventory.length > 0 ? (
         <div>
           <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Inventory</p>
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 stagger-children">
             {data.inventory.map((item) => <ResourceCard key={item.resource} item={item} />)}
           </div>
         </div>
@@ -748,7 +748,7 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.7)" }}
     >
-      <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl shadow-black/60 overflow-hidden">
+      <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl shadow-black/60 overflow-hidden animate-fade-in-up">
 
         {/* Header */}
         <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5">

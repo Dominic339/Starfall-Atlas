@@ -65,18 +65,13 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("already_exists", "This warp tunnel has already been used.").error);
   }
 
-  // ── Determine player's current system ─────────────────────────────────────
-  const { data: shipRow } = maybeSingleResult<Pick<Ship, "current_system_id">>(
-    await admin
-      .from("ships")
-      .select("current_system_id")
-      .eq("owner_id", player.id)
-      .not("current_system_id", "is", null)
-      .maybeSingle(),
-  );
-  const { data: stationRow } = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
-    await admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
-  );
+  // ── Determine player's current system (ship + station in parallel) ────────
+  const [shipRes, stationRes] = await Promise.all([
+    admin.from("ships").select("current_system_id").eq("owner_id", player.id).not("current_system_id", "is", null).maybeSingle(),
+    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
+  ]);
+  const { data: shipRow }    = maybeSingleResult<Pick<Ship, "current_system_id">>(shipRes);
+  const { data: stationRow } = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
   const fromSystemId = shipRow?.current_system_id ?? stationRow?.current_system_id ?? null;
   if (!fromSystemId) {
     return toErrorResponse(fail("invalid_target", "No ship or station is present in a system.").error);
@@ -88,28 +83,15 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("forbidden", "Warp tunnels cannot originate from Sol.").error);
   }
 
-  // ── Target must be discovered ──────────────────────────────────────────────
-  const { data: discovery } = maybeSingleResult<SystemDiscovery>(
-    await admin
-      .from("system_discoveries")
-      .select("id")
-      .eq("system_id", toSystemId)
-      .limit(1)
-      .maybeSingle(),
-  );
-  if (!discovery) {
+  // ── Discovery + existing-lane check (parallel) ───────────────────────────
+  const [discRes, existingRes] = await Promise.all([
+    admin.from("system_discoveries").select("id").eq("system_id", toSystemId).limit(1).maybeSingle(),
+    admin.from("hyperspace_lanes").select("id").eq("from_system_id", fromSystemId).eq("to_system_id", toSystemId).eq("is_active", true).maybeSingle(),
+  ]);
+  if (!maybeSingleResult<SystemDiscovery>(discRes).data) {
     return toErrorResponse(fail("invalid_target", "The target system has not yet been discovered.").error);
   }
-
-  // ── No existing active lane in this direction ─────────────────────────────
-  const { data: existing } = await admin
-    .from("hyperspace_lanes")
-    .select("id, is_active")
-    .eq("from_system_id", fromSystemId)
-    .eq("to_system_id", toSystemId)
-    .eq("is_active", true)
-    .maybeSingle();
-  if (existing) {
+  if (maybeSingleResult<{ id: string }>(existingRes).data) {
     return toErrorResponse(fail("already_exists", "An active lane already exists from your system to that destination.").error);
   }
 

@@ -17,7 +17,7 @@ import { systemDisplayName } from "@/lib/catalog";
 import { getNearbySystems } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player, Fleet, Ship, TravelJob } from "@/lib/types/game";
-import { DisbandFleetButton, DispatchFleetForm } from "../../_components/FleetActions";
+import { DisbandFleetButton, DispatchFleetForm, RenameFleetButton } from "../../_components/FleetActions";
 
 export const dynamic = "force-dynamic";
 
@@ -101,7 +101,10 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
       {/* Header */}
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold text-zinc-100">{fleet.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-zinc-100">{fleet.name}</h1>
+            <RenameFleetButton fleetId={fleet.id} currentName={fleet.name} />
+          </div>
           <p className="mt-0.5 text-sm text-zinc-500">
             {fleet.status === "traveling" ? (
               <>
@@ -155,7 +158,7 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
 
       {/* Status card */}
       <section>
-        <div className={`rounded-lg border px-4 py-3 ${
+        <div className={`rounded-lg border px-4 py-3 card-interactive animate-fade-in-up ${
           fleet.status === "traveling"
             ? "border-indigo-800 bg-zinc-900"
             : "border-zinc-700 bg-zinc-900"
@@ -189,11 +192,11 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
           Member Ships ({memberShips.length})
         </h2>
         {memberShips.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {memberShips.map((ship) => (
               <div
                 key={ship.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div>
@@ -226,7 +229,7 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Dispatch Fleet
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 animate-fade-in-up">
             <DispatchFleetForm
               fleetId={fleet.id}
               nearbySystems={nearbySystems}
@@ -241,7 +244,7 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             In Transit
           </h2>
-          <div className="rounded-lg border border-indigo-900/60 bg-zinc-900 px-4 py-3">
+          <div className="rounded-lg border border-indigo-900/60 bg-zinc-900 px-4 py-3 animate-fade-in-up">
             <div className="flex items-center justify-between gap-4">
               <div>
                 <p className="text-sm text-zinc-300">

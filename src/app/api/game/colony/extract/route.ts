@@ -96,16 +96,14 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch survey result ───────────────────────────────────────────────────
-  const { data: survey } = maybeSingleResult<
-    Pick<SurveyResult, "resource_nodes">
-  >(
-    await admin
-      .from("survey_results")
-      .select("resource_nodes")
-      .eq("body_id", colony.body_id)
-      .maybeSingle(),
-  );
+  // ── Fetch survey + structures + research in parallel ─────────────────────
+  const [surveyRes, structuresRes, researchRes] = await Promise.all([
+    admin.from("survey_results").select("resource_nodes").eq("body_id", colony.body_id).maybeSingle(),
+    admin.from("structures").select("type, tier, is_active").eq("colony_id", colonyId).eq("is_active", true),
+    admin.from("player_research").select("research_id").eq("player_id", player.id),
+  ]);
+
+  const { data: survey } = maybeSingleResult<Pick<SurveyResult, "resource_nodes">>(surveyRes);
 
   if (!survey || survey.resource_nodes.length === 0) {
     return toErrorResponse(
@@ -115,19 +113,6 @@ export async function POST(request: NextRequest) {
       ).error,
     );
   }
-
-  // ── Fetch colony structures and player research for extraction bonus ────────
-  const [structuresRes, researchRes] = await Promise.all([
-    admin
-      .from("structures")
-      .select("type, tier, is_active")
-      .eq("colony_id", colonyId)
-      .eq("is_active", true),
-    admin
-      .from("player_research")
-      .select("research_id")
-      .eq("player_id", player.id),
-  ]);
 
   type StructureRow = Pick<Structure, "type" | "tier" | "is_active">;
   const colonyStructures = ((structuresRes.data ?? []) as StructureRow[]);
@@ -166,25 +151,16 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // ── Reset extraction timer FIRST (safer: lose resources > double-extract) ─
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
-    .from("colonies")
-    .update({ last_extract_at: now.toISOString() })
-    .eq("id", colonyId);
-
-  // ── Fetch current colony inventory for the extracted resource types ────────
+  // ── Reset timer + fetch current inventory in parallel ────────────────────
+  // Timer resets first in intent (safer: lose resources > double-extract) but
+  // the inventory read is independent of the timer write, so both can fire at once.
   const resourceTypes = extracted.map((e) => e.resource_type);
-  const { data: existingRows } = listResult<
-    Pick<ResourceInventoryRow, "resource_type" | "quantity">
-  >(
-    await admin
-      .from("resource_inventory")
-      .select("resource_type, quantity")
-      .eq("location_type", "colony")
-      .eq("location_id", colonyId)
-      .in("resource_type", resourceTypes),
-  );
+  const [, inventoryRes] = await Promise.all([
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin as any).from("colonies").update({ last_extract_at: now.toISOString() }).eq("id", colonyId),
+    admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "colony").eq("location_id", colonyId).in("resource_type", resourceTypes),
+  ]);
+  const { data: existingRows } = listResult<Pick<ResourceInventoryRow, "resource_type" | "quantity">>(inventoryRes);
 
   const existing = new Map(
     (existingRows ?? []).map((r) => [r.resource_type, r.quantity]),

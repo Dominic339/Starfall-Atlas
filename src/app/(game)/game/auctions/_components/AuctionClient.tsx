@@ -51,6 +51,14 @@ function formatTimeLeft(endsAt: string): string {
   return `${mins}m`;
 }
 
+function timeLeftColor(endsAt: string): string {
+  const ms = new Date(endsAt).getTime() - Date.now();
+  if (ms <= 0) return "text-zinc-600";
+  if (ms < 2 * 3_600_000)  return "text-red-400";
+  if (ms < 12 * 3_600_000) return "text-amber-400";
+  return "text-emerald-400";
+}
+
 // ---------------------------------------------------------------------------
 // Bid form (per auction)
 // ---------------------------------------------------------------------------
@@ -364,7 +372,7 @@ function AuctionCard({
   const hasBids      = auction.currentHighBid > 0;
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 space-y-2">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-4 py-3 space-y-2 card-interactive animate-fade-in-up">
       {/* Header row */}
       <div className="flex items-start justify-between gap-3">
         <div>
@@ -381,7 +389,7 @@ function AuctionCard({
         </div>
         <div className="text-right shrink-0">
           <p className="text-xs text-zinc-600">Ends in</p>
-          <p className="text-sm font-mono text-amber-400">{formatTimeLeft(auction.endsAt)}</p>
+          <p className={`text-sm font-mono tabular-nums ${timeLeftColor(auction.endsAt)}`}>{formatTimeLeft(auction.endsAt)}</p>
         </div>
       </div>
 
@@ -455,7 +463,7 @@ export default function AuctionClient({
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             Your Auctions
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {myAuctions.map((a) => (
               <AuctionCard key={a.id} auction={a} playerId={playerId} playerCredits={playerCredits} />
             ))}
@@ -469,7 +477,7 @@ export default function AuctionClient({
           <h2 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-600">
             Open Auctions
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {otherAuctions.map((a) => (
               <AuctionCard key={a.id} auction={a} playerId={playerId} playerCredits={playerCredits} />
             ))}
@@ -477,7 +485,13 @@ export default function AuctionClient({
         </section>
       ) : (
         auctions.length === 0 && (
-          <p className="text-sm text-zinc-700">No active auctions right now.</p>
+          <div className="flex flex-col items-center gap-2 py-10 text-center border border-dashed border-zinc-800 rounded-lg">
+            <svg className="w-8 h-8 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v12m-3-2.818.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+            </svg>
+            <p className="text-sm text-zinc-600">No active auctions right now.</p>
+            <p className="text-xs text-zinc-700">Be the first to put a colony or stewardship up for sale.</p>
+          </div>
         )
       )}
     </div>

@@ -243,7 +243,7 @@ function PlanetPanel({
   const label    = bodyLabel(body.type);
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex flex-col h-full overflow-y-auto animate-fade-in-up">
       {/* Header */}
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
         <div className="flex items-center gap-2">
@@ -490,7 +490,7 @@ function ShipPanel({
   const assign = useApiAction();
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto">
+    <div className="flex flex-col h-full overflow-y-auto animate-fade-in-up">
       <div className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
         <div className="flex items-center gap-2">
           <span className="h-2 w-2 rounded-full bg-indigo-400 shrink-0" />
@@ -679,7 +679,7 @@ function SystemOverviewPanel({
   // Map bodyIndex → other-colony info for quick lookup
   const otherColonyByIdx = new Map(otherColonies.map(c => [c.bodyIndex, c]));
   return (
-    <div className="flex flex-col overflow-y-auto h-full">
+    <div className="flex flex-col overflow-y-auto h-full animate-fade-in-up">
       {/* System header */}
       <div className="border-b border-zinc-800 px-4 py-3">
         <div className="flex items-center gap-2">

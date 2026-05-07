@@ -70,11 +70,13 @@ export default async function ColonyPage({
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  // ── Auth + balance in parallel ────────────────────────────────────────────
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // Materialise colony inventory and resolve upkeep so this page always shows
@@ -154,6 +156,11 @@ export default async function ColonyPage({
   let activePermits: (PermitRow & { granteeHandle: string })[] = [];
   let myPermit: PermitRow | null = null;
 
+  // Start station iron fetch concurrently with the stewardship block below
+  const stationIronP = station
+    ? admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", "iron").maybeSingle()
+    : Promise.resolve({ data: null, error: null });
+
   if (stewardship) {
     if (isPlayerSteward) {
       // Steward: fetch all active permits on this body so they can be shown/revoked
@@ -208,18 +215,8 @@ export default async function ColonyPage({
     return { resourceType: rt, pricePerUnit };
   });
 
-  // Get station iron for "can afford" check
-  let stationIron = 0;
-  if (station) {
-    const { data: stationInv } = await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", "iron")
-      .maybeSingle();
-    stationIron = (stationInv as { quantity: number } | null)?.quantity ?? 0;
-  }
+  // Get station iron for "can afford" check (was started concurrently above)
+  const stationIron = ((await stationIronP).data as { quantity: number } | null)?.quantity ?? 0;
 
   // Compute accrued tax
   const now = new Date();
@@ -469,10 +466,10 @@ export default async function ColonyPage({
           </span>
         </div>
         {colonyInventory.length > 0 ? (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 animate-fade-in-up">
+            <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3 stagger-children">
               {colonyInventory.map((row) => (
-                <div key={row.resource_type} className="flex items-center justify-between">
+                <div key={row.resource_type} className="flex items-center justify-between animate-fade-in-up">
                   <span className="text-xs text-zinc-500 capitalize">
                     {row.resource_type.replace(/_/g, " ")}
                   </span>
@@ -494,7 +491,7 @@ export default async function ColonyPage({
             </p>
           </div>
         ) : (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 px-4 py-4 text-center animate-fade-in-up">
             <p className="text-sm text-zinc-600">Stockpile is empty.</p>
             <p className="mt-1 text-xs text-zinc-700">
               Resources accumulate automatically.{" "}
@@ -512,10 +509,10 @@ export default async function ColonyPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Output
           </h2>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
 
             {/* Production rate */}
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up">
               <p className="text-xs text-zinc-600 uppercase tracking-wider">Resource production</p>
               {resourceNodes.length === 0 ? (
                 <p className="mt-1 text-sm text-zinc-600">
@@ -551,7 +548,7 @@ export default async function ColonyPage({
             </div>
 
             {/* Tax */}
-            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+            <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up">
               <p className="text-xs text-zinc-600 uppercase tracking-wider">Tax accrued</p>
               {accrued > 0 ? (
                 <>
@@ -578,7 +575,7 @@ export default async function ColonyPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Ships in System ({shipsAtSystem.length})
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-2 animate-fade-in-up">
             {shipsAtSystem.map((ship) => {
               const isAssigned = ship.pinned_colony_id === colony.id;
               const isAuto = ship.dispatch_mode !== "manual";
@@ -633,7 +630,7 @@ export default async function ColonyPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Upkeep
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 animate-fade-in-up">
             <p className="text-sm text-zinc-400">{upkeepDesc}</p>
             {isHarsh && (
               <p className="mt-1 text-xs text-amber-500">
@@ -655,7 +652,7 @@ export default async function ColonyPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Emergency Supply
           </h2>
-          <div className={`rounded-lg border px-4 py-3 ${
+          <div className={`rounded-lg border px-4 py-3 animate-fade-in-up ${
             health !== "well_supplied"
               ? "border-orange-900/50 bg-orange-950/20"
               : "border-zinc-800 bg-zinc-900/50"
@@ -752,7 +749,7 @@ export default async function ColonyPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Structures
           </h2>
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-4 animate-fade-in-up">
             {buildOptions.map(({ type, currentTier, targetTier, cost, canAfford, atMax }) => {
               const label =
                 type === "warehouse" ? "Warehouse" :

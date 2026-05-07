@@ -85,12 +85,13 @@ export default async function GalaxyMapPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
 
-  // ── Auth ─────────────────────────────────────────────────────────────────
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  // ── Auth + balance in parallel ────────────────────────────────────────────
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // ── Engine tick + travel resolution ──────────────────────────────────────
@@ -138,6 +139,7 @@ export default async function GalaxyMapPage() {
     gatesRes,
     equippedSkinsRes,
     eventNodesRes,
+    unreadMsgRes,
   ] = await Promise.all([
     // Ships — include dispatch_mode + auto_state so the map panel can show mode context
     admin
@@ -264,6 +266,14 @@ export default async function GalaxyMapPage() {
       .from("live_event_nodes")
       .select("id, event_id, system_id, display_offset_x, display_offset_y, resource_type, total_amount, remaining_amount, status, spawned_at, expires_at")
       .eq("status", "active"),
+
+    // Unread direct message count — for the Comms HUD badge
+    admin
+      .from("player_messages")
+      .select("id", { count: "exact", head: true })
+      .eq("recipient_id", player.id)
+      .is("read_at", null)
+      .eq("deleted_recipient", false),
   ]);
 
   // ── Lazy dispute resolution ───────────────────────────────────────────────
@@ -347,100 +357,80 @@ export default async function GalaxyMapPage() {
     totalColonyBySystem.set(c.system_id, (totalColonyBySystem.get(c.system_id) ?? 0) + 1);
   }
 
-  // ── Resolve handles for body stewards ────────────────────────────────────
-  const bodyStewardPlayerIds = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
-  const bodyStewardHandles   = new Map<string, string>();
-  if (bodyStewardPlayerIds.length > 0) {
-    type HandleRowBS = { id: string; handle: string };
-    const { data: bsHandleRows } = listResult<HandleRowBS>(
-      await admin.from("players").select("id, handle").in("id", bodyStewardPlayerIds),
-    );
-    for (const h of bsHandleRows ?? []) bodyStewardHandles.set(h.id, h.handle);
-  }
+  // ── Collect IDs for all post-batch-1 lookups (all depend only on batch 1 data) ──
+  const bodyStewardPlayerIds  = [...new Set(rawBodyStewrdRows.map((s) => s.steward_id))];
+  const otherStationOwnerIds  = [...new Set(otherStationRows.map((s) => s.owner_id))];
+  const firstDiscovererIds    = [...new Set(firstDiscoveries.map((d) => d.player_id))];
+  const allHandleIds = [...new Set([...bodyStewardPlayerIds, ...otherStationOwnerIds, ...firstDiscovererIds])];
+  const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
+  type CargoRow = { location_id: string; resource_type: string; quantity: number };
+  const inTransitShipIds = travelJobs.map((tj) => tj.ship_id).filter(Boolean);
+  const activeAsteroidIds = new Set(asteroidRows.map((a) => a.id));
+  const asteroidsBeingHarvested = new Set(myHarvests.map((h) => h.asteroid_id));
+  const resolvedAmounts = new Map<string, number>();
+  const asteroidResolutionP = Promise.all(
+    [...asteroidsBeingHarvested]
+      .filter((id) => activeAsteroidIds.has(id))
+      .map(async (asteroidId) => {
+        const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
+        resolvedAmounts.set(asteroidId, newRemaining);
+      }),
+  );
+
+  // ── Batch 2: handles + beacon alliances + ship cargo in parallel ──────────
+  type HandleRow = { id: string; handle: string };
+  type AllianceTagRow = { id: string; name: string; tag: string };
+  const [handleRes, allianceTagRes, cargoRes] = await Promise.all([
+    allHandleIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", allHandleIds)
+      : Promise.resolve({ data: null as HandleRow[] | null, error: null }),
+    beaconAllianceIds.length > 0
+      ? admin.from("alliances").select("id, name, tag").in("id", beaconAllianceIds)
+      : Promise.resolve({ data: null as AllianceTagRow[] | null, error: null }),
+    inTransitShipIds.length > 0
+      ? admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "ship").in("location_id", inTransitShipIds).gt("quantity", 0)
+      : Promise.resolve({ data: null as CargoRow[] | null, error: null }),
+  ]);
+  await asteroidResolutionP;
+
+  const handleMap = new Map<string, string>();
+  const { data: handleRows } = listResult<HandleRow>(handleRes);
+  for (const h of handleRows ?? []) handleMap.set(h.id, h.handle);
+
+  const otherStationHandles = handleMap;
 
   const galaxyBodyStewrds: GalaxyBodySteward[] = rawBodyStewrdRows.map((s) => ({
     bodyId:           s.body_id,
     systemId:         s.system_id,
     stewardId:        s.steward_id,
-    stewardHandle:    bodyStewardHandles.get(s.steward_id) ?? "Unknown",
+    stewardHandle:    handleMap.get(s.steward_id) ?? "Unknown",
     isPlayerSteward:  s.steward_id === player.id,
     defaultTaxRatePct: s.default_tax_rate_pct,
   }));
 
-  // ── Build lane + gate lists for client ────────────────────────────────────
-  const rawLaneRows   = listResult<LaneRow2>(lanesRes).data ?? [];
-  const rawGateRows   = listResult<GateRow2>(gatesRes).data ?? [];
-  const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
-
-  const galaxyLanes: GalaxyLane[] = rawLaneRows
-    .filter((l) => systemSvgMap.has(l.from_system_id) && systemSvgMap.has(l.to_system_id))
-    .map((l) => {
-      const from = systemSvgMap.get(l.from_system_id)!;
-      const to   = systemSvgMap.get(l.to_system_id)!;
-      return {
-        id:           l.id,
-        fromSystemId: l.from_system_id,
-        toSystemId:   l.to_system_id,
-        accessLevel:  l.access_level as "public" | "alliance_only" | "private",
-        isOwner:      l.owner_id === player.id,
-        x1: from.svgX, y1: from.svgY,
-        x2: to.svgX,   y2: to.svgY,
-      };
-    });
-
-  // ── Resolve handles for other players' station owners ─────────────────────
-  const otherStationOwnerIds = [...new Set(otherStationRows.map((s) => s.owner_id))];
-  const otherStationHandles  = new Map<string, string>();
-  if (otherStationOwnerIds.length > 0) {
-    type HandleRow2 = { id: string; handle: string };
-    const { data: stationHandleRows } = listResult<HandleRow2>(
-      await admin.from("players").select("id, handle").in("id", otherStationOwnerIds),
-    );
-    for (const h of stationHandleRows ?? []) otherStationHandles.set(h.id, h.handle);
-  }
-
-  // Fetch discoverer handles for first-discovery systems (so panel can show names)
-  const firstDiscovererIds = [...new Set(firstDiscoveries.map((d) => d.player_id))];
-  type HandleRow = { id: string; handle: string };
-  const discovererHandles = new Map<string, string>();
-  if (firstDiscovererIds.length > 0) {
-    const { data: handleRows } = listResult<HandleRow>(
-      await admin.from("players").select("id, handle").in("id", firstDiscovererIds),
-    );
-    for (const h of handleRows ?? []) discovererHandles.set(h.id, h.handle);
-  }
   // Map: systemId → discoverer handle (null if not first-discovered yet)
   const firstDiscovererBySystem = new Map<string, string>();
   for (const d of firstDiscoveries) {
-    const handle = discovererHandles.get(d.player_id);
+    const handle = handleMap.get(d.player_id);
     if (handle) firstDiscovererBySystem.set(d.system_id, handle);
   }
 
-  // ── Resolve beacon alliance tags ──────────────────────────────────────────
-  const beaconAllianceIds = [...new Set(rawBeaconRows.map((b) => b.alliance_id))];
-  type AllianceTagRow = { id: string; name: string; tag: string };
+  // ── Parse lane + gate rows (SVG coords computed after systemSvgMap below) ──
+  const rawLaneRows       = listResult<LaneRow2>(lanesRes).data ?? [];
+  const rawGateRows       = listResult<GateRow2>(gatesRes).data ?? [];
+  const activeGateSystems = new Set(rawGateRows.map((g) => g.system_id));
+
+  // ── Process batch 2 results ───────────────────────────────────────────────
   const allianceTagMap = new Map<string, { name: string; tag: string }>();
-  if (beaconAllianceIds.length > 0) {
-    const { data: allianceTagRows } = listResult<AllianceTagRow>(
-      await admin.from("alliances").select("id, name, tag").in("id", beaconAllianceIds),
-    );
-    for (const a of allianceTagRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
-  }
+  const { data: allianceTagRows } = listResult<AllianceTagRow>(allianceTagRes);
+  for (const a of allianceTagRows ?? []) allianceTagMap.set(a.id, { name: a.name, tag: a.tag });
 
-  // ── Lazy resolve asteroids that have active harvests ──────────────────────
-  // Find which active asteroids have ANY active harvest (not just this player's)
-  // We only resolve if there are active harvests to process.
-  const activeAsteroidIds = new Set(asteroidRows.map((a) => a.id));
-  const asteroidsBeingHarvested = new Set(myHarvests.map((h) => h.asteroid_id));
-
-  // Resolve all asteroids that have active harvests from this player.
-  // This ensures the map shows up-to-date remaining_amount.
-  const resolvedAmounts = new Map<string, number>();
-  for (const asteroidId of asteroidsBeingHarvested) {
-    if (activeAsteroidIds.has(asteroidId)) {
-      const newRemaining = await resolveAsteroidHarvests(admin, asteroidId);
-      resolvedAmounts.set(asteroidId, newRemaining);
-    }
+  const shipCargoByShipId = new Map<string, { resourceType: string; quantity: number }[]>();
+  const { data: cargoRowsFetched } = listResult<CargoRow>(cargoRes);
+  for (const row of cargoRowsFetched ?? []) {
+    const list = shipCargoByShipId.get(row.location_id) ?? [];
+    list.push({ resourceType: row.resource_type, quantity: row.quantity });
+    shipCargoByShipId.set(row.location_id, list);
   }
 
   // ── Build lookup sets ─────────────────────────────────────────────────────
@@ -485,7 +475,24 @@ export default async function GalaxyMapPage() {
     catalogEntries.map((entry, i) => [entry.id, { svgX: projected[i].svgX, svgY: projected[i].svgY }]),
   );
 
-  // Build GalaxyOtherStation list — must be after systemSvgMap is defined
+  // Build lane SVG coordinate pairs now that systemSvgMap is available
+  const galaxyLanes: GalaxyLane[] = rawLaneRows
+    .filter((l) => systemSvgMap.has(l.from_system_id) && systemSvgMap.has(l.to_system_id))
+    .map((l) => {
+      const from = systemSvgMap.get(l.from_system_id)!;
+      const to   = systemSvgMap.get(l.to_system_id)!;
+      return {
+        id:           l.id,
+        fromSystemId: l.from_system_id,
+        toSystemId:   l.to_system_id,
+        accessLevel:  l.access_level as "public" | "alliance_only" | "private",
+        isOwner:      l.owner_id === player.id,
+        x1: from.svgX, y1: from.svgY,
+        x2: to.svgX,   y2: to.svgY,
+      };
+    });
+
+  // Build GalaxyOtherStation list
   const galaxyOtherStations: GalaxyOtherStation[] = otherStationRows
     .filter((s) => s.current_system_id !== null && systemSvgMap.has(s.current_system_id!))
     .map((s) => {
@@ -570,6 +577,12 @@ export default async function GalaxyMapPage() {
   });
 
   // ── Build travel lines for client ────────────────────────────────────────
+  // Pre-count ships per fleet so we can show "×N" badge on fleet icons.
+  const fleetShipCounts = new Map<string, number>();
+  for (const tj of travelJobs) {
+    if (tj.fleet_id) fleetShipCounts.set(tj.fleet_id, (fleetShipCounts.get(tj.fleet_id) ?? 0) + 1);
+  }
+
   // Deduplicate by fleet_id so fleet members don't produce N identical lines.
   const seenFleetIds = new Set<string>();
   const galaxyTravelLines: GalaxyTravelLine[] = [];
@@ -583,6 +596,14 @@ export default async function GalaxyMapPage() {
       if (seenFleetIds.has(tj.fleet_id)) continue;
       seenFleetIds.add(tj.fleet_id);
       const fleet = fleets.find((f) => f.id === tj.fleet_id);
+      // Aggregate cargo across all ships in this fleet
+      const fleetShipIds = travelJobs.filter((j) => j.fleet_id === tj.fleet_id).map((j) => j.ship_id);
+      const cargoMap = new Map<string, number>();
+      for (const sid of fleetShipIds) {
+        for (const c of shipCargoByShipId.get(sid) ?? []) {
+          cargoMap.set(c.resourceType, (cargoMap.get(c.resourceType) ?? 0) + c.quantity);
+        }
+      }
       galaxyTravelLines.push({
         key: `fleet-${tj.fleet_id}`,
         x1: fromPos.svgX, y1: fromPos.svgY,
@@ -591,6 +612,9 @@ export default async function GalaxyMapPage() {
         toSystemId: tj.to_system_id,
         label: fleet?.name ?? "Fleet",
         isFleet: true,
+        shipCount: fleetShipCounts.get(tj.fleet_id) ?? 1,
+        cargo: [...cargoMap.entries()].map(([resourceType, quantity]) => ({ resourceType, quantity })),
+        travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
@@ -605,6 +629,9 @@ export default async function GalaxyMapPage() {
         toSystemId: tj.to_system_id,
         label: ship?.name ?? "Ship",
         isFleet: false,
+        shipCount: 1,
+        cargo: shipCargoByShipId.get(tj.ship_id) ?? [],
+        travelJobId: tj.id,
         arriveAt: tj.arrive_at,
         departAt: tj.depart_at,
       });
@@ -735,6 +762,9 @@ export default async function GalaxyMapPage() {
   // Discovery stats for map sub-bar
   const discoveredCount = systems.filter((s) => s.isDiscovered).length;
 
+  // Unread message count for Comms HUD badge
+  const unreadMessageCount = (unreadMsgRes as { count: number | null }).count ?? 0;
+
   return (
     // Full-height flex column — fills the layout's main flex container.
     // The sub-bar is a thin info strip; GalaxyMapClient fills the rest.
@@ -792,6 +822,7 @@ export default async function GalaxyMapPage() {
         initialEquippedStationSkinId={equippedSkinsRow?.station_skin_id ?? null}
         initialEquippedFleetSkinId={equippedSkinsRow?.fleet_skin_id ?? null}
         playerIsDev={player.is_dev}
+        unreadMessageCount={unreadMessageCount}
       />
     </div>
   );

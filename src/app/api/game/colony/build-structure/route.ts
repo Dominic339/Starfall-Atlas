@@ -43,36 +43,22 @@ export async function POST(request: NextRequest) {
   if (!input.ok) return toErrorResponse(input.error);
   const { colonyId, structureType } = input.data;
 
-  const admin = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = createAdminClient() as any;
 
-  // ── Fetch colony ─────────────────────────────────────────────────────────
-  const { data: colony } = maybeSingleResult<Colony>(
-    await admin
-      .from("colonies")
-      .select("id, owner_id, status")
-      .eq("id", colonyId)
-      .maybeSingle(),
-  );
+  // ── Fetch colony, existing structure, and station in parallel ─────────────
+  const [colonyRes, existingRes, stationRes] = await Promise.all([
+    admin.from("colonies").select("id, owner_id, status").eq("id", colonyId).maybeSingle(),
+    admin.from("structures").select("id, tier, is_active").eq("colony_id", colonyId).eq("type", structureType).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
 
-  if (!colony) {
-    return toErrorResponse(fail("not_found", "Colony not found.").error);
-  }
-  if (colony.owner_id !== player.id) {
-    return toErrorResponse(fail("forbidden", "You do not own this colony.").error);
-  }
-  if (colony.status !== "active") {
-    return toErrorResponse(fail("invalid_target", "Colony must be active to build structures.").error);
-  }
+  const { data: colony } = maybeSingleResult<Colony>(colonyRes);
+  if (!colony) return toErrorResponse(fail("not_found", "Colony not found.").error);
+  if (colony.owner_id !== player.id) return toErrorResponse(fail("forbidden", "You do not own this colony.").error);
+  if (colony.status !== "active") return toErrorResponse(fail("invalid_target", "Colony must be active to build structures.").error);
 
-  // ── Check existing structure ──────────────────────────────────────────────
-  const { data: existing } = maybeSingleResult<Structure>(
-    await admin
-      .from("structures")
-      .select("id, tier, is_active")
-      .eq("colony_id", colonyId)
-      .eq("type", structureType)
-      .maybeSingle(),
-  );
+  const { data: existing } = maybeSingleResult<Structure>(existingRes);
 
   const currentTier = existing?.tier ?? 0;
   const targetTier = currentTier + 1;
@@ -91,28 +77,12 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("invalid_target", "Invalid target tier.").error);
   }
 
-  // ── Fetch station ─────────────────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<PlayerStation>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Station guard + fetch iron/carbon ────────────────────────────────────
+  const { data: station } = maybeSingleResult<PlayerStation>(stationRes);
+  if (!station) return toErrorResponse(fail("not_found", "Player station not found.").error);
 
-  if (!station) {
-    return toErrorResponse(fail("not_found", "Player station not found.").error);
-  }
-
-  // ── Fetch station iron and carbon ──────────────────────────────────────────
   const { data: invRows } = listResult<Pick<ResourceInventoryRow, "resource_type" | "quantity">>(
-    await admin
-      .from("resource_inventory")
-      .select("resource_type, quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .in("resource_type", ["iron", "carbon"]),
+    await admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", station.id).in("resource_type", ["iron", "carbon"]),
   );
 
   const invMap = new Map((invRows ?? []).map((r) => [r.resource_type, r.quantity]));
@@ -138,82 +108,44 @@ export async function POST(request: NextRequest) {
 
   const now = new Date().toISOString();
 
-  // ── Deduct resources from station ─────────────────────────────────────────
-  const newIron = stationIron - cost.iron;
+  // ── Deduct resources + build/upgrade structure in parallel ────────────────
+  const newIron   = stationIron - cost.iron;
   const newCarbon = stationCarbon - cost.carbon;
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await (admin as any)
-    .from("resource_inventory")
-    .upsert(
-      [
-        {
-          location_type: "station",
-          location_id: station.id,
-          resource_type: "iron",
-          quantity: newIron,
-        },
-        {
-          location_type: "station",
-          location_id: station.id,
-          resource_type: "carbon",
-          quantity: newCarbon,
-        },
-      ].filter((r) => r.quantity > 0),
-      { onConflict: "location_type,location_id,resource_type" },
-    );
+  const toUpsert = [
+    { location_type: "station", location_id: station.id, resource_type: "iron",   quantity: newIron   },
+    { location_type: "station", location_id: station.id, resource_type: "carbon", quantity: newCarbon },
+  ].filter((r) => r.quantity > 0);
 
-  // Remove entries that dropped to 0
-  for (const [rt, qty] of [["iron", newIron], ["carbon", newCarbon]] as [string, number][]) {
-    if (qty <= 0) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      await (admin as any)
-        .from("resource_inventory")
-        .delete()
-        .eq("location_type", "station")
-        .eq("location_id", station.id)
-        .eq("resource_type", rt);
-    }
+  const toDeleteRt = [
+    ...(newIron   <= 0 ? ["iron"]   : []),
+    ...(newCarbon <= 0 ? ["carbon"] : []),
+  ];
+
+  const structureWrite = existing
+    ? admin.from("structures").update({ tier: targetTier, is_active: true, built_at: now }).eq("id", existing.id).select("id").maybeSingle()
+    : admin.from("structures").insert({ colony_id: colonyId, owner_id: player.id, type: structureType as BuildableType, tier: targetTier, is_active: true, built_at: now }).select("id").maybeSingle();
+
+  const writes: Promise<unknown>[] = [structureWrite];
+  if (toUpsert.length > 0) {
+    writes.push(admin.from("resource_inventory").upsert(toUpsert, { onConflict: "location_type,location_id,resource_type" }));
+  }
+  if (toDeleteRt.length > 0) {
+    writes.push(admin.from("resource_inventory").delete().eq("location_type", "station").eq("location_id", station.id).in("resource_type", toDeleteRt));
   }
 
-  // ── Build or upgrade the structure ────────────────────────────────────────
-  let structureId: string;
+  const [structureRes] = await Promise.all(writes);
+  const insertRes = structureRes as { data: { id: string } | null; error: unknown };
 
-  if (existing) {
-    // Upgrade: bump tier
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("structures")
-      .update({ tier: targetTier, is_active: true, built_at: now })
-      .eq("id", existing.id);
-    structureId = existing.id;
-  } else {
-    // New build: insert row
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const insertRes = await (admin as any)
-      .from("structures")
-      .insert({
-        colony_id: colonyId,
-        owner_id: player.id,
-        type: structureType as BuildableType,
-        tier: targetTier,
-        is_active: true,
-        built_at: now,
-      })
-      .select("id")
-      .maybeSingle();
-
+  if (!existing) {
     if (insertRes.error) {
       const msg = (insertRes.error as { message?: string })?.message;
-      return toErrorResponse(
-        fail("internal_error", msg ? `Failed to create structure: ${msg}` : "Failed to create structure.").error,
-      );
+      return toErrorResponse(fail("internal_error", msg ? `Failed to create structure: ${msg}` : "Failed to create structure.").error);
     }
-    if (!insertRes.data) {
-      return toErrorResponse(fail("internal_error", "Failed to create structure.").error);
-    }
-    structureId = (insertRes.data as { id: string }).id;
+    if (!insertRes.data) return toErrorResponse(fail("internal_error", "Failed to create structure.").error);
   }
+
+  const structureId = existing ? existing.id : insertRes.data!.id;
 
   return Response.json({
     ok: true,

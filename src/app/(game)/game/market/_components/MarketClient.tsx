@@ -56,8 +56,36 @@ const RESOURCE_LABELS: Record<string, string> = {
   polymers:         "Polymers",
 };
 
+const RESOURCE_COLOR: Record<string, string> = {
+  iron:             "text-zinc-300 bg-zinc-800/60",
+  carbon:           "text-stone-400 bg-stone-900/60",
+  silica:           "text-sky-300 bg-sky-950/50",
+  water:            "text-cyan-300 bg-cyan-950/50",
+  biomass:          "text-lime-400 bg-lime-950/50",
+  sulfur:           "text-yellow-400 bg-yellow-950/50",
+  rare_crystal:     "text-violet-400 bg-violet-950/50",
+  food:             "text-emerald-400 bg-emerald-950/50",
+  steel:            "text-slate-300 bg-slate-800/60",
+  glass:            "text-sky-200 bg-sky-950/40",
+  exotic_matter:    "text-fuchsia-400 bg-fuchsia-950/50",
+  crystalline_core: "text-indigo-300 bg-indigo-950/50",
+  void_dust:        "text-purple-400 bg-purple-950/50",
+  ice:              "text-blue-200 bg-blue-950/40",
+  fuel_cells:       "text-orange-400 bg-orange-950/50",
+  polymers:         "text-teal-400 bg-teal-950/50",
+};
+
 function resourceLabel(rt: string): string {
   return RESOURCE_LABELS[rt] ?? rt.replace("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function resourcePill(rt: string) {
+  const cls = RESOURCE_COLOR[rt] ?? "text-zinc-400 bg-zinc-800/60";
+  return (
+    <span className={`inline-block text-xs font-medium px-2 py-0.5 rounded-full ${cls}`}>
+      {resourceLabel(rt)}
+    </span>
+  );
 }
 
 function formatExpiry(expiresAt: string): string {
@@ -67,6 +95,14 @@ function formatExpiry(expiresAt: string): string {
   const hours = Math.floor((ms % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
   if (days > 0) return `${days}d ${hours}h`;
   return `${hours}h`;
+}
+
+function expiryColor(expiresAt: string): string {
+  const ms = new Date(expiresAt).getTime() - Date.now();
+  if (ms <= 0) return "text-zinc-700";
+  if (ms < 6 * 3_600_000)  return "text-red-400";
+  if (ms < 24 * 3_600_000) return "text-amber-500/80";
+  return "text-zinc-600";
 }
 
 // ---------------------------------------------------------------------------
@@ -407,7 +443,7 @@ export function MarketClient({
                       </td>
                       <td className="px-3 py-2 text-right text-zinc-400">{l.pricePerUnit.toLocaleString()} ¢</td>
                       <td className="px-3 py-2 text-right text-emerald-500/80">{value.toLocaleString()} ¢</td>
-                      <td className="px-3 py-2 text-right text-zinc-600">{formatExpiry(l.expiresAt)}</td>
+                      <td className={`px-3 py-2 text-right tabular-nums ${expiryColor(l.expiresAt)}`}>{formatExpiry(l.expiresAt)}</td>
                       <td className="px-3 py-2 text-right">
                         <CancelButton listingId={l.id} />
                       </td>
@@ -447,16 +483,21 @@ export function MarketClient({
         </div>
 
         {sorted.length === 0 && (
-          <p className="text-xs text-zinc-700">
-            {otherListings.length === 0 ? "No listings on the market." : "No listings match the filter."}
-          </p>
+          <div className="flex flex-col items-center gap-2 py-8 text-center border border-dashed border-zinc-800 rounded-lg">
+            <svg className="w-7 h-7 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 3h1.386c.51 0 .955.343 1.087.835l.383 1.437M7.5 14.25a3 3 0 0 0-3 3h15.75m-12.75-3h11.218c1.121-2.3 2.1-4.684 2.924-7.138a60.114 60.114 0 0 0-16.536-1.84M7.5 14.25 5.106 5.272M6 20.25a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Zm12.75 0a.75.75 0 1 1-1.5 0 .75.75 0 0 1 1.5 0Z" />
+            </svg>
+            <p className="text-xs text-zinc-600">
+              {otherListings.length === 0 ? "No listings on the market yet." : "No listings match the filter."}
+            </p>
+          </div>
         )}
 
         {grouped.size > 0 && (
           <div className="space-y-4">
             {[...grouped.entries()].map(([rt, group]) => (
               <div key={rt}>
-                <p className="mb-1.5 text-xs font-medium text-zinc-500">{resourceLabel(rt)}</p>
+                <div className="mb-1.5">{resourcePill(rt)}</div>
                 <div className="overflow-hidden rounded border border-zinc-800/60">
                   <table className="w-full text-xs">
                     <thead>
@@ -478,7 +519,7 @@ export function MarketClient({
                             <td className="px-3 py-2 text-right text-zinc-300">{remaining.toLocaleString()}</td>
                             <td className="px-3 py-2 text-right font-mono text-amber-400/90">{l.pricePerUnit.toLocaleString()} ¢</td>
                             <td className="px-3 py-2 text-right text-zinc-600">{l.systemId}</td>
-                            <td className="px-3 py-2 text-right text-zinc-600">{formatExpiry(l.expiresAt)}</td>
+                            <td className={`px-3 py-2 text-right tabular-nums ${expiryColor(l.expiresAt)}`}>{formatExpiry(l.expiresAt)}</td>
                             <td className="px-3 py-2 text-right">
                               <BuyButton listing={l} playerCredits={playerCredits} />
                             </td>

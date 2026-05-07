@@ -15,11 +15,12 @@
  * The navigation bar shows the player's handle and a sign-out button.
  */
 
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getUser } from "@/lib/supabase/server";
 import { bootstrapPlayer } from "@/lib/actions/bootstrap";
 import { signOut } from "@/lib/actions/signout";
+import { NavBar } from "@/app/(game)/game/_components/NavBar";
+import { PageTransition } from "@/app/(game)/game/_components/PageTransition";
 
 export default async function GameLayout({
   children,
@@ -44,69 +45,12 @@ export default async function GameLayout({
 
   return (
     <div className="flex h-screen flex-col bg-zinc-950 text-zinc-100">
-      {/* Navigation bar */}
-      <header className="shrink-0 border-b border-zinc-800 bg-zinc-950 px-6 py-3">
-        <div className="flex items-center justify-between">
-          <span className="font-mono text-sm font-medium text-zinc-300">
-            Starfall Atlas
-          </span>
-          <div className="flex items-center gap-5">
-            <Link
-              href="/game/map"
-              className="text-xs font-medium text-indigo-400 hover:text-indigo-300 transition-colors"
-            >
-              Map
-            </Link>
-            <Link
-              href="/game/station"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Station
-            </Link>
-            <Link
-              href="/game/market"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Market
-            </Link>
-            <Link
-              href="/game/research"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Research
-            </Link>
-            <Link
-              href="/game/alliance"
-              className="text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
-            >
-              Alliance
-            </Link>
-            <Link
-              href="/game/command"
-              className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
-            >
-              Overview
-            </Link>
-            <Link
-              href="/game/profile"
-              className="font-mono text-sm text-zinc-400 hover:text-zinc-200 transition-colors"
-            >
-              {player.handle}
-            </Link>
-            <form action={signOut}>
-              <button
-                type="submit"
-                className="text-xs text-zinc-600 transition-colors hover:text-zinc-400"
-              >
-                Sign out
-              </button>
-            </form>
-          </div>
-        </div>
-      </header>
+      <NavBar handle={player.handle} signOutAction={signOut} />
 
-      {/* Page content */}
-      <main className="flex flex-1 flex-col overflow-y-auto">{children}</main>
+      {/* Page content — animates in on every navigation */}
+      <main className="flex flex-1 flex-col overflow-y-auto">
+        <PageTransition>{children}</PageTransition>
+      </main>
     </div>
   );
 }

@@ -59,16 +59,15 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Validate entitlement ──────────────────────────────────────────────────
+  // ── Validate entitlement + fetch existing survey in parallel ─────────────
+  const [entitlementRes, surveyRes] = await Promise.all([
+    admin.from("premium_entitlements").select("id, player_id, item_type, consumed").eq("id", entitlementId).maybeSingle(),
+    admin.from("survey_results").select("*").eq("body_id", bodyId).maybeSingle(),
+  ]);
+
   const { data: entitlement } = maybeSingleResult<{
     id: string; player_id: string; item_type: string; consumed: boolean;
-  }>(
-    await admin
-      .from("premium_entitlements")
-      .select("id, player_id, item_type, consumed")
-      .eq("id", entitlementId)
-      .maybeSingle(),
-  );
+  }>(entitlementRes);
   if (!entitlement || entitlement.player_id !== player.id) {
     return toErrorResponse(fail("not_found", "Entitlement not found.").error);
   }
@@ -80,9 +79,7 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Basic survey must already exist ───────────────────────────────────────
-  const { data: existing } = maybeSingleResult<SurveyResult>(
-    await admin.from("survey_results").select("*").eq("body_id", bodyId).maybeSingle(),
-  );
+  const { data: existing } = maybeSingleResult<SurveyResult>(surveyRes);
   if (!existing) {
     return toErrorResponse(
       fail("invalid_target", "The body must have a basic survey before using a Deep Survey Kit.").error,
@@ -107,17 +104,12 @@ export async function POST(request: NextRequest) {
     is_rare:  true,
   }));
 
-  // ── Update survey result + consume entitlement ────────────────────────────
+  // ── Update survey result + consume entitlement in parallel ───────────────
   const now = new Date();
-  await admin
-    .from("survey_results")
-    .update({ deep_nodes: deepNodes, has_deep_nodes: deepNodes.length > 0 })
-    .eq("body_id", bodyId);
-
-  await admin
-    .from("premium_entitlements")
-    .update({ consumed: true, consumed_at: now.toISOString() })
-    .eq("id", entitlementId);
+  await Promise.all([
+    admin.from("survey_results").update({ deep_nodes: deepNodes, has_deep_nodes: deepNodes.length > 0 }).eq("body_id", bodyId),
+    admin.from("premium_entitlements").update({ consumed: true, consumed_at: now.toISOString() }).eq("id", entitlementId),
+  ]);
 
   const updated: SurveyResult = {
     ...existing,

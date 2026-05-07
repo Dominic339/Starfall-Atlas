@@ -45,13 +45,22 @@ export async function GET() {
   type RawMember = { id: string; player_id: string; role: AllianceRole; alliance_credits: number };
   const rawMembers = listResult<RawMember>(membersRes).data ?? [];
 
-  // Resolve handles
+  type StorageRow = { resource_type: string; quantity: number };
+  const station = maybeSingleResult<{ id: string }>(stationRes).data;
+
+  // Resolve handles + station inventory in parallel
   const playerIds = rawMembers.map((m) => m.player_id);
+  const [handlesRes, invRes] = await Promise.all([
+    playerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", playerIds)
+      : Promise.resolve({ data: null as { id: string; handle: string }[] | null }),
+    station
+      ? admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", station.id)
+      : Promise.resolve({ data: [] as StorageRow[] }),
+  ]);
+
   const handleMap = new Map<string, string>();
-  if (playerIds.length > 0) {
-    const { data: handles } = await admin.from("players").select("id, handle").in("id", playerIds);
-    for (const h of (handles ?? []) as { id: string; handle: string }[]) handleMap.set(h.id, h.handle);
-  }
+  for (const h of ((handlesRes.data ?? []) as { id: string; handle: string }[])) handleMap.set(h.id, h.handle);
 
   const members = rawMembers.map((m) => ({
     id: m.id,
@@ -62,7 +71,6 @@ export async function GET() {
     isSelf: m.player_id === player.id,
   }));
 
-  type StorageRow = { resource_type: string; quantity: number };
   const storage = (listResult<StorageRow>(storageRes).data ?? []).map((r) => ({
     resource: r.resource_type, quantity: r.quantity,
   }));
@@ -79,13 +87,7 @@ export async function GET() {
     pct: g.quantity_target > 0 ? Math.round((g.quantity_filled / g.quantity_target) * 100) : 0,
   }));
 
-  // Station inventory for deposit UI
-  let stationInventory: { resource: string; quantity: number }[] = [];
-  const station = maybeSingleResult<{ id: string }>(stationRes).data;
-  if (station) {
-    const { data: inv } = await admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", station.id);
-    stationInventory = ((inv ?? []) as StorageRow[]).map((r) => ({ resource: r.resource_type, quantity: r.quantity }));
-  }
+  const stationInventory = ((invRes.data ?? []) as StorageRow[]).map((r) => ({ resource: r.resource_type, quantity: r.quantity }));
 
   return Response.json({
     ok: true,

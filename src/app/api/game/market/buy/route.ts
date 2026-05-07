@@ -83,69 +83,37 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fetch buyer's station ─────────────────────────────────────────────────
-  const { data: buyerStation } = maybeSingleResult<{ id: string }>(
-    await admin
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
+  // ── Fetch buyer station + seller credits in parallel ─────────────────────
+  const [stationRes, sellerRes] = await Promise.all([
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+    admin.from("players").select("credits").eq("id", listing.seller_id).maybeSingle(),
+  ]);
+
+  const { data: buyerStation } = maybeSingleResult<{ id: string }>(stationRes);
   if (!buyerStation) {
     return toErrorResponse(fail("not_found", "Your station was not found.").error);
   }
-
-  // ── Fetch seller's current credits for the update ─────────────────────────
-  const { data: seller } = maybeSingleResult<{ credits: number }>(
-    await admin
-      .from("players")
-      .select("credits")
-      .eq("id", listing.seller_id)
-      .maybeSingle(),
-  );
+  const { data: seller } = maybeSingleResult<{ credits: number }>(sellerRes);
   const sellerCredits = seller?.credits ?? 0;
 
-  // ── Deduct credits from buyer ──────────────────────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: player.credits - totalCost })
-    .eq("id", player.id);
+  // ── Deduct/credit players + pre-fetch buyer inventory in parallel ─────────
+  const [, , buyerInvRes] = await Promise.all([
+    admin.from("players").update({ credits: player.credits - totalCost }).eq("id", player.id),
+    admin.from("players").update({ credits: sellerCredits + totalCost }).eq("id", listing.seller_id),
+    admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", buyerStation.id).eq("resource_type", listing.resource_type).maybeSingle(),
+  ]);
+  const { data: buyerInv } = maybeSingleResult<{ quantity: number }>(buyerInvRes);
 
-  // ── Add credits to seller ──────────────────────────────────────────────────
-  await admin
-    .from("players")
-    .update({ credits: sellerCredits + totalCost })
-    .eq("id", listing.seller_id);
-
-  // ── Deliver resources to buyer's station ──────────────────────────────────
-  const { data: buyerInv } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", buyerStation.id)
-      .eq("resource_type", listing.resource_type)
-      .maybeSingle(),
-  );
-  await admin
-    .from("resource_inventory")
-    .upsert(
-      {
-        location_type: "station",
-        location_id:   buyerStation.id,
-        resource_type: listing.resource_type,
-        quantity:      (buyerInv?.quantity ?? 0) + qty,
-      },
-      { onConflict: "location_type,location_id,resource_type" },
-    );
-
-  // ── Update listing status ─────────────────────────────────────────────────
+  // ── Deliver resources + update listing in parallel ────────────────────────
   const newFilled = listing.quantity_filled + qty;
   const newStatus = newFilled >= listing.quantity ? "filled" : "partially_filled";
-  await admin
-    .from("market_listings")
-    .update({ quantity_filled: newFilled, status: newStatus, buyer_id: player.id })
-    .eq("id", listingId);
+  await Promise.all([
+    admin.from("resource_inventory").upsert(
+      { location_type: "station", location_id: buyerStation.id, resource_type: listing.resource_type, quantity: (buyerInv?.quantity ?? 0) + qty },
+      { onConflict: "location_type,location_id,resource_type" },
+    ),
+    admin.from("market_listings").update({ quantity_filled: newFilled, status: newStatus, buyer_id: player.id }).eq("id", listingId),
+  ]);
 
   // Award battle pass XP for market trade (fire-and-forget)
   void awardBattlePassXp(admin, player.id, { type: "market_trades", count: 1 });

@@ -32,34 +32,19 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Verify membership ─────────────────────────────────────────────────────
-  const { data: membership } = maybeSingleResult<{ alliance_id: string }>(
-    await admin
-      .from("alliance_members")
-      .select("alliance_id")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
-  if (!membership) {
-    return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
-  }
+  // ── Fetch membership + station in parallel ────────────────────────────────
+  const [membershipRes, stationRes] = await Promise.all([
+    admin.from("alliance_members").select("alliance_id").eq("player_id", player.id).maybeSingle(),
+    admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
+  const { data: membership } = maybeSingleResult<{ alliance_id: string }>(membershipRes);
+  if (!membership) return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
 
-  // ── Fetch station and resource ────────────────────────────────────────────
-  const { data: station } = maybeSingleResult<{ id: string }>(
-    await admin.from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
-  );
-  if (!station) {
-    return toErrorResponse(fail("not_found", "Station not found.").error);
-  }
+  const { data: station } = maybeSingleResult<{ id: string }>(stationRes);
+  if (!station) return toErrorResponse(fail("not_found", "Station not found.").error);
 
   const { data: stationRow } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", resourceType)
-      .maybeSingle(),
+    await admin.from("resource_inventory").select("quantity").eq("location_type", "station").eq("location_id", station.id).eq("resource_type", resourceType).maybeSingle(),
   );
   const stationQty = stationRow?.quantity ?? 0;
   if (stationQty < quantity) {
@@ -71,45 +56,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Deduct from station ───────────────────────────────────────────────────
+  // ── Deduct from station + fetch alliance storage qty in parallel ──────────
   const newStationQty = stationQty - quantity;
-  if (newStationQty <= 0) {
-    await admin
-      .from("resource_inventory")
-      .delete()
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", resourceType);
-  } else {
-    await admin
-      .from("resource_inventory")
-      .update({ quantity: newStationQty })
-      .eq("location_type", "station")
-      .eq("location_id", station.id)
-      .eq("resource_type", resourceType);
-  }
+  const stationWrite = newStationQty <= 0
+    ? admin.from("resource_inventory").delete().eq("location_type", "station").eq("location_id", station.id).eq("resource_type", resourceType)
+    : admin.from("resource_inventory").update({ quantity: newStationQty }).eq("location_type", "station").eq("location_id", station.id).eq("resource_type", resourceType);
 
-  // ── Add to alliance storage ───────────────────────────────────────────────
-  const { data: storageRow } = maybeSingleResult<{ quantity: number }>(
-    await admin
-      .from("resource_inventory")
-      .select("quantity")
-      .eq("location_type", "alliance_storage")
-      .eq("location_id", membership.alliance_id)
-      .eq("resource_type", resourceType)
-      .maybeSingle(),
+  const [, storageRes] = await Promise.all([
+    stationWrite,
+    admin.from("resource_inventory").select("quantity").eq("location_type", "alliance_storage").eq("location_id", membership.alliance_id).eq("resource_type", resourceType).maybeSingle(),
+  ]);
+  const { data: storageRow } = maybeSingleResult<{ quantity: number }>(storageRes);
+
+  await admin.from("resource_inventory").upsert(
+    { location_type: "alliance_storage", location_id: membership.alliance_id, resource_type: resourceType, quantity: (storageRow?.quantity ?? 0) + quantity },
+    { onConflict: "location_type,location_id,resource_type" },
   );
-  await admin
-    .from("resource_inventory")
-    .upsert(
-      {
-        location_type: "alliance_storage",
-        location_id:   membership.alliance_id,
-        resource_type: resourceType,
-        quantity:      (storageRow?.quantity ?? 0) + quantity,
-      },
-      { onConflict: "location_type,location_id,resource_type" },
-    );
 
   return Response.json({ ok: true, data: { deposited: quantity, resourceType } });
 }

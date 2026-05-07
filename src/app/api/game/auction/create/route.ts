@@ -51,54 +51,35 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Guard: no existing active auction for this item ───────────────────────
-  const { data: existing } = listResult<{ id: string }>(
-    await admin.from("auctions").select("id").eq("item_id", itemId).eq("status", "active"),
-  );
+  // ── Guard + ownership check in parallel ──────────────────────────────────
+  const [existingRes, ownershipRes] = await Promise.all([
+    admin.from("auctions").select("id").eq("item_id", itemId).eq("status", "active"),
+    itemType === "colony"
+      ? admin.from("colonies").select("id, status, system_id").eq("id", itemId).eq("owner_id", player.id).maybeSingle()
+      : admin.from("system_stewardship").select("system_id").eq("system_id", itemId).eq("steward_id", player.id).maybeSingle(),
+  ]);
+
+  const { data: existing } = listResult<{ id: string }>(existingRes);
   if (existing && existing.length > 0) {
     return toErrorResponse(
       fail("already_auctioned", "An active auction already exists for this item.").error,
     );
   }
 
-  // ── Verify ownership and eligibility ─────────────────────────────────────
   let systemId: string | null = null;
-
   if (itemType === "colony") {
-    const { data: colony } = maybeSingleResult<{
-      id: string;
-      status: string;
-      system_id: string;
-    }>(
-      await admin
-        .from("colonies")
-        .select("id, status, system_id")
-        .eq("id", itemId)
-        .eq("owner_id", player.id)
-        .maybeSingle(),
-    );
+    const { data: colony } = maybeSingleResult<{ id: string; status: string; system_id: string }>(ownershipRes);
     if (!colony) {
       return toErrorResponse(fail("not_found", "Colony not found or not owned by you.").error);
     }
     if (colony.status !== "active") {
-      return toErrorResponse(
-        fail("invalid_target", "Only active colonies can be auctioned.").error,
-      );
+      return toErrorResponse(fail("invalid_target", "Only active colonies can be auctioned.").error);
     }
     systemId = colony.system_id;
   } else {
-    const { data: stewardship } = maybeSingleResult<{ system_id: string }>(
-      await admin
-        .from("system_stewardship")
-        .select("system_id")
-        .eq("system_id", itemId)
-        .eq("steward_id", player.id)
-        .maybeSingle(),
-    );
+    const { data: stewardship } = maybeSingleResult<{ system_id: string }>(ownershipRes);
     if (!stewardship) {
-      return toErrorResponse(
-        fail("not_found", "Stewardship not found or not held by you.").error,
-      );
+      return toErrorResponse(fail("not_found", "Stewardship not found or not held by you.").error);
     }
     systemId = itemId;
   }

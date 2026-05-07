@@ -31,32 +31,32 @@ export default async function MessagesPage() {
   );
   if (!player) redirect("/login");
 
-  // ── Fetch inbox ────────────────────────────────────────────────────────────
-  type MsgRow = {
-    id: string; sender_id: string; recipient_id: string;
-    subject: string; body: string; sent_at: string; read_at: string | null;
-  };
+  type MsgRow    = { id: string; sender_id: string; recipient_id: string; subject: string; body: string; sent_at: string; read_at: string | null };
+  type AMsgRow   = { id: string; sender_id: string; body: string; sent_at: string };
   type HandleRow = { id: string; handle: string };
 
-  const { data: rawInbox } = listResult<MsgRow>(
-    await admin
-      .from("player_messages")
-      .select("id, sender_id, recipient_id, subject, body, sent_at, read_at")
-      .eq("recipient_id", player.id)
-      .eq("deleted_recipient", false)
-      .order("sent_at", { ascending: false })
-      .limit(30),
-  );
+  // ── Batch 1: inbox + alliance membership (parallel) ───────────────────────
+  const [inboxRes, membershipRes] = await Promise.all([
+    admin.from("player_messages").select("id, sender_id, recipient_id, subject, body, sent_at, read_at").eq("recipient_id", player.id).eq("deleted_recipient", false).order("sent_at", { ascending: false }).limit(30),
+    admin.from("alliance_members").select("alliance_id").eq("player_id", player.id).maybeSingle(),
+  ]);
 
-  const inboxMessages = rawInbox ?? [];
+  const { data: membership } = maybeSingleResult<{ alliance_id: string }>(membershipRes);
+  const inboxMessages = listResult<MsgRow>(inboxRes).data ?? [];
   const senderIds = [...new Set(inboxMessages.map((m) => m.sender_id))];
+
+  // ── Batch 2: inbox sender handles + alliance messages (parallel) ───────────
+  const [handleRes, aMsgsRes] = await Promise.all([
+    senderIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", senderIds)
+      : Promise.resolve({ data: [] }),
+    membership
+      ? admin.from("alliance_messages").select("id, sender_id, body, sent_at").eq("alliance_id", membership.alliance_id).order("sent_at", { ascending: false }).limit(50)
+      : Promise.resolve({ data: [] }),
+  ]);
+
   const handleMap = new Map<string, string>();
-  if (senderIds.length > 0) {
-    const { data: handles } = listResult<HandleRow>(
-      await admin.from("players").select("id, handle").in("id", senderIds),
-    );
-    for (const h of handles ?? []) handleMap.set(h.id, h.handle);
-  }
+  for (const h of (listResult<HandleRow>(handleRes).data ?? [])) handleMap.set(h.id, h.handle);
 
   const inbox: DirectMessage[] = inboxMessages.map((m) => ({
     id:            m.id,
@@ -68,29 +68,11 @@ export default async function MessagesPage() {
     isRead:        !!m.read_at,
   }));
 
-  // ── Alliance membership + messages ────────────────────────────────────────
-  const { data: membership } = maybeSingleResult<{ alliance_id: string }>(
-    await admin
-      .from("alliance_members")
-      .select("alliance_id")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
-
+  // ── Alliance messages ─────────────────────────────────────────────────────
   let allianceMessages: AllianceMessage[] | null = null;
 
   if (membership) {
-    type AMsgRow = { id: string; sender_id: string; body: string; sent_at: string };
-    const { data: rawAMsgs } = listResult<AMsgRow>(
-      await admin
-        .from("alliance_messages")
-        .select("id, sender_id, body, sent_at")
-        .eq("alliance_id", membership.alliance_id)
-        .order("sent_at", { ascending: false })
-        .limit(50),
-    );
-
-    const aMsgs = rawAMsgs ?? [];
+    const aMsgs = listResult<AMsgRow>(aMsgsRes).data ?? [];
     const aSenderIds = [...new Set(aMsgs.map((m) => m.sender_id))];
     const aHandleMap = new Map<string, string>();
     if (aSenderIds.length > 0) {

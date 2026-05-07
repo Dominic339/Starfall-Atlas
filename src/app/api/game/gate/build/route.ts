@@ -54,30 +54,24 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const now   = new Date();
 
-  // ── Governance check ──────────────────────────────────────────────────────
-  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(
-    await admin
-      .from("system_stewardship")
-      .select("steward_id, has_governance")
-      .eq("system_id", systemId)
-      .maybeSingle(),
-  );
+  // ── Governance + presence + existing-gate check in parallel ─────────────
+  const [stewardshipRes, shipsRes, stationRes, gateRes] = await Promise.all([
+    admin.from("system_stewardship").select("steward_id, has_governance").eq("system_id", systemId).maybeSingle(),
+    admin.from("ships").select("current_system_id").eq("owner_id", player.id),
+    admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
+    admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
+  ]);
 
+  const { data: stewardship } = maybeSingleResult<{ steward_id: string; has_governance: boolean }>(stewardshipRes);
   if (!stewardship || stewardship.steward_id !== player.id || !stewardship.has_governance) {
     return toErrorResponse(
       fail("forbidden", "Only the governance holder of this system can build a gate.").error,
     );
   }
 
-  // ── Presence check ────────────────────────────────────────────────────────
-  const [{ data: shipRows }, { data: stationRow }] = await Promise.all([
-    listResult<Pick<Ship, "current_system_id">>(
-      await admin.from("ships").select("current_system_id").eq("owner_id", player.id),
-    ),
-    maybeSingleResult<Pick<PlayerStation, "current_system_id">>(
-      await admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
-    ),
-  ]);
+  const { data: shipRows }    = listResult<Pick<Ship, "current_system_id">>(shipsRes);
+  const { data: stationRow }  = maybeSingleResult<Pick<PlayerStation, "current_system_id">>(stationRes);
+  const { data: existingGate } = maybeSingleResult<HyperspaceGate>(gateRes);
 
   const shipPresent    = (shipRows ?? []).some((s) => s.current_system_id === systemId);
   const stationPresent = stationRow?.current_system_id === systemId;
@@ -87,11 +81,6 @@ export async function POST(request: NextRequest) {
       fail("invalid_target", "Your ship or station must be in the system to build a gate.").error,
     );
   }
-
-  // ── Check existing gate ───────────────────────────────────────────────────
-  const { data: existingGate } = maybeSingleResult<HyperspaceGate>(
-    await admin.from("hyperspace_gates").select("*").eq("system_id", systemId).maybeSingle(),
-  );
 
   if (existingGate?.status === "active") {
     return toErrorResponse(fail("already_exists", "An active gate already exists in this system.").error);
@@ -115,12 +104,11 @@ export async function POST(request: NextRequest) {
     );
 
     if (job && new Date(job.complete_at) <= now) {
-      // Construction complete — activate
-      await admin
-        .from("hyperspace_gates")
-        .update({ status: "active", built_at: now.toISOString() })
-        .eq("id", existingGate.id);
-      await admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", job.id);
+      // Construction complete — activate both writes in parallel
+      await Promise.all([
+        admin.from("hyperspace_gates").update({ status: "active", built_at: now.toISOString() }).eq("id", existingGate.id),
+        admin.from("gate_construction_jobs").update({ status: "complete" }).eq("id", job.id),
+      ]);
 
       void admin.from("world_events").insert({
         event_type: "gate_built",

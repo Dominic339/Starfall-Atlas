@@ -67,11 +67,12 @@ export default async function StationPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const balance = await getBalanceWithOverrides(admin);
+  const [balance, playerRes] = await Promise.all([
+    getBalanceWithOverrides(admin),
+    admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
+  ]);
 
-  const { data: player } = maybeSingleResult<Player>(
-    await admin.from("players").select("*").eq("auth_id", user.id).maybeSingle(),
-  );
+  const { data: player } = maybeSingleResult<Player>(playerRes);
   if (!player) redirect("/login");
 
   // Resolve colony growth, upkeep, biomass→food conversion, and passive
@@ -302,9 +303,9 @@ export default async function StationPage() {
       </div>
 
       {/* ── Summary tiles ───────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
         {/* Credits */}
-        <div className="rounded-xl border border-amber-900/50 bg-zinc-900/80 px-4 py-4">
+        <div className="rounded-xl border border-amber-900/50 bg-zinc-900/80 px-4 py-4 card-interactive animate-fade-in-up">
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Credits</p>
           <p className="mt-1.5 font-mono text-2xl font-bold text-amber-300 tabular-nums">
             {player.credits.toLocaleString("en-US")}
@@ -317,7 +318,7 @@ export default async function StationPage() {
           </p>
         </div>
         {/* Iron */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-4 card-interactive animate-fade-in-up">
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Iron</p>
           <p className="mt-1.5 font-mono text-2xl font-bold text-zinc-200 tabular-nums">
             {totalIron.toLocaleString()}
@@ -325,7 +326,7 @@ export default async function StationPage() {
           <p className="mt-0.5 text-[10px] text-zinc-700">units at station</p>
         </div>
         {/* Food */}
-        <div className={`rounded-xl border px-4 py-4 ${
+        <div className={`rounded-xl border px-4 py-4 card-interactive animate-fade-in-up ${
           totalFood === 0 && colonies.length > 0
             ? "border-amber-900/50 bg-amber-950/20"
             : "border-zinc-800 bg-zinc-900/80"
@@ -343,7 +344,7 @@ export default async function StationPage() {
           )}
         </div>
         {/* Inventory total */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/80 px-4 py-4 card-interactive animate-fade-in-up">
           <p className="text-[10px] font-bold uppercase tracking-widest text-zinc-600">Inventory</p>
           <p className="mt-1.5 font-mono text-2xl font-bold text-zinc-200 tabular-nums">
             {totalStationUnits.toLocaleString()}
@@ -389,7 +390,7 @@ export default async function StationPage() {
           meta={<span className="text-zinc-600">{dockedShips.length}</span>}
         />
         {dockedShips.length > 0 ? (
-          <div className="space-y-3">
+          <div className="space-y-3 stagger-children">
             {dockedShips.map((ship) => {
               const cargo = cargoByShipId.get(ship.id) ?? [];
               const cargoUsed = cargo.reduce((s, r) => s + r.quantity, 0);
@@ -409,7 +410,7 @@ export default async function StationPage() {
               return (
                 <div
                   key={ship.id}
-                  className="rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden"
+                  className="rounded-xl border border-zinc-800 bg-zinc-900/70 overflow-hidden card-interactive animate-fade-in-up"
                 >
                   {/* Ship header */}
                   <div className="flex items-start justify-between gap-3 px-5 py-3.5">

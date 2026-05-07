@@ -106,7 +106,7 @@ export function ResearchCard({
 
   return (
     <div
-      className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[170px] flex-1 ${cardBorder}`}
+      className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[170px] flex-1 card-interactive ${cardBorder}`}
     >
       {/* ── Header: name + tier badge ─────────────────────────────────────── */}
       <div className="flex items-start justify-between gap-2">
@@ -138,40 +138,54 @@ export function ResearchCard({
       {/* ── Footer: lock reasons + cost + button ─────────────────────────── */}
       <div className="flex items-end justify-between gap-2 flex-wrap">
         {/* Left column: why it's blocked */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 flex flex-col gap-1">
           {isScaffold && (
-            <p className="text-xs text-zinc-700 leading-tight">
+            <span className="inline-flex items-center gap-1 text-xs text-zinc-600 bg-zinc-800/40 rounded px-1.5 py-0.5 w-fit">
+              <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zm0 1.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zM7.25 5.5v4h1.5v-4h-1.5zm0 5v1.5h1.5V10.5h-1.5z" />
+              </svg>
               Coming in a future update
-            </p>
+            </span>
           )}
           {!isScaffold && isLocked && !prereqsMet && (
-            <p className="text-xs text-amber-600/90 leading-tight">
-              Requires:{" "}
-              <span className="font-medium">
-                {blockingPrereqNames.join(", ")}
+            <span className="inline-flex items-start gap-1 text-xs text-amber-600/90 bg-amber-950/30 ring-1 ring-amber-900/40 rounded px-1.5 py-0.5 w-fit max-w-full">
+              <svg className="w-3 h-3 shrink-0 mt-px" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M6 4H4a2 2 0 0 0 0 4h2M10 4h2a2 2 0 0 0 0 4h-2M6 8h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+              </svg>
+              <span className="leading-tight">
+                Requires{" "}
+                <span className="font-semibold text-amber-500">{blockingPrereqNames.join(", ")}</span>
               </span>
-            </p>
+            </span>
           )}
           {!isScaffold && isLocked && prereqsMet && !milestonesMet && (
-            <p className="text-xs text-amber-600/90 leading-tight">
-              Needs:{" "}
-              <span className="font-medium">
-                {blockingMilestoneLabels.join(", ")}
+            <span className="inline-flex items-start gap-1 text-xs text-amber-600/90 bg-amber-950/30 ring-1 ring-amber-900/40 rounded px-1.5 py-0.5 w-fit max-w-full">
+              <svg className="w-3 h-3 shrink-0 mt-px" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M8 2l1.5 3.5L13 6l-2.5 2.5.6 3.5L8 10.5 4.9 12l.6-3.5L3 6l3.5-.5L8 2z" />
+              </svg>
+              <span className="leading-tight">
+                Needs{" "}
+                <span className="font-semibold text-amber-500">{blockingMilestoneLabels.join(", ")}</span>
               </span>
-            </p>
+            </span>
           )}
           {isPurchasable && !canAfford && (
-            <p className="text-xs text-amber-500/90 leading-tight">
-              Need{" "}
-              <span className="font-medium text-amber-400">{costLabel}</span>
-            </p>
+            <span className="inline-flex items-center gap-1 text-xs text-amber-500/90 bg-amber-950/20 rounded px-1.5 py-0.5 w-fit">
+              <svg className="w-3 h-3 shrink-0" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+                <path d="M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zM7.25 5.5v4h1.5v-4h-1.5zm0 5v1.5h1.5V10.5h-1.5z" />
+              </svg>
+              Need <span className="font-semibold text-amber-400">{costLabel}</span>
+            </span>
           )}
         </div>
 
         {/* Right column: status badge or cost + purchase button */}
         {isUnlocked ? (
-          <span className="text-xs text-emerald-500 font-semibold shrink-0">
-            ✓ Unlocked
+          <span className="inline-flex items-center gap-1 text-xs text-emerald-400 font-semibold shrink-0 bg-emerald-950/40 ring-1 ring-emerald-800/50 px-1.5 py-0.5 rounded">
+            <svg className="w-3 h-3" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+              <path d="M6.5 11.5 3 8l1-1 2.5 2.5 5-5 1 1z" />
+            </svg>
+            Unlocked
           </span>
         ) : isScaffold ? (
           <span className="text-xs text-zinc-700 shrink-0 font-mono bg-zinc-800/50 px-1.5 py-0.5 rounded">

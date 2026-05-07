@@ -24,25 +24,21 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // Fetch pass
-  const { data: pass } = await admin
-    .from("battle_passes")
-    .select("id, premium_cost_credits, premium_cost_premium, is_active, starts_at, ends_at")
-    .eq("id", passId)
-    .maybeSingle();
+  const now = new Date().toISOString();
 
+  // Fetch pass + player progress in parallel
+  const [passRaw, progressRaw] = await Promise.all([
+    admin.from("battle_passes").select("id, premium_cost_credits, premium_cost_premium, is_active, starts_at, ends_at").eq("id", passId).maybeSingle(),
+    admin.from("player_battle_pass").select("id, current_tier, xp_points, is_premium").eq("player_id", player.id).eq("pass_id", passId).maybeSingle(),
+  ]);
+
+  const { data: pass } = passRaw;
   if (!pass) return toErrorResponse(fail("not_found", "Battle pass not found").error);
   if (!pass.is_active) return toErrorResponse(fail("invalid_target", "This battle pass is no longer active").error);
-
-  const now = new Date().toISOString();
   if (pass.ends_at < now) return toErrorResponse(fail("invalid_target", "This battle pass has ended").error);
 
   // Fetch or enroll progress
-  let { data: progress } = await admin
-    .from("player_battle_pass")
-    .select("id, current_tier, xp_points, is_premium")
-    .eq("player_id", player.id).eq("pass_id", passId)
-    .maybeSingle();
+  let { data: progress } = progressRaw;
 
   if (!progress) {
     const { data: enrolled } = await admin
@@ -63,12 +59,11 @@ export async function POST(request: NextRequest) {
   if (player.credits < cost) {
     return toErrorResponse(fail("insufficient_credits", `Requires ${cost} credits`).error);
   }
-  if (cost > 0) {
-    await admin.from("players").update({ credits: player.credits - cost }).eq("id", player.id);
-  }
-
-  // Mark premium
-  await admin.from("player_battle_pass").update({ is_premium: true, updated_at: new Date().toISOString() }).eq("id", progress.id);
+  // Deduct credits (if any) + mark premium in parallel
+  await Promise.all([
+    cost > 0 ? admin.from("players").update({ credits: player.credits - cost }).eq("id", player.id) : Promise.resolve(null),
+    admin.from("player_battle_pass").update({ is_premium: true, updated_at: new Date().toISOString() }).eq("id", progress.id),
+  ]);
 
   // Retroactively deliver premium rewards for already-unlocked tiers
   if ((progress.current_tier ?? 0) > 0) {

@@ -193,6 +193,12 @@ export interface GalaxyTravelLine {
   label: string;
   /** True = fleet travel (slightly different styling) */
   isFleet: boolean;
+  /** Number of ships in this travel group (1 for solo ships). */
+  shipCount: number;
+  /** Cargo items being carried by this ship/fleet. */
+  cargo: { resourceType: string; quantity: number }[];
+  /** A travel_jobs.id for this line (any member job for fleets). Used for speedups. */
+  travelJobId: string;
   /** ISO timestamps for ETA display and ship-position interpolation. */
   arriveAt: string | null;
   departAt: string | null;
@@ -255,6 +261,8 @@ interface GalaxyMapClientProps {
   initialEquippedFleetSkinId:   string | null;
   /** Whether this player has admin/dev tool access. */
   playerIsDev: boolean;
+  /** Number of unread direct messages — shown as badge on the Comms button. */
+  unreadMessageCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +482,7 @@ export function GalaxyMapClient({
   initialEquippedStationSkinId,
   initialEquippedFleetSkinId,
   playerIsDev,
+  unreadMessageCount,
 }: GalaxyMapClientProps) {
   const router = useRouter();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -607,6 +616,11 @@ export function GalaxyMapClient({
   // ── Map legend ─────────────────────────────────────────────────────────────
   const [legendOpen, setLegendOpen] = useState(false);
 
+  // ── Cargo manifest panel ───────────────────────────────────────────────────
+  const [manifestOpen, setManifestOpen] = useState(false);
+  const [speedupLoading, setSpeedupLoading] = useState<string | null>(null); // travelLine key
+  const [speedupError,   setSpeedupError]   = useState<string | null>(null);
+
   // ── Beacon placement state ─────────────────────────────────────────────────
   const [beaconLoading, setBeaconLoading] = useState(false);
   const [beaconError, setBeaconError] = useState<string | null>(null);
@@ -619,28 +633,34 @@ export function GalaxyMapClient({
   const [routeHops, setRouteHops] = useState<string[] | null>(null);
 
   // ── Derived data ──────────────────────────────────────────────────────────
-  const systemMap = new Map(systems.map((s) => [s.id, s]));
-  const asteroidMap = new Map(asteroids.map((a) => [a.id, a]));
-  const currentSystem = systems.find((s) => s.isCurrentLocation) ?? null;
-  const stationSystem = systems.find((s) => s.isStationLocation) ?? null;
-  const dockedShip = ships.find((s) => s.systemId != null) ?? null;
+  const systemMap   = useMemo(() => new Map(systems.map((s) => [s.id, s])),   [systems]);
+  const asteroidMap = useMemo(() => new Map(asteroids.map((a) => [a.id, a])), [asteroids]);
+  const currentSystem = useMemo(() => systems.find((s) => s.isCurrentLocation) ?? null, [systems]);
+  const stationSystem = useMemo(() => systems.find((s) => s.isStationLocation) ?? null, [systems]);
+  const dockedShip    = useMemo(() => ships.find((s) => s.systemId != null) ?? null, [ships]);
   const selectedSystem = selectedId ? (systemMap.get(selectedId) ?? null) : null;
+
+  // Quick lookup: system ID → which alliance territory it belongs to (if any)
+  const systemTerritoryMap = useMemo(() => {
+    const m = new Map<string, GalaxyTerritory>();
+    for (const t of territories) for (const sid of t.systemIds) m.set(sid, t);
+    return m;
+  }, [territories]);
   const selectedAsteroid = selectedAsteroidId ? (asteroidMap.get(selectedAsteroidId) ?? null) : null;
 
-  // Search results (top 8 by name prefix match, then substring)
-  const searchResults = searchOpen && searchQuery.trim().length > 0
-    ? (() => {
-        const q = searchQuery.trim().toLowerCase();
-        return systems
-          .filter((s) => s.name.toLowerCase().includes(q))
-          .sort((a, b) => {
-            const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-            const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-            return aStart - bStart || a.name.localeCompare(b.name);
-          })
-          .slice(0, 8);
-      })()
-    : [];
+  // Search results (top 8 by name prefix match, then substring) — memoized
+  const searchResults = useMemo(() => {
+    if (!searchOpen || !searchQuery.trim()) return [];
+    const q = searchQuery.trim().toLowerCase();
+    return systems
+      .filter((s) => s.name.toLowerCase().includes(q))
+      .sort((a, b) => {
+        const aStart = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+        const bStart = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+        return aStart - bStart || a.name.localeCompare(b.name);
+      })
+      .slice(0, 8);
+  }, [searchOpen, searchQuery, systems]);
 
   // Travel range circle radius in SVG base coords
   const rangeRadius = baseRangeLy * pixelsPerLy;
@@ -672,29 +692,44 @@ export function GalaxyMapClient({
     ? asteroids.filter((a) => a.systemId === selectedSystem.id).length
     : 0;
 
-  // Beacons grouped by system (for SVG markers)
-  const beaconsBySystem = new Map<string, GalaxyBeacon[]>();
-  for (const b of beacons) {
-    const list = beaconsBySystem.get(b.systemId) ?? [];
-    list.push(b);
-    beaconsBySystem.set(b.systemId, list);
-  }
-  // Beacons in the selected system
+  // Beacons grouped by system (for SVG markers) — memoized
+  const beaconsBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyBeacon[]>();
+    for (const b of beacons) {
+      const list = m.get(b.systemId) ?? [];
+      list.push(b);
+      m.set(b.systemId, list);
+    }
+    return m;
+  }, [beacons]);
   const beaconsInSelected = selectedSystem ? (beaconsBySystem.get(selectedSystem.id) ?? []) : [];
 
-  // Territories that contain the selected system
-  const territoriesInSelected = selectedSystem
-    ? territories.filter((t) => t.systemIds.includes(selectedSystem.id))
-    : [];
+  // Territories that contain the selected system — use O(1) map lookup
+  const selectedTerritory = selectedSystem ? (systemTerritoryMap.get(selectedSystem.id) ?? null) : null;
+  const territoriesInSelected = selectedTerritory ? [selectedTerritory] : [];
 
-  // Disputes indexed by beacon system id
-  const disputesBySystem = new Map<string, GalaxyDispute[]>();
-  for (const d of disputes) {
-    const list = disputesBySystem.get(d.beaconSystemId) ?? [];
-    list.push(d);
-    disputesBySystem.set(d.beaconSystemId, list);
-  }
+  // Disputes indexed by beacon system id — memoized
+  const disputesBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyDispute[]>();
+    for (const d of disputes) {
+      const list = m.get(d.beaconSystemId) ?? [];
+      list.push(d);
+      m.set(d.beaconSystemId, list);
+    }
+    return m;
+  }, [disputes]);
   const disputesInSelected = selectedSystem ? (disputesBySystem.get(selectedSystem.id) ?? []) : [];
+
+  // Body stewards grouped by system — memoized so the system panel filter is O(1)
+  const stewrdsBySystem = useMemo(() => {
+    const m = new Map<string, typeof bodyStewrds>();
+    for (const s of bodyStewrds) {
+      const list = m.get(s.systemId) ?? [];
+      list.push(s);
+      m.set(s.systemId, list);
+    }
+    return m;
+  }, [bodyStewrds]);
 
   // latest-value refs (avoid stale closures in useCallback handlers)
   const latestTransform = useRef(transform);
@@ -706,15 +741,18 @@ export function GalaxyMapClient({
   const canTravelRef = useRef(false);
   const handleTravelRef = useRef<(() => void) | null>(null);
 
-  // Ships grouped by system for drag marker positioning
-  const shipsBySystem = new Map<string, GalaxyShip[]>();
-  for (const ship of ships) {
-    if (ship.systemId) {
-      const list = shipsBySystem.get(ship.systemId) ?? [];
-      list.push(ship);
-      shipsBySystem.set(ship.systemId, list);
+  // Ships grouped by system for drag marker positioning — memoized
+  const shipsBySystem = useMemo(() => {
+    const m = new Map<string, GalaxyShip[]>();
+    for (const ship of ships) {
+      if (ship.systemId) {
+        const list = m.get(ship.systemId) ?? [];
+        list.push(ship);
+        m.set(ship.systemId, list);
+      }
     }
-  }
+    return m;
+  }, [ships]);
 
   // ── SVG coordinate helpers ────────────────────────────────────────────────
   /** Convert client mouse coords to SVG viewBox coords. */
@@ -1108,11 +1146,11 @@ export function GalaxyMapClient({
       if (inInput) return;
       const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
         messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
-        colonyPanelSystemId !== null;
+        colonyPanelSystemId !== null || manifestOpen;
       if (anyOverlay) {
         setProfilePanelOpen(false); setMarketPanelOpen(false); setEmpirePanelOpen(false);
         setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false);
-        setShopPanelOpen(false); setColonyPanelSystemId(null);
+        setShopPanelOpen(false); setColonyPanelSystemId(null); setManifestOpen(false);
       } else {
         setSelectedId(null); setSelectedAsteroidId(null);
       }
@@ -1120,7 +1158,7 @@ export function GalaxyMapClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [searchOpen, profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
-      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId]);
+      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId, manifestOpen]);
 
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
@@ -1652,11 +1690,10 @@ export function GalaxyMapClient({
                   key={t.allianceId}
                   points={pts}
                   fill={color}
-                  fillOpacity={0.08}
+                  fillOpacity={0.13}
                   stroke={color}
-                  strokeOpacity={0.30}
-                  strokeWidth={1.5 / scale}
-                  strokeDasharray={`${5 / scale} ${3 / scale}`}
+                  strokeOpacity={0.55}
+                  strokeWidth={2 / scale}
                   pointerEvents="none"
                 />
               );
@@ -1674,9 +1711,8 @@ export function GalaxyMapClient({
                     x2={lnk.x2}
                     y2={lnk.y2}
                     stroke={color}
-                    strokeOpacity={0.35}
-                    strokeWidth={1 / scale}
-                    strokeDasharray={`${4 / scale} ${3 / scale}`}
+                    strokeOpacity={0.50}
+                    strokeWidth={1.5 / scale}
                     pointerEvents="none"
                   />
                 );
@@ -1752,8 +1788,11 @@ export function GalaxyMapClient({
             {travelLines.map((tl) => {
               const midX = (tl.x1 + tl.x2) / 2;
               const midY = (tl.y1 + tl.y2) / 2;
-              const lineColor  = tl.isFleet ? "#a78bfa" : "#818cf8";
-              const labelColor = tl.isFleet ? "#c4b5fd" : "#a5b4fc";
+              const shipSkin  = getSkinById(equippedShipSkinId  ?? "");
+              const fleetSkin = getSkinById(equippedFleetSkinId ?? "");
+              const activeSkin = tl.isFleet ? fleetSkin : shipSkin;
+              const lineColor  = activeSkin?.visual.color ?? (tl.isFleet ? "#a78bfa" : "#818cf8");
+              const labelColor = activeSkin?.visual.accentColor ?? (tl.isFleet ? "#c4b5fd" : "#a5b4fc");
 
               // Interpolated ship position along the route
               let shipX: number | null = null;
@@ -1859,29 +1898,51 @@ export function GalaxyMapClient({
                         opacity={0.35}
                         pointerEvents="none"
                       />
-                      {/* Main ship marker — chevron pointing toward destination */}
+                      {/* Main ship/fleet marker — skin-colored, scaled to feel like an army */}
                       {(() => {
                         const angle = Math.atan2(tl.y2 - tl.y1, tl.x2 - tl.x1) + Math.PI / 2;
-                        const s = 6 / scale;
+                        const s = 9 / scale;
+                        if (tl.isFleet) {
+                          // Fleet: lead ship + two flanking escorts (formation look)
+                          const off = s * 0.9;
+                          const perpA = angle - Math.PI / 2;
+                          const ox = Math.cos(perpA) * off;
+                          const oy = Math.sin(perpA) * off;
+                          const sBig = s, sSmall = s * 0.65;
+                          const lagX = shipX! - Math.cos(angle - Math.PI / 2) * s * 1.1;
+                          const lagY = shipY! - Math.sin(angle - Math.PI / 2) * s * 1.1;
+                          return (
+                            <g filter="url(#glow)">
+                              {/* Flanking escorts */}
+                              <polygon points={shipPolygon(shipX! + ox, shipY! + oy, sSmall, angle)} fill={lineColor} stroke="#06060a" strokeWidth={0.8 / scale} opacity={0.75} />
+                              <polygon points={shipPolygon(shipX! - ox, shipY! - oy, sSmall, angle)} fill={lineColor} stroke="#06060a" strokeWidth={0.8 / scale} opacity={0.75} />
+                              {/* Lead ship */}
+                              <polygon points={shipPolygon(lagX, lagY, sBig, angle)} fill={labelColor} stroke="#06060a" strokeWidth={1.2 / scale} />
+                              {/* Orbit ring */}
+                              <circle cx={shipX!} cy={shipY!} r={13 / scale} fill="none" stroke={labelColor} strokeWidth={0.8 / scale} opacity={0.25} pointerEvents="none" />
+                              {/* Ship count badge */}
+                              {tl.shipCount > 1 && (
+                                <text
+                                  x={shipX! + 11 / scale}
+                                  y={shipY! - 9 / scale}
+                                  fill={labelColor}
+                                  fontSize={Math.max(6, 8 / scale)}
+                                  fontWeight="700"
+                                  textAnchor="middle"
+                                  pointerEvents="none"
+                                  opacity={0.95}
+                                >
+                                  {`×${tl.shipCount}`}
+                                </text>
+                              )}
+                            </g>
+                          );
+                        }
                         return (
-                          <>
-                            <polygon
-                              points={shipPolygon(shipX!, shipY!, s, angle)}
-                              fill={labelColor}
-                              stroke="#06060a"
-                              strokeWidth={1.2 / scale}
-                              filter="url(#glow)"
-                            />
-                            <circle
-                              cx={shipX!} cy={shipY!}
-                              r={9 / scale}
-                              fill="none"
-                              stroke={labelColor}
-                              strokeWidth={0.7 / scale}
-                              opacity={0.20}
-                              pointerEvents="none"
-                            />
-                          </>
+                          <g filter="url(#glow)">
+                            <polygon points={shipPolygon(shipX!, shipY!, s, angle)} fill={labelColor} stroke="#06060a" strokeWidth={1.2 / scale} />
+                            <circle cx={shipX!} cy={shipY!} r={11 / scale} fill="none" stroke={labelColor} strokeWidth={0.7 / scale} opacity={0.22} pointerEvents="none" />
+                          </g>
                         );
                       })()}
                     </>
@@ -1962,6 +2023,40 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(sys.id)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
+                  {/* ── Alliance territory ring ─────────────────────────── */}
+                  {!isDim && (() => {
+                    const territory = systemTerritoryMap.get(sys.id);
+                    if (!territory) return null;
+                    const tc = allianceColor(territory.allianceTag);
+                    return (
+                      <g pointerEvents="none">
+                        {/* Filled halo ring */}
+                        <circle
+                          cx={sys.svgX} cy={sys.svgY}
+                          r={r * 4.2}
+                          fill={tc}
+                          fillOpacity={0.16}
+                          stroke={tc}
+                          strokeOpacity={0.60}
+                          strokeWidth={1.8 / scale}
+                        />
+                        {/* Alliance tag badge */}
+                        {scale >= 1.0 && (
+                          <text
+                            x={sys.svgX}
+                            y={sys.svgY + r * 6}
+                            textAnchor="middle"
+                            fill={tc}
+                            fontSize={Math.max(7, 9 / scale)}
+                            opacity={0.85}
+                          >
+                            [{territory.allianceTag}]
+                          </text>
+                        )}
+                      </g>
+                    );
+                  })()}
+
                   {/* ── Undiscovered: faint twinkle only ─────────────────── */}
                   {isDim && (
                     <>
@@ -2546,9 +2641,8 @@ export function GalaxyMapClient({
             {stationSystem && (() => {
               const sys = stationSystem;
               const starR = nodeRadius(sys);
-              // Position station marker below-right of the star (avoids ship marker area)
-              const mx = sys.svgX + starR + 10;
-              const my = sys.svgY + starR + 10;
+              const mx = sys.svgX + starR + 14;
+              const my = sys.svgY + starR + 14;
               const isDragging = stationDrag !== null;
               return (
                 <g
@@ -2565,23 +2659,41 @@ export function GalaxyMapClient({
                     setShipDispatchError(null);
                   }}
                 >
-                  {/* Station cross icon — cross arms + end caps + centre hub */}
                   {(() => {
-                    const s = 5.5 / scale;
+                    const s = 8 / scale;
                     const stSkin   = getSkinById(equippedStationSkinId ?? "");
                     const stColor  = stSkin?.visual.color      ?? "#fbbf24";
                     const stAccent = stSkin?.visual.accentColor ?? "#f59e0b";
                     return (
-                      <g opacity={isDragging ? 0.30 : 1} filter={isDragging ? undefined : "url(#glow)"}>
-                        <rect x={mx - s * 1.6} y={my - s * 0.22} width={s * 3.2} height={s * 0.44} fill={stColor} />
-                        <rect x={mx - s * 0.22} y={my - s * 1.6} width={s * 0.44} height={s * 3.2} fill={stColor} />
+                      <g opacity={isDragging ? 0.25 : 1} filter={isDragging ? undefined : "url(#glow)"}>
+                        {/* Background disc — filled halo */}
+                        <circle cx={mx} cy={my} r={s * 2.2}
+                          fill={stColor} fillOpacity={0.15}
+                          stroke={stColor} strokeOpacity={0.45} strokeWidth={1.2 / scale} />
+                        {/* Outer halo ring */}
+                        <circle cx={mx} cy={my} r={s * 3}
+                          fill="none" stroke={stColor} strokeOpacity={0.20} strokeWidth={0.8 / scale} />
+                        {/* Cross arms */}
+                        <rect x={mx - s * 1.8} y={my - s * 0.25} width={s * 3.6} height={s * 0.5} fill={stColor} rx={s * 0.1} />
+                        <rect x={mx - s * 0.25} y={my - s * 1.8} width={s * 0.5} height={s * 3.6} fill={stColor} rx={s * 0.1} />
+                        {/* Arm-end orbs */}
                         {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                           <circle key={i}
-                            cx={mx + Math.cos(a) * s * 1.6}
-                            cy={my + Math.sin(a) * s * 1.6}
-                            r={s * 0.45} fill={stAccent} />
+                            cx={mx + Math.cos(a) * s * 1.8}
+                            cy={my + Math.sin(a) * s * 1.8}
+                            r={s * 0.55} fill={stAccent} />
                         ))}
-                        <circle cx={mx} cy={my} r={s * 0.6} fill={stAccent} />
+                        {/* Centre hub */}
+                        <circle cx={mx} cy={my} r={s * 0.75} fill={stAccent} />
+                        {/* Station label */}
+                        {scale >= 0.9 && (
+                          <text x={mx} y={my + s * 3.8}
+                            textAnchor="middle" fill={stColor}
+                            fontSize={Math.max(7, 9 / scale)} opacity={0.9}
+                            className="select-none pointer-events-none">
+                            Your Station
+                          </text>
+                        )}
                       </g>
                     );
                   })()}
@@ -2589,15 +2701,14 @@ export function GalaxyMapClient({
               );
             })()}
 
-            {/* ── Other players' station markers (silver cross, read-only) ── */}
+            {/* ── Other players' station markers ── */}
             {otherStations.map((os) => {
               const sys = systemMap.get(os.systemId);
               if (!sys) return null;
               const starR = nodeRadius(sys);
-              // Position upper-left of the star (opposite quadrant from player's own station)
-              const mx = sys.svgX - starR - 10;
-              const my = sys.svgY - starR - 10;
-              const s = 4.5 / scale;
+              const mx = sys.svgX - starR - 14;
+              const my = sys.svgY - starR - 14;
+              const s = 6.5 / scale;
               const isHov = hoveredId === `other-station-${os.id}`;
               return (
                 <g
@@ -2606,19 +2717,31 @@ export function GalaxyMapClient({
                   onMouseEnter={() => setHoveredId(`other-station-${os.id}`)}
                   onMouseLeave={() => setHoveredId(null)}
                 >
-                  <circle cx={mx} cy={my} r={10 / scale} fill="transparent" />
-                  <g opacity={isHov ? 1 : 0.7}>
-                    <rect x={mx - s * 1.5} y={my - s * 0.2} width={s * 3} height={s * 0.4} fill="#9ca3af" />
-                    <rect x={mx - s * 0.2} y={my - s * 1.5} width={s * 0.4} height={s * 3} fill="#9ca3af" />
+                  <circle cx={mx} cy={my} r={14 / scale} fill="transparent" />
+                  <g opacity={isHov ? 1 : 0.65}>
+                    {/* Background disc */}
+                    <circle cx={mx} cy={my} r={s * 2.2}
+                      fill="#9ca3af" fillOpacity={0.10}
+                      stroke="#9ca3af" strokeOpacity={0.35} strokeWidth={1 / scale} />
+                    {/* Cross arms */}
+                    <rect x={mx - s * 1.7} y={my - s * 0.22} width={s * 3.4} height={s * 0.44} fill="#9ca3af" rx={s * 0.1} />
+                    <rect x={mx - s * 0.22} y={my - s * 1.7} width={s * 0.44} height={s * 3.4} fill="#9ca3af" rx={s * 0.1} />
                     {([0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] as number[]).map((a, i) => (
                       <circle key={i}
-                        cx={mx + Math.cos(a) * s * 1.5}
-                        cy={my + Math.sin(a) * s * 1.5}
-                        r={s * 0.4}
-                        fill="#6b7280"
-                      />
+                        cx={mx + Math.cos(a) * s * 1.7}
+                        cy={my + Math.sin(a) * s * 1.7}
+                        r={s * 0.45} fill="#6b7280" />
                     ))}
-                    <circle cx={mx} cy={my} r={s * 0.55} fill="#6b7280" />
+                    <circle cx={mx} cy={my} r={s * 0.65} fill="#6b7280" />
+                    {/* Owner label (always visible at low-medium zoom) */}
+                    {scale >= 0.7 && (
+                      <text x={mx} y={my + s * 3.5}
+                        textAnchor="middle" fill="#9ca3af"
+                        fontSize={Math.max(7, 9 / scale)} opacity={0.80}
+                        className="select-none pointer-events-none">
+                        {os.ownerHandle}
+                      </text>
+                    )}
                   </g>
                   {/* Tooltip on hover */}
                   {isHov && (
@@ -2980,7 +3103,7 @@ export function GalaxyMapClient({
               </svg>,
             },
             {
-              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true),
+              label: "Comms", bg: "from-violet-900/70 to-violet-950/80", border: "border-violet-700/40", glow: "shadow-violet-900/40", iconBg: "bg-violet-950/60", onClick: () => setMessagesPanelOpen(true), badge: unreadMessageCount || undefined,
               icon: <svg viewBox="0 0 24 24" fill="none" strokeLinecap="round" className="w-6 h-6">
                 <polygon points="9,21 12,13 15,21" fill="#3b0764" opacity="0.7"/>
                 <line x1="12" y1="22" x2="12" y2="13" stroke="#a78bfa" strokeWidth="2"/>
@@ -3002,6 +3125,17 @@ export function GalaxyMapClient({
                 <circle cx="20" cy="9" r="0.9" fill="#c7d2fe"/>
                 <circle cx="12" cy="5" r="2.5" fill="#818cf8"/>
                 <circle cx="12" cy="5" r="1" fill="#e0e7ff"/>
+              </svg>,
+            },
+            {
+              label: "Cargo", bg: "from-emerald-900/70 to-emerald-950/80", border: "border-emerald-800/40", glow: "shadow-emerald-900/40", iconBg: "bg-emerald-950/60", onClick: () => setManifestOpen(true),
+              badge: travelLines.filter((tl) => tl.cargo.length > 0).length || undefined,
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <rect x="3" y="10" width="18" height="11" rx="2" fill="#064e3b" opacity="0.6"/>
+                <rect x="3" y="10" width="18" height="11" rx="2" stroke="#34d399" strokeWidth="1.5"/>
+                <path d="M7 10V7a5 5 0 0110 0v3" stroke="#6ee7b7" strokeWidth="2" strokeLinecap="round"/>
+                <circle cx="12" cy="15.5" r="2" fill="#34d399"/>
+                <line x1="12" y1="14" x2="12" y2="13" stroke="#6ee7b7" strokeWidth="1.5" strokeLinecap="round"/>
               </svg>,
             },
           ] as { label: string; bg: string; border: string; glow: string; iconBg: string; onClick: () => void; icon: ReactNode; badge?: number }[]).map((btn) => (
@@ -3624,7 +3758,7 @@ export function GalaxyMapClient({
                           >
                             {disputeLoading === b.id
                               ? "Challenging…"
-                              : `Challenge [{${b.allianceTag}}] Beacon`}
+                              : `Challenge [${b.allianceTag}] Beacon`}
                           </button>
                         ))}
                       </div>
@@ -3702,7 +3836,7 @@ export function GalaxyMapClient({
 
               {/* ── Body stewardship ───────────────────────────────────── */}
               {(() => {
-                const stewrdsHere = bodyStewrds.filter((s) => s.systemId === selectedSystem.id);
+                const stewrdsHere = stewrdsBySystem.get(selectedSystem.id) ?? [];
                 if (stewrdsHere.length === 0) return null;
                 return (
                   <div className="py-2">
@@ -3833,6 +3967,29 @@ export function GalaxyMapClient({
                               </div>
                             );
                           })}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Ships en route to this system */}
+                    {shipsInTransit.filter((s) => s.destinationSystemId === selectedSystem.id).length > 0 && (
+                      <div className="mb-3">
+                        <p className="mb-1.5 text-xs text-zinc-700">Incoming</p>
+                        <div className="space-y-1">
+                          {shipsInTransit
+                            .filter((s) => s.destinationSystemId === selectedSystem.id)
+                            .map((ship) => {
+                              const tl = travelLines.find((t) => t.key.includes(ship.id) || (t.isFleet && fleets.find((f) => f.id === t.key.replace("fleet-","") && f.destinationSystemId === selectedSystem.id)));
+                              const msLeft = ship.arriveAt ? new Date(ship.arriveAt).getTime() - Date.now() : null;
+                              const eta = msLeft !== null && msLeft > 0 ? formatEta(msLeft / 3600000) : "arriving";
+                              return (
+                                <div key={ship.id} className="flex items-center gap-2 rounded border border-sky-900/40 bg-sky-950/20 px-2.5 py-1.5">
+                                  <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400 opacity-70 animate-pulse" />
+                                  <p className="flex-1 truncate text-xs text-zinc-300">{ship.name}</p>
+                                  <span className="text-[10px] text-sky-500 shrink-0">{eta}</span>
+                                </div>
+                              );
+                            })}
                         </div>
                       </div>
                     )}
@@ -4232,6 +4389,98 @@ export function GalaxyMapClient({
             setEquippedFleetSkinId(eq.fleetSkinId);
           }}
         />
+      )}
+
+      {/* ── Cargo Manifest panel ──────────────────────────────────────── */}
+      {manifestOpen && (
+        <div className="fixed inset-y-0 right-0 z-50 flex flex-col w-80 bg-zinc-950/95 border-l border-emerald-900/40 shadow-2xl backdrop-blur-md">
+          {/* Header */}
+          <div className="flex items-center justify-between px-4 py-3 border-b border-emerald-900/30">
+            <span className="text-sm font-semibold text-emerald-300 uppercase tracking-widest">Cargo Manifest</span>
+            <button onClick={() => setManifestOpen(false)} className="text-zinc-500 hover:text-zinc-200 transition-colors text-lg leading-none">×</button>
+          </div>
+
+          {/* Speedup hint */}
+          <div className="px-3 py-2 border-b border-zinc-800/40 text-[10px] text-zinc-500">
+            ⚡ Speed Up costs <span className="text-yellow-400 font-semibold">25 credits</span> · cuts 1 hr off travel time
+          </div>
+
+          {/* Error */}
+          {speedupError && (
+            <div className="mx-3 mt-2 px-2 py-1.5 rounded bg-red-950/60 border border-red-800/50 text-[10px] text-red-400">
+              {speedupError}
+            </div>
+          )}
+
+          {/* Body */}
+          <div className="flex-1 overflow-y-auto p-3 space-y-3">
+            {travelLines.length === 0 ? (
+              <p className="text-xs text-zinc-600 text-center mt-8">No ships in transit.</p>
+            ) : (
+              travelLines.map((tl) => {
+                const msLeft = tl.arriveAt ? new Date(tl.arriveAt).getTime() - Date.now() : null;
+                const etaStr = msLeft !== null && msLeft > 0 ? formatEta(msLeft / 3600000) : "arriving";
+                const fromSys = systems.find((s) => s.id === tl.fromSystemId);
+                const toSys   = systems.find((s) => s.id === tl.toSystemId);
+                const isArriving = msLeft !== null && msLeft <= 0;
+                const isLoading  = speedupLoading === tl.key;
+                return (
+                  <div key={tl.key} className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 p-3 space-y-2">
+                    {/* Route + ETA header */}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-zinc-200 truncate">
+                        {tl.label}{tl.shipCount > 1 ? ` ×${tl.shipCount}` : ""}
+                      </span>
+                      <span className="text-[10px] text-emerald-400 shrink-0">{etaStr}</span>
+                    </div>
+                    <div className="text-[10px] text-zinc-500">
+                      {fromSys?.name ?? tl.fromSystemId} → {toSys?.name ?? tl.toSystemId}
+                    </div>
+                    {/* Cargo rows */}
+                    {tl.cargo.length === 0 ? (
+                      <div className="text-[10px] text-zinc-600 italic">Empty hold</div>
+                    ) : (
+                      <div className="space-y-1">
+                        {tl.cargo.map((c) => (
+                          <div key={c.resourceType} className="flex items-center justify-between text-[11px]">
+                            <span className="capitalize text-zinc-300">{c.resourceType.replace(/_/g, " ")}</span>
+                            <span className="font-mono text-emerald-400 tabular-nums">{c.quantity.toLocaleString()}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {/* Speedup button */}
+                    {!isArriving && (
+                      <button
+                        disabled={isLoading}
+                        onClick={async () => {
+                          setSpeedupError(null);
+                          setSpeedupLoading(tl.key);
+                          try {
+                            const res = await fetch("/api/game/travel/speedup", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ travelJobId: tl.travelJobId }),
+                            });
+                            const json = await res.json();
+                            if (!json.ok) setSpeedupError(json.error ?? "Speedup failed.");
+                          } catch {
+                            setSpeedupError("Network error.");
+                          } finally {
+                            setSpeedupLoading(null);
+                          }
+                        }}
+                        className="w-full flex items-center justify-center gap-1.5 py-1.5 rounded-md bg-yellow-900/30 border border-yellow-700/40 text-[10px] font-semibold text-yellow-300 hover:bg-yellow-900/50 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {isLoading ? "Applying…" : "⚡ Speed Up  (25 cr)"}
+                      </button>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

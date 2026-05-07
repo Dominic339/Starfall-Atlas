@@ -88,38 +88,37 @@ export default async function SystemPage({
 
   if (!player) redirect("/login");
 
-  // Phase 16: fetch player research to check harsh colony gating.
-  const { data: researchData } = listResult<{ research_id: string }>(
-    await admin
+  // ── Parallel initial fetches ──────────────────────────────────────────────
+  // All queries below are independent of each other — run together.
+  const [
+    researchRes,
+    shipsRes,
+    pendingJobsRes,
+  ] = await Promise.all([
+    admin
       .from("player_research")
       .select("research_id")
       .eq("player_id", player.id),
-  );
-  const hasHarshColonyResearch = (researchData ?? []).some(
-    (r) => r.research_id === "harsh_colony_environment",
-  );
-
-  // Fetch all ships — players start with 2 (Phase 5.5).
-  const { data: shipsData } = listResult<Ship>(
-    await admin
+    admin
       .from("ships")
       .select("*")
       .eq("owner_id", player.id)
       .order("created_at", { ascending: true }),
-  );
-  const shipList = shipsData ?? [];
-
-  // ── Fetch pending travel job (in transit?) ────────────────────────────────
-  const { data: pendingJobs } = listResult<TravelJob>(
-    await admin
+    admin
       .from("travel_jobs")
       .select("*")
       .eq("player_id", player.id)
       .eq("status", "pending")
       .order("created_at", { ascending: false })
       .limit(1),
+  ]);
+
+  const researchData = listResult<{ research_id: string }>(researchRes).data ?? [];
+  const hasHarshColonyResearch = researchData.some(
+    (r) => r.research_id === "harsh_colony_environment",
   );
-  const activeTravelJob = pendingJobs?.[0] ?? null;
+  const shipList = listResult<Ship>(shipsRes).data ?? [];
+  const activeTravelJob = listResult<TravelJob>(pendingJobsRes).data?.[0] ?? null;
 
   // Is any ship currently in transit TO this system?
   const inTransitHere =
@@ -133,36 +132,36 @@ export default async function SystemPage({
   const shipPresentHere = shipList.find((s) => s.current_system_id === systemId) ?? null;
   const shipIsHere = !!shipPresentHere;
 
-  // ── Discovery / stewardship state ─────────────────────────────────────────
-  const { data: myDiscovery } = maybeSingleResult<SystemDiscovery>(
-    await admin
+  // ── Second parallel batch: system-specific lookups ───────────────────────
+  const [
+    discoveryRes,
+    stewardshipRes,
+    surveyRes,
+    systemColoniesRes,
+  ] = await Promise.all([
+    admin
       .from("system_discoveries")
       .select("*")
       .eq("system_id", systemId)
       .eq("player_id", player.id)
       .maybeSingle(),
-  );
-
-  const { data: stewardship } = maybeSingleResult<SystemStewardship>(
-    await admin
+    admin
       .from("system_stewardship")
       .select("*")
       .eq("system_id", systemId)
       .maybeSingle(),
-  );
+    admin
+      .from("survey_results")
+      .select("*")
+      .eq("system_id", systemId),
+    admin
+      .from("colonies")
+      .select("id, body_id, owner_id, status, population_tier, next_growth_at")
+      .eq("system_id", systemId),
+  ]);
 
-  // Fetch steward's handle if stewardship exists.
-  let stewardHandle: string | null = null;
-  if (stewardship) {
-    const { data: stewardPlayer } = maybeSingleResult<{ handle: string }>(
-      await admin
-        .from("players")
-        .select("handle")
-        .eq("id", stewardship.steward_id)
-        .maybeSingle(),
-    );
-    stewardHandle = stewardPlayer?.handle ?? null;
-  }
+  const myDiscovery   = maybeSingleResult<SystemDiscovery>(discoveryRes).data ?? null;
+  const stewardship   = maybeSingleResult<SystemStewardship>(stewardshipRes).data ?? null;
 
   // ── Travel reachability ───────────────────────────────────────────────────
   // Find a ship that is docked somewhere other than this system and not the
@@ -209,100 +208,99 @@ export default async function SystemPage({
     ? getNearbySystems(systemId, maxRangeLy)
     : getNearbySystems(systemId, maxRangeLy).slice(0, 6);
 
-  // ── Phase 5: Survey results for all bodies in this system ─────────────────
-  const { data: surveyResults } = listResult<SurveyResult>(
-    await admin
-      .from("survey_results")
-      .select("*")
-      .eq("system_id", systemId),
-  );
-  const surveyByBodyId = new Map(
-    (surveyResults ?? []).map((s) => [s.body_id, s]),
-  );
-
-  // ── Phase 5/6: Colonies in this system (any player) ──────────────────────
+  // Parse survey + colony results from the parallel batch above
   type ColonyRow = Pick<
     Colony,
     "id" | "body_id" | "owner_id" | "status" | "population_tier" | "next_growth_at"
   >;
-  const { data: systemColonies } = listResult<ColonyRow>(
-    await admin
-      .from("colonies")
-      .select("id, body_id, owner_id, status, population_tier, next_growth_at")
-      .eq("system_id", systemId),
-  );
-  const colonyByBodyId = new Map(
-    (systemColonies ?? []).map((c) => [c.body_id, c]),
-  );
+  const surveyResults  = listResult<SurveyResult>(surveyRes).data ?? [];
+  const systemColonies = listResult<ColonyRow>(systemColoniesRes).data ?? [];
 
-  // ── Phase 26: Fetch owner handles for other players' active colonies ───────
+  const surveyByBodyId = new Map(surveyResults.map((s) => [s.body_id, s]));
+  const colonyByBodyId = new Map(systemColonies.map((c) => [c.body_id, c]));
+
+  // ── Batch 3: all post-batch-2 queries run in parallel ────────────────────
+  const myColonyIds = systemColonies
+    .filter((c) => c.owner_id === player.id && c.status === "active")
+    .map((c) => c.id);
+
   const otherOwnerIds = [
     ...new Set(
-      (systemColonies ?? [])
+      systemColonies
         .filter((c) => c.owner_id !== player.id && c.status !== "collapsed")
         .map((c) => c.owner_id),
     ),
   ];
-  const colonyOwnerHandles = new Map<string, string>();
-  if (otherOwnerIds.length > 0) {
-    const { data: ownerRows } = listResult<{ id: string; handle: string }>(
-      await admin
-        .from("players")
-        .select("id, handle")
-        .in("id", otherOwnerIds),
-    );
-    for (const row of ownerRows ?? []) {
-      colonyOwnerHandles.set(row.id, row.handle);
-    }
-  }
 
-  // ── Phase 26: Fetch first discoverer info for this system ─────────────────
-  let firstDiscovererHandle: string | null = null;
-  if (!isSol && !myDiscovery?.is_first) {
-    const { data: firstDisc } = maybeSingleResult<{ player_id: string }>(
-      await admin
-        .from("system_discoveries")
-        .select("player_id")
-        .eq("system_id", systemId)
-        .eq("is_first", true)
-        .maybeSingle(),
-    );
-    if (firstDisc) {
-      const { data: discPlayer } = maybeSingleResult<{ handle: string }>(
-        await admin
-          .from("players")
-          .select("handle")
-          .eq("id", firstDisc.player_id)
-          .maybeSingle(),
-      );
-      firstDiscovererHandle = discPlayer?.handle ?? null;
-    }
-  }
+  type InvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & { location_id: string };
+  type AllColonyRow = { id: string; body_id: string; system_id: string };
+  type RouteRow = Pick<ColonyRoute, "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes">;
+  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
+  type StationInvRow = { resource_type: string; quantity: number };
 
-  // ── Phase 7: Colony inventory for player's colonies in this system ─────────
-  // Used to display load actions when a ship is present.
-  const myColonyIds = (systemColonies ?? [])
-    .filter((c) => c.owner_id === player.id && c.status === "active")
-    .map((c) => c.id);
-
-  type InvRow = Pick<ResourceInventoryRow, "resource_type" | "quantity"> & {
-    location_id: string;
-  };
-  const colonyInvRows: InvRow[] =
+  const [
+    stewardPlayerRes,
+    ownerHandlesRes,
+    firstDiscRes,
+    colonyInvRes,
+    allColoniesRes,
+    routesRes,
+    transportsRes,
+    stationRes,
+  ] = await Promise.all([
+    stewardship
+      ? admin.from("players").select("handle").eq("id", stewardship.steward_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    otherOwnerIds.length > 0
+      ? admin.from("players").select("id, handle").in("id", otherOwnerIds)
+      : Promise.resolve({ data: [], error: null }),
+    !isSol && !myDiscovery?.is_first
+      ? admin.from("system_discoveries").select("player_id").eq("system_id", systemId).eq("is_first", true).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
     myColonyIds.length > 0
-      ? (listResult<InvRow>(
-          await admin
-            .from("resource_inventory")
-            .select("location_id, resource_type, quantity")
-            .eq("location_type", "colony")
-            .in("location_id", myColonyIds)
-            .order("resource_type", { ascending: true }),
-        ).data ?? [])
-      : [];
-  const colonyInventoryById = new Map<
-    string,
-    { resource_type: string; quantity: number }[]
-  >();
+      ? admin.from("resource_inventory").select("location_id, resource_type, quantity").eq("location_type", "colony").in("location_id", myColonyIds).order("resource_type", { ascending: true })
+      : Promise.resolve({ data: [], error: null }),
+    admin.from("colonies").select("id, body_id, system_id").eq("owner_id", player.id).eq("status", "active"),
+    myColonyIds.length > 0
+      ? admin.from("colony_routes").select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes").eq("player_id", player.id).or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`).order("from_colony_id")
+      : Promise.resolve({ data: [], error: null }),
+    myColonyIds.length > 0
+      ? admin.from("colony_transports").select("id, colony_id, tier").in("colony_id", myColonyIds)
+      : Promise.resolve({ data: [], error: null }),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (admin as any).from("player_stations").select("id").eq("owner_id", player.id).maybeSingle(),
+  ]);
+
+  const stewardHandle = maybeSingleResult<{ handle: string }>(stewardPlayerRes).data?.handle ?? null;
+  const colonyOwnerHandles = new Map<string, string>(
+    (listResult<{ id: string; handle: string }>(ownerHandlesRes).data ?? []).map((r) => [r.id, r.handle]),
+  );
+  const firstDisc = maybeSingleResult<{ player_id: string }>(firstDiscRes).data;
+  const colonyInvRows: InvRow[] = listResult<InvRow>(colonyInvRes).data ?? [];
+  const allActiveColonies: AllColonyRow[] = listResult<AllColonyRow>(allColoniesRes).data ?? [];
+  const colonyRoutesRows: RouteRow[] = listResult<RouteRow>(routesRes).data ?? [];
+  const transportRows: TransportRow[] = listResult<TransportRow>(transportsRes).data ?? [];
+  const stationRow = maybeSingleResult<{ id: string }>(stationRes).data;
+
+  // ── Batch 4: first discoverer handle + station inventory (parallel) ───────
+  const [firstDiscHandleRes, stationInvFetchRes] = await Promise.all([
+    firstDisc
+      ? admin.from("players").select("handle").eq("id", firstDisc.player_id).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+    stationRow
+      ? admin.from("resource_inventory").select("resource_type, quantity").eq("location_type", "station").eq("location_id", stationRow.id).in("resource_type", ["iron", "carbon", "steel"])
+      : Promise.resolve({ data: [] as StationInvRow[], error: null }),
+  ]);
+
+  const firstDiscovererHandle = maybeSingleResult<{ handle: string }>(firstDiscHandleRes).data?.handle ?? null;
+  const stationInvRows = listResult<StationInvRow>(stationInvFetchRes).data ?? [];
+  const stationInvMap = new Map(stationInvRows.map((r) => [r.resource_type, r.quantity]));
+  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
+  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
+  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
+
+  // Build colony inventory map
+  const colonyInventoryById = new Map<string, { resource_type: string; quantity: number }[]>();
   for (const row of colonyInvRows) {
     const existing = colonyInventoryById.get(row.location_id) ?? [];
     existing.push({ resource_type: row.resource_type, quantity: row.quantity });
@@ -312,47 +310,7 @@ export default async function SystemPage({
   // Ship present here for load actions (first docked ship in system)
   const loadingShip = shipList.find((s) => s.current_system_id === systemId) ?? null;
 
-  // ── Phase 15: supply routes and transports for this system's colonies ──────
-  // Fetch all player's active colonies (for route destination selector).
-  type AllColonyRow = { id: string; body_id: string; system_id: string };
-  const { data: allPlayerColonies } = listResult<AllColonyRow>(
-    await admin
-      .from("colonies")
-      .select("id, body_id, system_id")
-      .eq("owner_id", player.id)
-      .eq("status", "active"),
-  );
-  const allActiveColonies = allPlayerColonies ?? [];
-
-  // Fetch existing routes for player's colonies in this system.
-  type RouteRow = Pick<ColonyRoute,
-    "id" | "from_colony_id" | "to_colony_id" | "resource_type" | "mode" | "fixed_amount" | "interval_minutes"
-  >;
-  const colonyRoutesRows: RouteRow[] =
-    myColonyIds.length > 0
-      ? (listResult<RouteRow>(
-          await admin
-            .from("colony_routes")
-            .select("id, from_colony_id, to_colony_id, resource_type, mode, fixed_amount, interval_minutes")
-            .eq("player_id", player.id)
-            .or(`from_colony_id.in.(${myColonyIds.join(",")}),to_colony_id.in.(${myColonyIds.join(",")})`)
-            .order("from_colony_id"),
-        ).data ?? [])
-      : [];
-
-  // Fetch transports for player's colonies in this system.
-  type TransportRow = Pick<ColonyTransport, "id" | "colony_id" | "tier">;
-  const transportRows: TransportRow[] =
-    myColonyIds.length > 0
-      ? (listResult<TransportRow>(
-          await admin
-            .from("colony_transports")
-            .select("id, colony_id, tier")
-            .in("colony_id", myColonyIds),
-        ).data ?? [])
-      : [];
-
-  // Build lookup maps.
+  // Build route/transport lookup maps
   const routesByFromColonyId = new Map<string, RouteRow[]>();
   const routesByToColonyId   = new Map<string, RouteRow[]>();
   for (const r of colonyRoutesRows) {
@@ -369,31 +327,6 @@ export default async function SystemPage({
     list.push(t);
     transportsByColonyId.set(t.colony_id, list);
   }
-
-  // ── Phase 18: station inventory (for transport purchase/upgrade affordability) ──
-  const { data: stationRow } = maybeSingleResult<{ id: string }>(
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await (admin as any)
-      .from("player_stations")
-      .select("id")
-      .eq("owner_id", player.id)
-      .maybeSingle(),
-  );
-
-  type StationInvRow = { resource_type: string; quantity: number };
-  const stationInvRes = stationRow
-    ? await admin
-        .from("resource_inventory")
-        .select("resource_type, quantity")
-        .eq("location_type", "station")
-        .eq("location_id", stationRow.id)
-        .in("resource_type", ["iron", "carbon", "steel"])
-    : { data: [] as StationInvRow[], error: null };
-  const { data: stationInvRows } = listResult<StationInvRow>(stationInvRes);
-  const stationInvMap = new Map((stationInvRows ?? []).map((r) => [r.resource_type, r.quantity]));
-  const stationIronForTransports   = stationInvMap.get("iron")   ?? 0;
-  const stationCarbonForTransports = stationInvMap.get("carbon") ?? 0;
-  const stationSteelForTransports  = stationInvMap.get("steel")  ?? 0;
 
   // Build destination colony selector options (exclude current colony, already-routed ones per resource).
   const colonyLabelById = new Map<string, string>(
@@ -415,15 +348,8 @@ export default async function SystemPage({
   const hasSystemAccess = isSol || !!myDiscovery;
   const canActOnBodies = shipIsHere && hasSystemAccess;
 
-  // Count player's active colonies (for first-colony detection display)
-  const { data: playerActiveColonies } = listResult<{ id: string }>(
-    await admin
-      .from("colonies")
-      .select("id")
-      .eq("owner_id", player.id)
-      .eq("status", "active"),
-  );
-  const activeColonyCount = playerActiveColonies?.length ?? 0;
+  // allActiveColonies (fetched above for route selectors) doubles as the count source.
+  const activeColonyCount = allActiveColonies.length;
   const isFirstColony = !player.first_colony_placed && activeColonyCount === 0;
   // True when the player has filled their current slot tier (unlimited tier bypasses this).
   const atSlotCap =
@@ -480,9 +406,9 @@ export default async function SystemPage({
       </div>
 
       {/* Status row */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 stagger-children">
         {/* Discovery status */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 card-interactive animate-fade-in-up">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Discovery
           </p>
@@ -523,7 +449,7 @@ export default async function SystemPage({
         </div>
 
         {/* Stewardship status */}
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 card-interactive animate-fade-in-up">
           <p className="text-xs font-medium uppercase tracking-wider text-zinc-500">
             Stewardship
           </p>
@@ -557,7 +483,7 @@ export default async function SystemPage({
 
       {/* Travel / discover / arrive actions */}
       {!isSol && (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4">
+        <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-4 animate-fade-in-up">
           <h2 className="mb-3 text-sm font-semibold text-zinc-400">Actions</h2>
           <div className="space-y-3">
             {/* Arrive button — ship is in transit here */}
@@ -623,7 +549,7 @@ export default async function SystemPage({
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
           Bodies ({system.bodyCount})
         </h2>
-        <div className="space-y-2">
+        <div className="space-y-2 stagger-children">
           {system.bodies.map((body) => {
             const survey = surveyByBodyId.get(body.id) ?? null;
             const colony = colonyByBodyId.get(body.id) ?? null;
@@ -656,7 +582,7 @@ export default async function SystemPage({
             return (
               <div
                 key={body.id}
-                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3"
+                className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up"
               >
                 {/* Body header row */}
                 <div className="flex items-start justify-between gap-3">
@@ -936,12 +862,12 @@ export default async function SystemPage({
           <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-zinc-500">
             Nearby systems (within {maxRangeLy} ly)
           </h2>
-          <div className="space-y-2">
+          <div className="space-y-2 stagger-children">
             {nearbySystems.map((nearby) => (
               <Link
                 key={nearby.id}
                 href={`/game/system/${encodeURIComponent(nearby.id)}`}
-                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 transition-colors hover:border-zinc-700"
+                className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 card-interactive animate-fade-in-up"
               >
                 <div>
                   <p className="text-sm font-medium text-zinc-200">

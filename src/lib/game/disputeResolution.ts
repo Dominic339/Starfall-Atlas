@@ -112,9 +112,7 @@ export async function resolveOverdueDisputes(admin: AdminClient): Promise<void> 
 
   const overdueDisputes: DisputeRow[] = overdueRows;
 
-  for (const dispute of overdueDisputes) {
-    await resolveSingleDispute(admin, dispute, now);
-  }
+  await Promise.all(overdueDisputes.map((dispute) => resolveSingleDispute(admin, dispute, now)));
 }
 
 async function resolveSingleDispute(
@@ -177,17 +175,15 @@ async function resolveSingleDispute(
     new Date(resolvedAt).getTime() + BALANCE.disputes.cooldownHours * 60 * 60 * 1000,
   ).toISOString();
 
-  // Upsert cooldowns (use ON CONFLICT via delete+insert pattern)
-  for (const beaconId of beaconIds) {
-    // Delete existing cooldowns for this beacon first
-    await admin.from("beacon_cooldowns").delete().eq("beacon_id", beaconId);
-
-    await admin.from("beacon_cooldowns").insert({
+  // Upsert cooldowns in a single batch delete + single batch insert
+  await admin.from("beacon_cooldowns").delete().in("beacon_id", beaconIds);
+  await admin.from("beacon_cooldowns").insert(
+    beaconIds.map((beaconId) => ({
       beacon_id:  beaconId,
       dispute_id: dispute.id,
       expires_at: cooldownExpiry,
-    });
-  }
+    })),
+  );
 
   // 5. Release all committed fleets
   const fleetIds = rRows.map((r) => r.fleet_id);

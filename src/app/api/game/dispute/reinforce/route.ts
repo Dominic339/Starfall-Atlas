@@ -55,222 +55,106 @@ export async function POST(request: NextRequest) {
   // ── Lazy resolution pass ──────────────────────────────────────────────────
   await resolveOverdueDisputes(admin);
 
-  // ── Caller must be in an alliance ─────────────────────────────────────────
+  // ── Batch 1: membership + dispute + fleet + fleet members in parallel ──────
   type MemberRow = { alliance_id: string };
-  const { data: membership } = maybeSingleResult<MemberRow>(
-    await admin
-      .from("alliance_members")
-      .select("alliance_id")
-      .eq("player_id", player.id)
-      .maybeSingle(),
-  );
+  type DisputeRow = { id: string; beacon_id: string; defending_alliance_id: string; attacking_alliance_id: string; status: string; resolves_at: string };
+  const [membershipRes, disputeRes, fleetRes, fleetShipRes] = await Promise.all([
+    admin.from("alliance_members").select("alliance_id").eq("player_id", player.id).maybeSingle(),
+    admin.from("disputes").select("id, beacon_id, defending_alliance_id, attacking_alliance_id, status, resolves_at").eq("id", disputeId).maybeSingle(),
+    admin.from("fleets").select("*").eq("id", fleetId).maybeSingle(),
+    admin.from("fleet_ships").select("ship_id").eq("fleet_id", fleetId),
+  ]);
 
-  if (!membership) {
-    return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
-  }
+  const { data: membership } = maybeSingleResult<MemberRow>(membershipRes);
+  if (!membership) return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
   const callerAllianceId = membership.alliance_id;
 
-  // ── Fetch dispute ─────────────────────────────────────────────────────────
-  type DisputeRow = {
-    id: string;
-    beacon_id: string;
-    defending_alliance_id: string;
-    attacking_alliance_id: string;
-    status: string;
-    resolves_at: string;
-  };
-  const { data: dispute } = maybeSingleResult<DisputeRow>(
-    await admin
-      .from("disputes")
-      .select("id, beacon_id, defending_alliance_id, attacking_alliance_id, status, resolves_at")
-      .eq("id", disputeId)
-      .maybeSingle(),
-  );
-
-  if (!dispute) {
-    return toErrorResponse(fail("not_found", "Dispute not found.").error);
-  }
-  if (dispute.status !== "open") {
-    return toErrorResponse(fail("already_exists", "This dispute is no longer active.").error);
+  const { data: dispute } = maybeSingleResult<DisputeRow>(disputeRes);
+  if (!dispute) return toErrorResponse(fail("not_found", "Dispute not found.").error);
+  if (dispute.status !== "open") return toErrorResponse(fail("already_exists", "This dispute is no longer active.").error);
+  if (callerAllianceId !== dispute.defending_alliance_id && callerAllianceId !== dispute.attacking_alliance_id) {
+    return toErrorResponse(fail("forbidden", "Your alliance is not a party to this dispute.").error);
   }
 
-  // ── Caller's alliance must be a party to the dispute ─────────────────────
-  if (
-    callerAllianceId !== dispute.defending_alliance_id &&
-    callerAllianceId !== dispute.attacking_alliance_id
-  ) {
-    return toErrorResponse(
-      fail("forbidden", "Your alliance is not a party to this dispute.").error,
-    );
-  }
-
-  // ── Fetch fleet ───────────────────────────────────────────────────────────
-  const { data: fleet } = maybeSingleResult<Fleet>(
-    await admin
-      .from("fleets")
-      .select("*")
-      .eq("id", fleetId)
-      .maybeSingle(),
-  );
-
-  if (!fleet) {
-    return toErrorResponse(fail("not_found", "Fleet not found.").error);
-  }
-  if (fleet.player_id !== player.id) {
-    return toErrorResponse(fail("forbidden", "You do not own this fleet.").error);
-  }
+  const { data: fleet } = maybeSingleResult<Fleet>(fleetRes);
+  if (!fleet) return toErrorResponse(fail("not_found", "Fleet not found.").error);
+  if (fleet.player_id !== player.id) return toErrorResponse(fail("forbidden", "You do not own this fleet.").error);
   if (fleet.status !== "active") {
     return toErrorResponse(
-      fail(
-        "job_in_progress",
-        fleet.status === "traveling"
-          ? "Fleet is currently traveling and cannot be committed."
-          : "Fleet has been disbanded.",
-      ).error,
+      fail("job_in_progress", fleet.status === "traveling" ? "Fleet is currently traveling and cannot be committed." : "Fleet has been disbanded.").error,
     );
   }
-  if (fleet.dispute_commit_id) {
-    return toErrorResponse(
-      fail("already_exists", "Fleet is already committed to a dispute.").error,
-    );
-  }
+  if (fleet.dispute_commit_id) return toErrorResponse(fail("already_exists", "Fleet is already committed to a dispute.").error);
 
   const fromSystemId = fleet.current_system_id;
-  if (!fromSystemId) {
-    return toErrorResponse(
-      fail("invalid_target", "Fleet has no current system.").error,
-    );
-  }
+  if (!fromSystemId) return toErrorResponse(fail("invalid_target", "Fleet has no current system.").error);
 
-  // ── Fetch beacon system for ETA calculation ───────────────────────────────
+  const { data: fleetShipRows } = listResult<FleetShip>(fleetShipRes);
+  const memberShipIds = (fleetShipRows ?? []).map((r) => r.ship_id);
+  if (memberShipIds.length === 0) return toErrorResponse(fail("invalid_target", "Fleet has no member ships.").error);
+
+  // ── Batch 2: beacon + member ships (with all needed columns) in parallel ──
   type BeaconRow = { system_id: string };
-  const { data: beacon } = maybeSingleResult<BeaconRow>(
-    await admin
-      .from("alliance_beacons")
-      .select("system_id")
-      .eq("id", dispute.beacon_id)
-      .maybeSingle(),
-  );
+  type ShipStatRow = { id: string; speed_ly_per_hr: number; turret_level: number; hull_level: number; shield_level: number };
+  const [beaconRes, memberShipsRes] = await Promise.all([
+    admin.from("alliance_beacons").select("system_id").eq("id", dispute.beacon_id).maybeSingle(),
+    admin.from("ships").select("id, speed_ly_per_hr, turret_level, hull_level, shield_level").in("id", memberShipIds),
+  ]);
 
-  if (!beacon) {
-    return toErrorResponse(fail("not_found", "Dispute beacon not found.").error);
-  }
-
+  const { data: beacon } = maybeSingleResult<BeaconRow>(beaconRes);
+  if (!beacon) return toErrorResponse(fail("not_found", "Dispute beacon not found.").error);
   const beaconSystemId = beacon.system_id;
+
+  const memberShips = listResult<ShipStatRow>(memberShipsRes).data ?? [];
+  if (memberShips.length === 0) return toErrorResponse(fail("invalid_target", "Fleet has no member ships.").error);
 
   // ── ETA check ─────────────────────────────────────────────────────────────
   const now = new Date();
   const resolvesAt = new Date(dispute.resolves_at);
-
-  // If the fleet is already at the beacon system, ETA is now (always valid)
   let eta = now;
   if (fromSystemId !== beaconSystemId) {
     const fromEntry = getCatalogEntry(fromSystemId);
     const destEntry = getCatalogEntry(beaconSystemId);
-
     if (!fromEntry || !destEntry) {
-      return toErrorResponse(
-        fail("not_found", "Could not compute travel distance (catalog entry missing).").error,
-      );
+      return toErrorResponse(fail("not_found", "Could not compute travel distance (catalog entry missing).").error);
     }
-
-    // Fetch member ships to get fleet speed
-    const { data: fleetShipRows } = listResult<FleetShip>(
-      await admin
-        .from("fleet_ships")
-        .select("ship_id")
-        .eq("fleet_id", fleetId),
-    );
-
-    const memberShipIds = (fleetShipRows ?? []).map((r) => r.ship_id);
-    if (memberShipIds.length === 0) {
-      return toErrorResponse(
-        fail("invalid_target", "Fleet has no member ships.").error,
-      );
-    }
-
-    const { data: memberShips } = listResult<Pick<Ship, "id" | "speed_ly_per_hr">>(
-      await admin
-        .from("ships")
-        .select("id, speed_ly_per_hr")
-        .in("id", memberShipIds),
-    );
-
-    const ships = memberShips ?? [];
-    if (ships.length === 0) {
-      return toErrorResponse(
-        fail("invalid_target", "Fleet has no member ships.").error,
-      );
-    }
-
-    const fleetSpeed = Math.min(...ships.map((s) => s.speed_ly_per_hr));
+    const fleetSpeed = Math.min(...memberShips.map((s) => s.speed_ly_per_hr));
     const distanceLy = distanceBetween(
       { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
       { x: destEntry.x, y: destEntry.y, z: destEntry.z },
     );
-
     eta = computeArrivalTime(now, distanceLy, fleetSpeed);
   }
 
   if (eta > resolvesAt) {
     const hoursLeft = ((resolvesAt.getTime() - now.getTime()) / (1000 * 60 * 60)).toFixed(1);
     return toErrorResponse(
-      fail(
-        "invalid_target",
-        `Fleet would arrive too late. Dispute ends in ~${hoursLeft}h but your fleet cannot arrive in time.`,
-      ).error,
+      fail("invalid_target", `Fleet would arrive too late. Dispute ends in ~${hoursLeft}h but your fleet cannot arrive in time.`).error,
     );
   }
 
-  // ── Snapshot score from fleet ships ───────────────────────────────────────
-  const { data: fleetShipRowsFinal } = listResult<FleetShip>(
-    await admin
-      .from("fleet_ships")
-      .select("ship_id")
-      .eq("fleet_id", fleetId),
-  );
+  // ── Snapshot score ─────────────────────────────────────────────────────────
+  const scoreSnapshot = computeFleetDisputeScore(memberShips);
 
-  const finalShipIds = (fleetShipRowsFinal ?? []).map((r) => r.ship_id);
-
-  type ShipStatRow = { turret_level: number; hull_level: number; shield_level: number };
-  let scoreSnapshot = 0;
-  if (finalShipIds.length > 0) {
-    const { data: statRows } = listResult<ShipStatRow>(
-      await admin
-        .from("ships")
-        .select("turret_level, hull_level, shield_level")
-        .in("id", finalShipIds),
-    );
-    scoreSnapshot = computeFleetDisputeScore(statRows ?? []);
-  }
-
-  // ── Insert reinforcement and lock fleet (atomic-ish) ─────────────────────
+  // ── Insert reinforcement and lock fleet in parallel ───────────────────────
   type NewReinforceRow = { id: string };
-  const { data: newReinforce } = maybeSingleResult<NewReinforceRow>(
-    await admin
-      .from("dispute_reinforcements")
-      .insert({
-        dispute_id:     disputeId,
-        alliance_id:    callerAllianceId,
-        fleet_id:       fleetId,
-        player_id:      player.id,
-        score_snapshot: scoreSnapshot,
-        committed_at:   now.toISOString(),
-        is_active:      true,
-      })
-      .select("id")
-      .single(),
-  );
+  const [reinforceRes] = await Promise.all([
+    admin.from("dispute_reinforcements").insert({
+      dispute_id:     disputeId,
+      alliance_id:    callerAllianceId,
+      fleet_id:       fleetId,
+      player_id:      player.id,
+      score_snapshot: scoreSnapshot,
+      committed_at:   now.toISOString(),
+      is_active:      true,
+    }).select("id").single(),
+    admin.from("fleets").update({ dispute_commit_id: disputeId }).eq("id", fleetId),
+  ]);
 
+  const { data: newReinforce } = maybeSingleResult<NewReinforceRow>(reinforceRes);
   if (!newReinforce) {
     return toErrorResponse(fail("internal_error", "Failed to commit fleet.").error);
   }
-
-  // Lock the fleet
-  await admin
-    .from("fleets")
-    .update({ dispute_commit_id: disputeId })
-    .eq("id", fleetId);
 
   return Response.json({
     ok: true,

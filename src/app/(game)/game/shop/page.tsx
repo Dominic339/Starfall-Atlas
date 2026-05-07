@@ -64,7 +64,7 @@ export default async function ShopPage({
   const cancelled   = sp.cancelled === "1";
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="mx-auto max-w-2xl p-6 space-y-6">
       {/* Breadcrumb */}
       <div className="flex items-center gap-2">
         <Link

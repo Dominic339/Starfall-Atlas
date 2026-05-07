@@ -61,7 +61,7 @@ function ComposeForm({ onSent }: { onSent: () => void }) {
   }
 
   return (
-    <div className="space-y-3 rounded border border-zinc-800 bg-zinc-900/40 p-4">
+    <div className="space-y-3 rounded-xl border border-zinc-800 bg-zinc-900/60 p-4 animate-fade-in-up">
       <p className="text-xs font-semibold uppercase tracking-widest text-zinc-400">Compose</p>
       <input
         type="text"
@@ -103,7 +103,7 @@ function MessageRow({ msg, onOpen }: { msg: DirectMessage; onOpen: (m: DirectMes
   return (
     <button
       onClick={() => onOpen(msg)}
-      className={`w-full text-left flex items-start gap-3 py-2.5 px-3 rounded border transition-colors ${
+      className={`w-full text-left flex items-start gap-3 py-2.5 px-3 rounded border transition-all card-interactive animate-fade-in-up ${
         msg.isRead
           ? "border-zinc-800 hover:bg-zinc-800/30"
           : "border-indigo-800/40 bg-indigo-900/10 hover:bg-indigo-900/20"
@@ -212,9 +212,14 @@ export function MessagesClient({ inbox: initialInbox, allianceMessages: initialA
             </div>
           )}
 
-          <div className="space-y-1">
+          <div className="space-y-1 stagger-children">
             {inbox.length === 0 && (
-              <p className="py-4 text-center text-sm text-zinc-600">No messages.</p>
+              <div className="flex flex-col items-center gap-2 py-8 text-center">
+                <svg className="w-6 h-6 text-zinc-700" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75" />
+                </svg>
+                <p className="text-xs text-zinc-600">No messages.</p>
+              </div>
             )}
             {inbox.map((m) => (
               <MessageRow key={m.id} msg={m} onOpen={markRead} />

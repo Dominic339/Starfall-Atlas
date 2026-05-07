@@ -38,23 +38,21 @@ export async function POST(request: NextRequest) {
 
   const admin = createAdminClient();
 
-  // ── Verify ship ownership ────────────────────────────────────────────────
-  const { data: ship } = maybeSingleResult<Pick<Ship, "id" | "owner_id">>(
-    await admin.from("ships").select("id, owner_id").eq("id", shipId).maybeSingle(),
-  );
+  // ── Verify ship + colony ownership in parallel ──────────────────────────
+  const [shipRes, colonyRes] = await Promise.all([
+    admin.from("ships").select("id, owner_id").eq("id", shipId).maybeSingle(),
+    colonyId !== null
+      ? admin.from("colonies").select("id, owner_id").eq("id", colonyId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+
+  const { data: ship } = maybeSingleResult<Pick<Ship, "id" | "owner_id">>(shipRes);
   if (!ship || ship.owner_id !== player.id) {
     return toErrorResponse(fail("not_found", "Ship not found.").error);
   }
 
-  // ── If assigning, verify colony ownership ────────────────────────────────
   if (colonyId !== null) {
-    const { data: colony } = maybeSingleResult<{ id: string; owner_id: string }>(
-      await admin
-        .from("colonies")
-        .select("id, owner_id")
-        .eq("id", colonyId)
-        .maybeSingle(),
-    );
+    const { data: colony } = maybeSingleResult<{ id: string; owner_id: string }>(colonyRes);
     if (!colony || colony.owner_id !== player.id) {
       return toErrorResponse(fail("not_found", "Colony not found.").error);
     }

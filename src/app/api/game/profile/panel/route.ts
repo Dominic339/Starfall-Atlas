@@ -17,21 +17,17 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  const [discRes, coloniesRes, firstDiscRes, allianceRes] = await Promise.all([
+  const [discRes, coloniesRes, firstDiscRes, allianceRes, shipsRes] = await Promise.all([
     admin.from("system_discoveries").select("id", { count: "exact", head: true }).eq("player_id", player.id),
     admin.from("colonies").select("id", { count: "exact", head: true }).eq("owner_id", player.id).eq("status", "active"),
     admin.from("system_discoveries").select("id", { count: "exact", head: true }).eq("player_id", player.id).eq("is_first", true),
     admin.from("alliance_members").select("role, alliances(name, tag)").eq("player_id", player.id).maybeSingle(),
+    admin.from("ships").select("hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level").eq("owner_id", player.id),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allianceData = allianceRes.data as any;
 
-  // Total ship upgrades across all ships
-  const shipsRes = await admin
-    .from("ships")
-    .select("hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level")
-    .eq("owner_id", player.id);
   const ships = (listResult<Record<string, number>>(shipsRes).data ?? []);
   const totalUpgrades = ships.reduce((sum: number, s: Record<string, number>) =>
     sum + (s.hull_level ?? 0) + (s.shield_level ?? 0) + (s.cargo_level ?? 0) +
