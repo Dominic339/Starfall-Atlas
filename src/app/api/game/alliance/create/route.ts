@@ -155,10 +155,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Add founder as member ─────────────────────────────────────────────────
-  await admin
-    .from("alliance_members")
-    .insert({ alliance_id: alliance.id, player_id: player.id, role: "founder" });
+  // ── Add founder as member + emit world event ─────────────────────────────
+  await Promise.all([
+    admin.from("alliance_members").insert({ alliance_id: alliance.id, player_id: player.id, role: "founder" }),
+    admin.from("world_events").insert({
+      event_type: "alliance_formed",
+      player_id:  player.id,
+      system_id:  null,
+      body_id:    null,
+      metadata: {
+        alliance_id: alliance.id,
+        name:        alliance.name,
+        tag:         alliance.tag,
+      },
+    }),
+  ]);
 
   return Response.json({
     ok: true,

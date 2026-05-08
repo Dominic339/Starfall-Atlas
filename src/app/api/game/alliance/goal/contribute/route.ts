@@ -40,6 +40,7 @@ export async function POST(request: NextRequest) {
     resource_type: string;
     quantity_target: number;
     quantity_filled: number;
+    credit_reward: number;
     completed_at: string | null;
     expired: boolean;
     deadline_at: string;
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
   if (!membership) {
     return toErrorResponse(fail("forbidden", "You are not in an alliance.").error);
   }
-  const { data: goal } = maybeSingleResult<GoalRow>(goalRes);
+  const { data: goal } = maybeSingleResult<GoalRow & { credit_reward: number }>(goalRes);
   if (!goal) return toErrorResponse(fail("not_found", "Goal not found.").error);
   if (goal.alliance_id !== membership.alliance_id) {
     return toErrorResponse(fail("forbidden", "Goal does not belong to your alliance.").error);
@@ -153,13 +154,70 @@ export async function POST(request: NextRequest) {
     }),
   ]);
 
+  // ── Distribute completion bonus credits proportionally to all contributors ──
+  let bonusCreditsEarned = 0;
+  if (nowCompleted && goal.credit_reward > 0) {
+    const { data: contributions } = await admin
+      .from("alliance_goal_contributions")
+      .select("player_id, quantity")
+      .eq("goal_id", goalId);
+
+    if (contributions && contributions.length > 0) {
+      // Aggregate each player's total contribution across all their inserts.
+      const playerTotals = new Map<string, number>();
+      for (const c of contributions as { player_id: string; quantity: number }[]) {
+        playerTotals.set(c.player_id, (playerTotals.get(c.player_id) ?? 0) + c.quantity);
+      }
+
+      // Floor-divide shares, track rounding remainder.
+      let distributed = 0;
+      let topQty = 0;
+      let topPlayerId = "";
+      const shares = new Map<string, number>();
+      for (const [pid, qty] of playerTotals) {
+        const share = Math.floor((qty / goal.quantity_target) * goal.credit_reward);
+        shares.set(pid, share);
+        distributed += share;
+        if (qty > topQty) { topQty = qty; topPlayerId = pid; }
+      }
+
+      // Remainder goes to the top contributor (avoids credit loss from rounding).
+      const remainder = goal.credit_reward - distributed;
+      if (remainder > 0 && topPlayerId) {
+        shares.set(topPlayerId, (shares.get(topPlayerId) ?? 0) + remainder);
+      }
+
+      // Fetch fresh credits for every contributing member and apply bonuses.
+      const { data: memberRows } = await admin
+        .from("alliance_members")
+        .select("id, player_id, alliance_credits")
+        .eq("alliance_id", membership.alliance_id)
+        .in("player_id", Array.from(playerTotals.keys()));
+
+      if (memberRows && memberRows.length > 0) {
+        await Promise.all(
+          (memberRows as { id: string; player_id: string; alliance_credits: number }[]).map((m) => {
+            const bonus = shares.get(m.player_id) ?? 0;
+            if (bonus <= 0) return Promise.resolve();
+            if (m.player_id === player.id) bonusCreditsEarned = bonus;
+            return admin
+              .from("alliance_members")
+              .update({ alliance_credits: m.alliance_credits + bonus })
+              .eq("id", m.id);
+          }),
+        );
+      }
+    }
+  }
+
   return Response.json({
     ok: true,
     data: {
       contributed:    actualQty,
       newFilled,
       goalCompleted:  nowCompleted,
-      creditsEarned:  actualQty,
+      creditsEarned:  actualQty + bonusCreditsEarned,
+      bonusCredits:   bonusCreditsEarned,
     },
   });
 }

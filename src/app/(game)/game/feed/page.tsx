@@ -15,24 +15,84 @@ export const dynamic = "force-dynamic";
 export const metadata = { title: "World Feed — Starfall Atlas" };
 
 const LABEL: Record<string, string> = {
-  system_discovered:    "System discovered",
-  colony_founded:       "Colony founded",
-  colony_sold:          "Colony sold",
-  colony_abandoned:     "Colony abandoned",
-  colony_collapsed:     "Colony collapsed",
-  colony_reactivated:   "Colony reactivated",
-  system_sold:          "System sold",
-  alliance_formed:      "Alliance formed",
-  alliance_dissolved:   "Alliance dissolved",
-  lane_built:           "Hyperspace lane built",
-  gate_built:           "Hyperspace gate built",
-  gate_neutralized:     "Gate neutralized",
-  gate_reclaimed:       "Gate reclaimed",
+  system_discovered:       "System discovered",
+  colony_founded:          "Colony founded",
+  colony_sold:             "Colony sold",
+  colony_abandoned:        "Colony abandoned",
+  colony_collapsed:        "Colony collapsed",
+  colony_reactivated:      "Colony reactivated",
+  system_sold:             "System sold",
+  alliance_formed:         "Alliance formed",
+  alliance_dissolved:      "Alliance dissolved",
+  lane_built:              "Hyperspace lane built",
+  gate_built:              "Hyperspace gate built",
+  gate_neutralized:        "Gate neutralized",
+  gate_reclaimed:          "Gate reclaimed",
   stewardship_registered:  "Stewardship registered",
   stewardship_transferred: "Stewardship transferred",
   majority_control_gained: "Majority control gained",
   majority_control_lost:   "Majority control lost",
+  auction_started:         "Auction started",
+  auction_resolved:        "Auction resolved",
+  dispute_opened:          "Alliance dispute opened",
+  dispute_resolved:        "Alliance dispute resolved",
+  dispute_expired:         "Alliance dispute expired",
 };
+
+function buildSummary(
+  eventType: string,
+  handle: string | null,
+  systemId: string | null,
+  metadata: Record<string, unknown>,
+): string {
+  const sys = systemId ? systemDisplayName(systemId) : null;
+  const who = handle ?? "Someone";
+  const m = metadata;
+  switch (eventType) {
+    case "system_discovered":   return `${who} discovered ${sys ?? "a new system"}`;
+    case "colony_founded":      return `${who} founded a colony in ${sys ?? "an unknown system"}`;
+    case "colony_abandoned":    return `${who}'s colony in ${sys ?? "an unknown system"} was abandoned`;
+    case "colony_collapsed":    return `${who}'s colony in ${sys ?? "an unknown system"} collapsed`;
+    case "colony_reactivated":  return `${who} reactivated a colony in ${sys ?? "an unknown system"}`;
+    case "gate_built":          return `${who} constructed a hyperspace gate in ${sys ?? "an unknown system"}`;
+    case "gate_neutralized":    return `A gate in ${sys ?? "an unknown system"} was neutralized`;
+    case "gate_reclaimed":      return `${who} reclaimed a gate in ${sys ?? "an unknown system"}`;
+    case "lane_built": {
+      const toSys = m.to_system_id ? systemDisplayName(m.to_system_id as string) : "an unknown system";
+      return `${who} completed a hyperspace lane to ${toSys}`;
+    }
+    case "alliance_formed":     return `${who} founded alliance [${m.tag ?? "?"}] ${m.name ?? ""}`.trim();
+    case "dispute_opened": {
+      const atk = m.attacking_alliance_tag ?? "?";
+      const def = m.defending_alliance_tag ?? "?";
+      return `[${atk}] opened a beacon dispute against [${def}] in ${sys ?? "an unknown system"}`;
+    }
+    case "dispute_resolved": {
+      const winner = m.winner_tag ?? "?";
+      const atk = m.attacking_alliance_tag ?? "?";
+      const def = m.defending_alliance_tag ?? "?";
+      const atkScore = m.attacker_score as number ?? 0;
+      const defScore = m.defender_score as number ?? 0;
+      return `[${winner}] won the dispute in ${sys ?? "an unknown system"} — ${atk} ${atkScore} vs ${def} ${defScore}`;
+    }
+    case "dispute_expired":
+      return `A beacon dispute in ${sys ?? "an unknown system"} expired with no reinforcements`;
+    case "auction_started":
+      return `${who} opened an auction (${m.item_type ?? "item"}) starting at ${m.min_bid ?? 0} ¢`;
+    case "auction_resolved": {
+      const sold = (m.winning_bid as number | undefined) ? `sold for ${m.winning_bid} ¢` : "ended without a winner";
+      return `An auction ${sold}`;
+    }
+    case "majority_control_gained":
+      return `${who} gained majority control of ${sys ?? "a system"}`;
+    case "majority_control_lost":
+      return `${who} lost majority control of ${sys ?? "a system"}`;
+    case "stewardship_registered":
+      return `${who} registered stewardship over ${sys ?? "a system"}`;
+    default:
+      return LABEL[eventType] ?? eventType;
+  }
+}
 
 export default async function FeedPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -66,16 +126,21 @@ export default async function FeedPage() {
     for (const h of handles ?? []) handleMap.set(h.id, h.handle);
   }
 
-  const initialEvents: FeedEvent[] = events.map((e) => ({
-    id:           e.id,
-    eventType:    e.event_type,
-    label:        LABEL[e.event_type] ?? e.event_type,
-    playerHandle: e.player_id ? (handleMap.get(e.player_id) ?? "Unknown") : null,
-    systemId:     e.system_id,
-    systemName:   e.system_id ? systemDisplayName(e.system_id) : null,
-    metadata:     e.metadata ?? {},
-    occurredAt:   e.occurred_at,
-  }));
+  const initialEvents: FeedEvent[] = events.map((e) => {
+    const handle = e.player_id ? (handleMap.get(e.player_id) ?? "Unknown") : null;
+    const meta = e.metadata ?? {};
+    return {
+      id:           e.id,
+      eventType:    e.event_type,
+      label:        LABEL[e.event_type] ?? e.event_type,
+      summary:      buildSummary(e.event_type, handle, e.system_id, meta),
+      playerHandle: handle,
+      systemId:     e.system_id,
+      systemName:   e.system_id ? systemDisplayName(e.system_id) : null,
+      metadata:     meta,
+      occurredAt:   e.occurred_at,
+    };
+  });
 
   return (
     <div className="max-w-2xl space-y-6">

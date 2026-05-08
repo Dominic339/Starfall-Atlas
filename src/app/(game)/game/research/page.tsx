@@ -147,7 +147,7 @@ const CATEGORY_DESCRIPTIONS: Record<ResearchCategory, string> = {
   ship_stat_caps:
     "Raise the maximum level cap for each individual ship stat.",
   fleet_tech:
-    "Multi-ship fleet coordination and formation capabilities. (Coming soon)",
+    "Coordinate multi-ship fleets, boost travel speed, and amplify asteroid harvest power.",
   colony_tech:
     "Boost extraction yield, reduce upkeep costs, and expand colony storage.",
 };

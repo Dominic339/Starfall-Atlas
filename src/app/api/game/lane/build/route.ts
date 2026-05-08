@@ -60,8 +60,8 @@ export async function POST(request: NextRequest) {
   const admin = createAdminClient() as any;
   const now   = new Date();
 
-  // ── Balance + presence + gate checks + duplicate check in one batch ───────
-  const [balance, shipsRes, stationRes, fromGateRes, toGateRes, existingLanesRes] = await Promise.all([
+  // ── Balance + presence + gate checks + duplicate check + relay colonies in one batch ──
+  const [balance, shipsRes, stationRes, fromGateRes, toGateRes, existingLanesRes, fromColoniesRes, toColoniesRes] = await Promise.all([
     getBalanceWithOverrides(admin),
     admin.from("ships").select("current_system_id").eq("owner_id", player.id),
     admin.from("player_stations").select("current_system_id").eq("owner_id", player.id).maybeSingle(),
@@ -71,6 +71,8 @@ export async function POST(request: NextRequest) {
       `and(from_system_id.eq.${fromSystemId},to_system_id.eq.${toSystemId}),` +
       `and(from_system_id.eq.${toSystemId},to_system_id.eq.${fromSystemId})`,
     ),
+    admin.from("colonies").select("id").eq("system_id", fromSystemId).eq("status", "active"),
+    admin.from("colonies").select("id").eq("system_id", toSystemId).eq("status", "active"),
   ]);
 
   const { data: shipRows }   = listResult<Pick<Ship, "current_system_id">>(shipsRes);
@@ -97,20 +99,46 @@ export async function POST(request: NextRequest) {
     return toErrorResponse(fail("invalid_target", "The destination system does not have an active gate.").error);
   }
 
+  // ── Relay station tier lookup (extends max lane range) ───────────────────
+  const fromColonyIds = ((fromColoniesRes.data ?? []) as { id: string }[]).map((c) => c.id);
+  const toColonyIds   = ((toColoniesRes.data   ?? []) as { id: string }[]).map((c) => c.id);
+
+  let relayTierA = 0;
+  let relayTierB = 0;
+  const relayFetches: Promise<unknown>[] = [];
+  if (fromColonyIds.length > 0) {
+    relayFetches.push(
+      admin.from("structures").select("tier").eq("type", "relay_station").eq("is_active", true).in("colony_id", fromColonyIds)
+        .then((res: { data: { tier: number }[] | null }) => {
+          relayTierA = Math.max(0, ...((res.data ?? []).map((s) => s.tier)));
+        }),
+    );
+  }
+  if (toColonyIds.length > 0) {
+    relayFetches.push(
+      admin.from("structures").select("tier").eq("type", "relay_station").eq("is_active", true).in("colony_id", toColonyIds)
+        .then((res: { data: { tier: number }[] | null }) => {
+          relayTierB = Math.max(0, ...((res.data ?? []).map((s) => s.tier)));
+        }),
+    );
+  }
+  if (relayFetches.length > 0) await Promise.all(relayFetches);
+
   // ── Distance check ────────────────────────────────────────────────────────
   const distLy = distanceBetween(
     { x: fromEntry.x, y: fromEntry.y, z: fromEntry.z },
     { x: toEntry.x,   y: toEntry.y,   z: toEntry.z   },
   );
 
-  // TODO: read relay_station tiers from DB for dynamic range extension
-  const inRange = isWithinLaneRange(distLy, 0, 0);
+  const inRange = isWithinLaneRange(distLy, relayTierA, relayTierB);
   if (!inRange) {
+    const maxRange = balance.lanes.baseRangeLy +
+      (relayTierA + relayTierB) * balance.lanes.relayExtensionPerTierLy;
     return toErrorResponse(
       fail(
         "lane_out_of_range",
         `${toEntry.properName ?? toSystemId} is ${distLy.toFixed(2)} ly away. ` +
-        `Max lane range is ${balance.lanes.baseRangeLy} ly (build relay stations to extend).`,
+        `Max lane range is ${maxRange} ly (relay stations at each endpoint extend it by ${balance.lanes.relayExtensionPerTierLy} ly per tier).`,
       ).error,
     );
   }
