@@ -274,6 +274,8 @@ export default async function ColonyPage({
     lastExtractAt,
     now,
     extBonusMult,
+    BALANCE,
+    extractorTier,
   );
   const accruedExtraction = rawAccruedExtraction
     .map((item) => ({ ...item, quantity: Math.floor(item.quantity * healthMult) }))
@@ -282,8 +284,12 @@ export default async function ColonyPage({
 
   // Extraction rate / elapsed display helpers
   const basicNodeCount = resourceNodes.filter((n) => !n.is_rare).length;
+  const rareNodeCount  = resourceNodes.filter((n) => n.is_rare).length;
+  const baseRate = extractionRatePerNode(colony.population_tier);
+  const canExtractRare = extractorTier >= 2;
+  const rareRate = canExtractRare ? baseRate * BALANCE.extraction.rareExtractionRateFraction : 0;
   const totalRatePerHr = Math.floor(
-    extractionRatePerNode(colony.population_tier) * basicNodeCount * extBonusMult * healthMult,
+    (baseRate * basicNodeCount + rareRate * rareNodeCount) * extBonusMult * healthMult,
   );
   const elapsedHours = (now.getTime() - new Date(lastExtractAt).getTime()) / (1000 * 60 * 60);
   const isCapped = elapsedHours >= BALANCE.extraction.accumulationCapHours;
@@ -561,6 +567,11 @@ export default async function ColonyPage({
                   </p>
                   <p className="mt-0.5 text-xs text-zinc-600">
                     {basicNodeCount} node{basicNodeCount !== 1 ? "s" : ""}
+                    {rareNodeCount > 0 && (
+                      canExtractRare
+                        ? <span className="ml-1 text-amber-500">· {rareNodeCount} rare (active)</span>
+                        : <span className="ml-1 text-zinc-700">· {rareNodeCount} rare (needs T2 extractor)</span>
+                    )}
                     {extractorTier > 0 && ` · Extractor T${extractorTier}`}
                     {extractionResearchLvl > 0 && (
                       <span className="ml-1 text-teal-600">· Research +{extractionResearchLvl * 10}%</span>

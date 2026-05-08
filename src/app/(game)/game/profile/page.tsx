@@ -41,7 +41,7 @@ export default async function ProfilePage() {
   if (!player) redirect("/login");
 
   // ── Stats ──────────────────────────────────────────────────────────────────
-  const [discoveriesRes, coloniesRes, allianceRes, firstDiscRes] = await Promise.all([
+  const [discoveriesRes, coloniesRes, allianceRes, firstDiscRes, researchRes, shipsRes] = await Promise.all([
     admin
       .from("system_discoveries")
       .select("id", { count: "exact", head: true })
@@ -53,7 +53,7 @@ export default async function ProfilePage() {
       .eq("status", "active"),
     admin
       .from("alliance_members")
-      .select("alliance_id, role, alliances(name, tag)")
+      .select("alliance_id, role, alliance_credits, alliances(name, tag)")
       .eq("player_id", player.id)
       .maybeSingle(),
     admin
@@ -61,16 +61,31 @@ export default async function ProfilePage() {
       .select("id", { count: "exact", head: true })
       .eq("player_id", player.id)
       .eq("is_first", true),
+    admin
+      .from("player_research")
+      .select("id", { count: "exact", head: true })
+      .eq("player_id", player.id),
+    admin
+      .from("ships")
+      .select("hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level")
+      .eq("owner_id", player.id),
   ]);
 
   const discoveryCount      = discoveriesRes.count ?? 0;
   const colonyCount         = coloniesRes.count ?? 0;
   const firstDiscoveryCount = firstDiscRes.count ?? 0;
+  const researchCount       = researchRes.count ?? 0;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const allianceData   = allianceRes.data as any;
-  const allianceName   = allianceData?.alliances?.name ?? null;
-  const allianceTag    = allianceData?.alliances?.tag  ?? null;
-  const allianceRole   = allianceData?.role            ?? null;
+  const allianceData     = allianceRes.data as any;
+  const allianceName     = allianceData?.alliances?.name ?? null;
+  const allianceTag      = allianceData?.alliances?.tag  ?? null;
+  const allianceRole     = allianceData?.role            ?? null;
+  const allianceCredits  = allianceData?.alliance_credits ?? null;
+
+  const ships = (shipsRes.data ?? []) as Record<string, number>[];
+  const totalShipUpgrades = ships.reduce((sum, s) =>
+    sum + (s.hull_level ?? 0) + (s.shield_level ?? 0) + (s.cargo_level ?? 0) +
+    (s.engine_level ?? 0) + (s.turret_level ?? 0) + (s.utility_level ?? 0), 0);
 
   return (
     <div className="space-y-8">
@@ -97,14 +112,23 @@ export default async function ProfilePage() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
-        <StatCard label="Discoveries" value={discoveryCount} />
-        <StatCard label="First discoveries" value={firstDiscoveryCount} />
+        <StatCard label="Credits" value={`${player.credits.toLocaleString()} ¢`} />
         <StatCard label="Active colonies" value={colonyCount} />
+        <StatCard label="Systems discovered" value={discoveryCount} sub={firstDiscoveryCount > 0 ? `${firstDiscoveryCount} first` : undefined} />
+        <StatCard label="Research unlocked" value={researchCount} />
+      </div>
+
+      {/* Secondary stats */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
+        <StatCard label="Ship upgrades" value={totalShipUpgrades} />
         <StatCard
           label="Alliance"
           value={allianceName ? `[${allianceTag}] ${allianceName}` : "—"}
           sub={allianceRole ?? undefined}
         />
+        {allianceCredits !== null && (
+          <StatCard label="Alliance credits" value={allianceCredits.toLocaleString()} />
+        )}
       </div>
 
       {/* Bio */}
