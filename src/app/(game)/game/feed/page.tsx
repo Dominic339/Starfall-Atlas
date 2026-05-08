@@ -80,8 +80,8 @@ function buildSummary(
     case "auction_started":
       return `${who} opened an auction (${m.item_type ?? "item"}) starting at ${m.min_bid ?? 0} ¢`;
     case "auction_resolved": {
-      const sold = (m.winning_bid as number | undefined) ? `sold for ${m.winning_bid} ¢` : "ended without a winner";
-      return `An auction ${sold}`;
+      const price = (m.price as number | undefined) ?? (m.winning_bid as number | undefined);
+      return price ? `An auction resolved — ${m.item_type ?? "item"} sold for ${price.toLocaleString()} ¢` : "An auction ended without a winner";
     }
     case "majority_control_gained":
       return `${who} gained majority control of ${sys ?? "a system"}`;

@@ -14,8 +14,9 @@ interface ProfileData {
     firstDiscoveries: number;
     activeColonies: number;
     totalShipUpgrades: number;
+    researchUnlocked?: number;
   };
-  alliance: { name: string | null; tag: string | null; role: string | null } | null;
+  alliance: { name: string | null; tag: string | null; role: string | null; allianceCredits?: number } | null;
 }
 
 interface ProfileMapPanelProps { onClose: () => void; }
@@ -132,10 +133,16 @@ export function ProfileMapPanel({ onClose }: ProfileMapPanelProps) {
             <>
               {/* Stats grid */}
               <div className="grid grid-cols-2 gap-2 stagger-children">
-                <StatTile label="Systems found"   value={data.stats.systemsDiscovered} color="text-indigo-400" />
-                <StatTile label="First contact"   value={data.stats.firstDiscoveries}  color="text-amber-400" />
-                <StatTile label="Colonies"        value={data.stats.activeColonies}    color="text-emerald-400" />
-                <StatTile label="Ship upgrades"   value={data.stats.totalShipUpgrades} color="text-rose-400" />
+                <StatTile label="Systems found"   value={data.stats.systemsDiscovered}    color="text-indigo-400" />
+                <StatTile label="First contact"   value={data.stats.firstDiscoveries}     color="text-amber-400" />
+                <StatTile label="Colonies"        value={data.stats.activeColonies}       color="text-emerald-400" />
+                <StatTile label="Ship upgrades"   value={data.stats.totalShipUpgrades}    color="text-rose-400" />
+                {data.stats.researchUnlocked !== undefined && (
+                  <StatTile label="Research"      value={data.stats.researchUnlocked}     color="text-sky-400" />
+                )}
+                {data.alliance?.allianceCredits !== undefined && (
+                  <StatTile label="Alliance ¢"    value={data.alliance.allianceCredits.toLocaleString()} color="text-violet-400" />
+                )}
               </div>
 
               {/* Joined */}
