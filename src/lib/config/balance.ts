@@ -430,7 +430,7 @@ export const BALANCE = {
     },
 
     /**
-     * Wired colony research effects (extraction_N, sustainability_N, storage_N).
+     * Wired colony research effects (extraction_N, sustainability_N, storage_N, growth_N).
      * Each unlocked research level adds this much bonus.
      */
     researchEffects: {
@@ -440,7 +440,26 @@ export const BALANCE = {
       sustainabilityBonusPerLevel: 0.10,
       /** Per storage research level: additional storage cap units. */
       storageCapPerLevel: 200,
+      /** Per growth research level: fractional speedup to population growth timer. */
+      growthSpeedPerLevel: 0.10,
     },
+  },
+
+  // -------------------------------------------------------------------------
+  // Fleet research bonuses (Phase AAA — fleet_command and fleet_formation)
+  // -------------------------------------------------------------------------
+  fleet: {
+    /**
+     * Additional fleet travel speed (ly/hr) per Fleet Command research level.
+     * Fleet Command I–V → +2, +4, +6, +8, +10 ly/hr above ship speed.
+     */
+    commandSpeedBonusPerLevelLyHr: 2.0,
+
+    /**
+     * Fractional harvest power bonus per Fleet Formation research level (additive).
+     * Fleet Formation I–V → +15%, +30%, +45%, +60%, +75% harvest power.
+     */
+    formationHarvestBonusPerLevel: 0.15,
   },
 
   // -------------------------------------------------------------------------

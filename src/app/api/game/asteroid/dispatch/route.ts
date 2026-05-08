@@ -27,6 +27,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { computeHarvestPower } from "@/lib/game/asteroids";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { getActiveLiveEvents, harvestBoostMultiplier } from "@/lib/game/liveEvents";
+import { fleetFormationHarvestMultiplier } from "@/lib/game/researchHelpers";
 import type { AsteroidHarvest } from "@/lib/types/game";
 
 const DispatchSchema = z.object({
@@ -48,9 +49,10 @@ export async function POST(request: NextRequest) {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
-  const [balance, liveEvents] = await Promise.all([
+  const [balance, liveEvents, researchRes] = await Promise.all([
     getBalanceWithOverrides(admin),
     getActiveLiveEvents(admin),
+    admin.from("player_research").select("research_id").eq("player_id", player.id),
   ]);
 
   // ── Fetch asteroid (both tables), fleet, and existing harvest in parallel ──
@@ -109,9 +111,13 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const unlockedResearchIds = new Set(
+    ((researchRes?.data ?? []) as { research_id: string }[]).map((r) => r.research_id),
+  );
   const basePower = computeHarvestPower(totalTurretLevel, balance);
   const eventMult = harvestBoostMultiplier(liveEvents, asteroid.system_id);
-  const harvestPowerPerHr = basePower * eventMult;
+  const formationMult = fleetFormationHarvestMultiplier(unlockedResearchIds, balance);
+  const harvestPowerPerHr = basePower * eventMult * formationMult;
 
   // ── Insert harvest record ────────────────────────────────────────────────
   const now = new Date().toISOString();

@@ -62,16 +62,19 @@ export function calculateAccumulatedTax(
  *
  * @param currentTier - Current population tier
  * @param from - Reference timestamp (when the tier was last reached)
+ * @param growthSpeedMult - Multiplier from growth research (1.0 = no bonus, 1.5 = 50% faster)
  */
 export function nextGrowthAt(
   currentTier: number,
   from: Date = new Date(),
+  growthSpeedMult = 1.0,
 ): Date | null {
   const growthHours = BALANCE.colony.growthHoursByTier[currentTier];
   if (growthHours == null) return null; // max tier reached
 
   const durationMs = growthHours * 60 * 60 * 1000;
-  return new Date(from.getTime() + durationMs);
+  const adjustedMs = durationMs / growthSpeedMult;
+  return new Date(from.getTime() + adjustedMs);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,14 +96,16 @@ export interface GrowthResolution {
  * Each tier is timestamped from when the previous tier was reached,
  * preserving real growth timing regardless of when the page loads.
  *
- * @param currentTier     - Colony's current population_tier
+ * @param currentTier        - Colony's current population_tier
  * @param colonyNextGrowthAt - ISO timestamp from colony.next_growth_at, or null
- * @param now             - Evaluation time (defaults to Date.now())
+ * @param now                - Evaluation time (defaults to Date.now())
+ * @param growthSpeedMult    - Multiplier from growth research (1.0 = no bonus)
  */
 export function resolveGrowth(
   currentTier: number,
   colonyNextGrowthAt: string | null,
   now: Date = new Date(),
+  growthSpeedMult = 1.0,
 ): GrowthResolution {
   if (colonyNextGrowthAt == null) {
     return { newTier: currentTier, newNextGrowthAt: null, tiersGained: 0 };
@@ -119,7 +124,7 @@ export function resolveGrowth(
     tier += 1;
     tiersGained += 1;
     // Next growth is relative to when THIS tier was earned.
-    nextAt = nextGrowthAt(tier, tierEarnedAt);
+    nextAt = nextGrowthAt(tier, tierEarnedAt, growthSpeedMult);
   }
 
   return {
@@ -136,11 +141,13 @@ export function resolveGrowth(
 export function applyGrowthResolution(
   colony: Colony,
   now: Date = new Date(),
+  growthSpeedMult = 1.0,
 ): { colony: Colony; resolution: GrowthResolution } {
   const resolution = resolveGrowth(
     colony.population_tier,
     colony.next_growth_at,
     now,
+    growthSpeedMult,
   );
   if (resolution.tiersGained === 0) return { colony, resolution };
   return {

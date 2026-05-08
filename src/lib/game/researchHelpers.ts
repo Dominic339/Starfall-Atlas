@@ -18,6 +18,8 @@ import {
   type MilestoneRequirement,
   type ResearchDefinition,
 } from "@/lib/config/research";
+import { BALANCE } from "@/lib/config/balance";
+import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -168,7 +170,7 @@ export function allStatCaps(
 
 /**
  * Number of fleet slots the player may command.
- * Driven by Fleet Command research. Returns 0 until fleet gameplay is active.
+ * Driven by Fleet Command research.
  *
  * Fleet Command I–V → 1, 2, 3, 4, 5 slots.
  */
@@ -186,7 +188,7 @@ export function fleetSlotsAllowed(
 
 /**
  * Maximum number of ships per fleet.
- * Driven by Fleet Formation research. Returns 0 until fleet gameplay is active.
+ * Driven by Fleet Formation research.
  *
  * Formation I–V → 2, 4, 8, 12, 20 ships per fleet.
  */
@@ -200,6 +202,42 @@ export function fleetSizeAllowed(
   if (set.has("fleet_formation_2")) return 4;
   if (set.has("fleet_formation_1")) return 2;
   return 0;
+}
+
+/**
+ * Additional fleet travel speed bonus (ly/hr) from Fleet Command research.
+ * Fleet Command I–V → +2, +4, +6, +8, +10 ly/hr added to the fleet's base speed.
+ */
+export function fleetCommandSpeedBonus(
+  unlockedIds: ReadonlySet<string> | string[],
+  balance: BalanceConfig = BALANCE,
+): number {
+  const set = Array.isArray(unlockedIds) ? new Set(unlockedIds) : unlockedIds;
+  let level = 0;
+  if (set.has("fleet_command_5"))      level = 5;
+  else if (set.has("fleet_command_4")) level = 4;
+  else if (set.has("fleet_command_3")) level = 3;
+  else if (set.has("fleet_command_2")) level = 2;
+  else if (set.has("fleet_command_1")) level = 1;
+  return level * balance.fleet.commandSpeedBonusPerLevelLyHr;
+}
+
+/**
+ * Harvest power multiplier from Fleet Formation research (applies to asteroid harvesting).
+ * Fleet Formation I–V → 1.15, 1.30, 1.45, 1.60, 1.75×.
+ */
+export function fleetFormationHarvestMultiplier(
+  unlockedIds: ReadonlySet<string> | string[],
+  balance: BalanceConfig = BALANCE,
+): number {
+  const set = Array.isArray(unlockedIds) ? new Set(unlockedIds) : unlockedIds;
+  let level = 0;
+  if (set.has("fleet_formation_5"))      level = 5;
+  else if (set.has("fleet_formation_4")) level = 4;
+  else if (set.has("fleet_formation_3")) level = 3;
+  else if (set.has("fleet_formation_2")) level = 2;
+  else if (set.has("fleet_formation_1")) level = 1;
+  return 1.0 + level * balance.fleet.formationHarvestBonusPerLevel;
 }
 
 // ---------------------------------------------------------------------------
