@@ -50,7 +50,7 @@ export function UpgradeButton({ shipId, stat, ironCost }: UpgradeButtonProps) {
         title={`Upgrade ${stat} · ${ironCost} iron`}
         className="rounded bg-indigo-800/80 px-1.5 py-0.5 text-xs font-medium text-indigo-200
                    hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed
-                   transition-colors whitespace-nowrap"
+                   transition-colors whitespace-nowrap btn-glow"
       >
         {state === "loading" ? "…" : `↑ ${ironCost} ⛏`}
       </button>

@@ -54,7 +54,7 @@ export default async function PublicProfilePage({
   if (!profile || profile.deactivated_at) notFound();
 
   // ── Fetch public stats ─────────────────────────────────────────────────────
-  const [discoveriesRes, firstDiscRes, coloniesRes, allianceRes] =
+  const [discoveriesRes, firstDiscRes, coloniesRes, allianceRes, researchRes, shipsRes] =
     await Promise.all([
       admin
         .from("system_discoveries")
@@ -75,11 +75,24 @@ export default async function PublicProfilePage({
         .select("role, alliances(name, tag)")
         .eq("player_id", profile.id)
         .maybeSingle(),
+      admin
+        .from("player_research")
+        .select("id", { count: "exact", head: true })
+        .eq("player_id", profile.id),
+      admin
+        .from("ships")
+        .select("hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level")
+        .eq("owner_id", profile.id),
     ]);
 
   const discoveryCount     = discoveriesRes.count ?? 0;
   const firstDiscCount     = firstDiscRes.count ?? 0;
   const colonyCount        = coloniesRes.count ?? 0;
+  const researchCount      = researchRes.count ?? 0;
+  const shipRows           = (shipsRes.data ?? []) as Record<string, number>[];
+  const totalShipUpgrades  = shipRows.reduce((sum, s) =>
+    sum + (s.hull_level ?? 0) + (s.shield_level ?? 0) + (s.cargo_level ?? 0) +
+    (s.engine_level ?? 0) + (s.turret_level ?? 0) + (s.utility_level ?? 0), 0);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const allianceData       = allianceRes.data as any;
   const allianceName       = allianceData?.alliances?.name ?? null;
@@ -101,7 +114,7 @@ export default async function PublicProfilePage({
 
       <main className="mx-auto max-w-2xl p-6 space-y-8">
         {/* Profile header */}
-        <div>
+        <div className="animate-fade-in-up">
           <h1 className="text-2xl font-semibold text-zinc-50">{profile.handle}</h1>
           {profile.title && (
             <p className="mt-0.5 text-sm text-zinc-400">{profile.title}</p>
@@ -121,7 +134,7 @@ export default async function PublicProfilePage({
 
         {/* Bio */}
         {profile.bio && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4">
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-4 animate-fade-in-up">
             <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-2">
               Bio
             </p>
@@ -130,15 +143,15 @@ export default async function PublicProfilePage({
         )}
 
         {/* Stats */}
-        <div>
+        <div className="animate-fade-in-up">
           <h2 className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-3">
             Achievements
           </h2>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Systems found" value={discoveryCount} />
-            <StatCard label="First discovered" value={firstDiscCount} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 stagger-children">
+            <StatCard label="Systems found" value={discoveryCount} sub={firstDiscCount > 0 ? `${firstDiscCount} first` : undefined} />
             <StatCard label="Active colonies" value={colonyCount} />
-            <StatCard label="Alliance" value={allianceName ?? "—"} />
+            <StatCard label="Research unlocked" value={researchCount} />
+            <StatCard label="Ship upgrades" value={totalShipUpgrades} />
           </div>
         </div>
       </main>
@@ -149,14 +162,17 @@ export default async function PublicProfilePage({
 function StatCard({
   label,
   value,
+  sub,
 }: {
   label: string;
   value: string | number;
+  sub?: string;
 }) {
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3">
+    <div className="rounded-lg border border-zinc-800 bg-zinc-900 p-3 card-interactive animate-fade-in-up">
       <p className="text-xs text-zinc-500 uppercase tracking-wider">{label}</p>
       <p className="mt-1 text-lg font-semibold text-zinc-200">{value}</p>
+      {sub && <p className="text-xs text-zinc-600 mt-0.5">{sub}</p>}
     </div>
   );
 }

@@ -88,7 +88,7 @@ function ComposeForm({ onSent }: { onSent: () => void }) {
         <button
           onClick={send}
           disabled={sending || !to.trim() || !body.trim()}
-          className="px-4 py-1.5 text-xs font-semibold rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 transition-colors"
+          className="px-4 py-1.5 text-xs font-semibold rounded border border-indigo-700/60 bg-indigo-900/30 text-indigo-300 hover:bg-indigo-800/40 disabled:opacity-50 transition-colors btn-glow"
         >
           {sending ? "Sending…" : "Send"}
         </button>
@@ -267,7 +267,7 @@ export function MessagesClient({ inbox: initialInbox, allianceMessages: initialA
                 <button
                   onClick={sendAlliance}
                   disabled={allianceSending || !allianceBody.trim()}
-                  className="px-3 py-1.5 text-xs font-semibold rounded border border-violet-700/60 bg-violet-900/30 text-violet-300 hover:bg-violet-800/40 disabled:opacity-50 transition-colors"
+                  className="px-3 py-1.5 text-xs font-semibold rounded border border-violet-700/60 bg-violet-900/30 text-violet-300 hover:bg-violet-800/40 disabled:opacity-50 transition-colors btn-glow"
                 >
                   {allianceSending ? "…" : "Send"}
                 </button>

@@ -37,6 +37,7 @@ import {
   upkeepReductionFraction,
   extractionBonusMultiplier,
   effectiveStorageCap,
+  growthSpeedMultiplier,
 } from "@/lib/game/colonyStructures";
 import { calculateAccumulatedExtraction } from "@/lib/game/extraction";
 import { BALANCE } from "@/lib/config/balance";
@@ -136,6 +137,8 @@ export async function runEngineTick(
   const sustainabilityResearchLvl = researchLevel(unlockedResearchIds, "sustainability");
   const extractionResearchLvl    = researchLevel(unlockedResearchIds, "extraction");
   const storageResearchLvl       = researchLevel(unlockedResearchIds, "storage");
+  const growthResearchLvl        = researchLevel(unlockedResearchIds, "growth");
+  const growthSpeedMult          = growthSpeedMultiplier(growthResearchLvl);
 
   const surveyByBodyId = new Map<string, { resource_nodes: ResourceNodeRecord[] }>();
   for (const row of ((surveyRowsRes?.data ?? []) as { body_id: string; resource_nodes: ResourceNodeRecord[] }[])) {
@@ -173,7 +176,7 @@ export async function runEngineTick(
   const resolvedColonies: Colony[] = colonies.map((colony) => {
     if (!colony.next_growth_at) return colony;
     if (isGrowthBlocked(colony.upkeep_missed_periods)) return colony;
-    const { colony: resolved, resolution } = applyGrowthResolution(colony, requestTime);
+    const { colony: resolved, resolution } = applyGrowthResolution(colony, requestTime, growthSpeedMult);
     if (resolution.tiersGained > 0) {
       growthUpdates.push({
         id: colony.id,
@@ -308,6 +311,7 @@ export async function runEngineTick(
       requestTime,
       extBonusMult,
       balance,
+      extractorTier,
     );
 
     const eventDropMult = dropMultiplier(liveEvents);

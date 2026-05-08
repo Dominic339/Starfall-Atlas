@@ -368,7 +368,7 @@ export default async function SystemPage({
       </nav>
 
       {/* System header */}
-      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between animate-fade-in-up">
         <div>
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-semibold text-zinc-50">

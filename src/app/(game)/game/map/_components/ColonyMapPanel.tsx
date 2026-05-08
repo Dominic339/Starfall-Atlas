@@ -95,7 +95,7 @@ function HealthBar({ pct, health }: { pct: number; health: string }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full rounded-full ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full progress-fill ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs font-mono shrink-0 ${textColor}`}>{pct}%</span>
     </div>
@@ -231,16 +231,17 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
       <div className="relative w-full max-w-2xl max-h-[85vh] flex flex-col rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl overflow-hidden animate-fade-in-up">
 
         {/* Header */}
-        <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-5 py-3 shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-200">
-            Colony Management
+        <div className="relative flex items-center justify-between gap-3 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3 shrink-0 overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-emerald-500/30 to-transparent" />
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-zinc-200">Colony Management</h2>
             {colony && (
-              <span className="ml-2 text-zinc-500 font-normal">— {colony.systemName}</span>
+              <p className="mt-0.5 text-xs text-amber-500/80">{colony.systemName}</p>
             )}
-          </h2>
+          </div>
           <button
             onClick={onClose}
-            className="text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none"
+            className="shrink-0 text-zinc-600 hover:text-zinc-300 transition-colors text-lg leading-none"
           >
             ✕
           </button>
@@ -248,15 +249,15 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
         {/* Tab bar (multiple colonies) */}
         {data && data.colonies.length > 1 && (
-          <div className="flex gap-1 border-b border-zinc-800 px-4 pt-2 shrink-0">
+          <div className="flex items-center gap-1 border-b border-zinc-800/60 px-4 py-2 shrink-0">
             {data.colonies.map((c, i) => (
               <button
                 key={c.id}
                 onClick={() => setActiveTab(i)}
-                className={`px-3 py-1.5 text-xs rounded-t transition-colors ${
+                className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                   i === activeTab
-                    ? "bg-zinc-800 text-zinc-200"
-                    : "text-zinc-600 hover:text-zinc-400"
+                    ? "bg-zinc-800/80 text-zinc-100 border border-zinc-700/60"
+                    : "text-zinc-600 hover:text-zinc-300 border border-transparent"
                 }`}
               >
                 Body {c.bodyIndex}
@@ -295,44 +296,49 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
             return (
               <>
-                {/* Colony header row */}
-                <div>
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base font-semibold text-zinc-100">
-                      Body {colony.bodyIndex}
-                    </span>
-                    {colony.planetType && (
-                      <span className={`rounded-full px-2 py-0.5 text-xs border ${
-                        colony.isHarsh
-                          ? "bg-red-950/60 text-red-400 border-red-900/40"
-                          : "bg-zinc-800 text-zinc-400 border-zinc-700"
-                      }`}>
-                        {BODY_LABELS[colony.planetType] ?? colony.planetType}
-                      </span>
-                    )}
-                    <span className={`rounded-full px-2 py-0.5 text-xs border ${healthBadge}`}>
-                      {healthLabel}
-                    </span>
-                    {colony.status !== "active" && (
-                      <span className="rounded-full px-2 py-0.5 text-xs border border-zinc-700 text-zinc-500">
-                        {colony.status}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    Tier {colony.populationTier}
-                    {colony.growthLabel && (
-                      <span className={`ml-2 ${colony.upkeepMissedPeriods >= 1 ? "text-amber-500" : "text-zinc-600"}`}>
-                        · {colony.growthLabel}
-                      </span>
-                    )}
-                  </p>
-                  {colony.status === "active" && (
-                    <div className="mt-2 max-w-xs">
-                      <HealthBar pct={colony.healthPct} health={colony.health} />
+                {/* Colony header card — themed by planet type */}
+                {(() => {
+                  const pt = colony.planetType;
+                  const isGreen = pt === "lush" || pt === "habitable" || pt === "ocean";
+                  const isDesert = pt === "desert";
+                  const isFrozen = pt === "ice_planet" || pt === "frozen" || pt === "ice_giant";
+                  const isToxic = pt === "toxic";
+                  const isGas = pt === "gas_giant";
+                  const borderCls = colony.isHarsh ? "border-red-900/40" : isGreen ? "border-emerald-900/30" : isDesert ? "border-amber-900/30" : isFrozen ? "border-sky-900/30" : isToxic ? "border-violet-900/30" : "border-zinc-800";
+                  const gradFrom = colony.isHarsh ? "from-red-950/30" : isGreen ? "from-emerald-950/30" : isDesert ? "from-amber-950/30" : isFrozen ? "from-sky-950/30" : isToxic ? "from-violet-950/30" : isGas ? "from-orange-950/20" : "from-zinc-900/60";
+                  const accentVia = colony.isHarsh ? "via-red-500/35" : isGreen ? "via-emerald-500/35" : isDesert ? "via-amber-500/35" : isFrozen ? "via-sky-400/35" : isToxic ? "via-violet-500/35" : isGas ? "via-orange-500/25" : "via-zinc-500/20";
+                  const ptBadge = colony.isHarsh ? "bg-red-950/60 text-red-400 border-red-900/40" : isGreen ? "bg-emerald-950/60 text-emerald-500 border-emerald-900/40" : isDesert ? "bg-amber-950/60 text-amber-400 border-amber-900/40" : isFrozen ? "bg-sky-950/60 text-sky-400 border-sky-900/40" : isToxic ? "bg-violet-950/60 text-violet-400 border-violet-900/40" : isGas ? "bg-orange-950/60 text-orange-400 border-orange-900/40" : "bg-zinc-800 text-zinc-400 border-zinc-700";
+                  return (
+                    <div className={`relative rounded-lg border ${borderCls} bg-gradient-to-br ${gradFrom} via-zinc-900 to-zinc-900 px-4 py-3 overflow-hidden`}>
+                      <div className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent ${accentVia} to-transparent`} />
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-sm font-semibold text-zinc-100">Body {colony.bodyIndex}</span>
+                        {colony.planetType && (
+                          <span className={`rounded-full px-2 py-0.5 text-xs border ${ptBadge}`}>
+                            {BODY_LABELS[colony.planetType] ?? colony.planetType}
+                          </span>
+                        )}
+                        <span className={`rounded-full px-2 py-0.5 text-xs border ${healthBadge}`}>{healthLabel}</span>
+                        {colony.status !== "active" && (
+                          <span className="rounded-full px-2 py-0.5 text-xs border border-zinc-700 text-zinc-500">{colony.status}</span>
+                        )}
+                      </div>
+                      <p className="mt-0.5 text-xs text-zinc-400">
+                        Tier {colony.populationTier}
+                        {colony.growthLabel && (
+                          <span className={`ml-2 ${colony.upkeepMissedPeriods >= 1 ? "text-amber-500" : "text-zinc-600"}`}>
+                            · {colony.growthLabel}
+                          </span>
+                        )}
+                      </p>
+                      {colony.status === "active" && (
+                        <div className="mt-2 max-w-xs">
+                          <HealthBar pct={colony.healthPct} health={colony.health} />
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })()}
 
                 {/* Abandoned banner */}
                 {colony.status === "abandoned" && (() => {
@@ -355,7 +361,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                           <button
                             onClick={() => handleReactivate(colony.id)}
                             disabled={reactivateLoading}
-                            className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                            className="rounded bg-amber-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors btn-glow-amber"
                           >
                             {reactivateLoading ? "Reactivating…" : "Reactivate Colony"}
                           </button>
@@ -385,11 +391,12 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                 )}
 
                 {/* Stockpile */}
-                <section>
-                  <div className="mb-2 flex items-baseline justify-between">
-                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">Stockpile</h3>
-                    <span className="text-xs text-zinc-700">
-                      {colony.inventoryTotal > 0 ? `${colony.inventoryTotal.toLocaleString()} units` : "empty"}
+                <section className="animate-fade-in-up">
+                  <div className="flex items-center gap-2 mb-2">
+                    <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 shrink-0">Stockpile</h3>
+                    <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+                    <span className="text-xs text-zinc-700 shrink-0">
+                      {colony.inventoryTotal > 0 ? `${colony.inventoryTotal.toLocaleString()} u` : "empty"}
                     </span>
                   </div>
                   {colony.inventory.length > 0 ? (
@@ -415,10 +422,13 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Output + Tax */}
                 {colony.status === "active" && (
-                  <section>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Output</h3>
+                  <section className="animate-fade-in-up">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 shrink-0">Output</h3>
+                      <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+                    </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 card-interactive">
                         <p className="text-xs text-zinc-600">Production</p>
                         <p className="mt-1 text-sm font-medium text-teal-300">
                           {colony.totalRatePerHr > 0 ? `${colony.totalRatePerHr} u/hr` : <span className="text-zinc-500">Paused</span>}
@@ -431,7 +441,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                           <p className="mt-1 text-xs text-amber-500">Cap reached — haul soon</p>
                         )}
                       </div>
-                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5">
+                      <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2.5 card-interactive">
                         <p className="text-xs text-zinc-600">Tax accrued</p>
                         {colony.accruedTax > 0 ? (
                           <>
@@ -440,7 +450,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                               <button
                                 onClick={() => handleCollect(colony.id)}
                                 disabled={collectLoading}
-                                className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors"
+                                className="rounded bg-amber-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-amber-600 disabled:opacity-50 transition-colors btn-glow-amber"
                               >
                                 {collectLoading ? "Collecting…" : `Collect ${colony.accruedTax} ¢`}
                               </button>
@@ -457,8 +467,11 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Structures */}
                 {colony.status === "active" && (
-                  <section>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Structures</h3>
+                  <section className="animate-fade-in-up">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 shrink-0">Structures</h3>
+                      <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+                    </div>
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-3">
                       {colony.buildOptions.map((opt) => (
                         <div key={opt.type} className="flex items-start justify-between gap-3">
@@ -499,8 +512,11 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Emergency Supply */}
                 {colony.status === "active" && colony.health !== "well_supplied" && (
-                  <section>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Emergency Supply</h3>
+                  <section className="animate-fade-in-up">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 shrink-0">Emergency Supply</h3>
+                      <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+                    </div>
                     <div className="rounded-lg border border-orange-900/50 bg-orange-950/20 px-4 py-3 space-y-2">
                       <p className="text-xs text-zinc-500">
                         Instant delivery · {colony.euxDailyUsed}/{colony.euxDailyLimit} daily limit used
@@ -540,10 +556,13 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
 
                 {/* Ships in system */}
                 {colony.shipsInSystem.length > 0 && (
-                  <section>
-                    <h3 className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">
-                      Ships in System ({colony.shipsInSystem.length})
-                    </h3>
+                  <section className="animate-fade-in-up">
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 shrink-0">
+                        Ships in System ({colony.shipsInSystem.length})
+                      </h3>
+                      <div className="flex-1 h-px bg-gradient-to-r from-zinc-800 to-transparent" />
+                    </div>
                     <div className="rounded-lg border border-zinc-800 bg-zinc-900 px-4 py-3 space-y-1.5">
                       {colony.shipsInSystem.map((s) => (
                         <div key={s.id} className="flex items-center justify-between gap-2">

@@ -97,7 +97,7 @@ export default async function MessagesPage() {
   return (
     <div className="max-w-2xl space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 animate-fade-in-up">
         <Link
           href="/game/command"
           className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -110,7 +110,7 @@ export default async function MessagesPage() {
         </span>
       </div>
 
-      <div>
+      <div className="animate-fade-in-up">
         <h1 className="text-lg font-bold tracking-tight text-zinc-100">Messages</h1>
         <p className="mt-1 text-xs text-zinc-500">
           Direct messages between players and alliance chat.

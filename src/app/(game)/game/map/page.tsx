@@ -770,7 +770,7 @@ export default async function GalaxyMapPage() {
     // The sub-bar is a thin info strip; GalaxyMapClient fills the rest.
     <div className="flex flex-1 flex-col overflow-hidden">
       {/* Thin map info bar */}
-      <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800/60 bg-zinc-950 px-4 py-1.5 text-xs text-zinc-600">
+      <div className="flex shrink-0 items-center gap-3 border-b border-zinc-800/60 bg-zinc-950 px-4 py-1.5 text-xs text-zinc-600 animate-fade-in-up">
         <span>
           {discoveredCount}/{systems.length} systems discovered
           {colonies.length > 0 && (

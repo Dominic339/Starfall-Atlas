@@ -64,7 +64,7 @@ export function PurchaseButton({
         onClick={handlePurchase}
         disabled={isDisabled}
         title={disabled ? (disabledReason ?? `Need ${costLabel}`) : undefined}
-        className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+        className={`rounded px-3 py-1.5 text-xs font-semibold transition-colors btn-glow ${
           disabled
             ? "bg-zinc-700/60 text-zinc-500 cursor-not-allowed"
             : state === "loading"

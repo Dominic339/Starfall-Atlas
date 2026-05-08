@@ -341,7 +341,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
               {!inboxLoading && inbox.length === 0 && (
                 <p className="text-sm text-zinc-600 text-center py-4">No messages.</p>
               )}
-              <div className="space-y-1">
+              <div className="space-y-1 stagger-children">
                 {inbox.map((m) => (
                   <button
                     key={m.id}
@@ -369,7 +369,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
 
           {/* ── Alliance chat tab ──────────────────────────────────────────── */}
           {tab === "chat" && (
-            <div className="space-y-3">
+            <div className="space-y-3 animate-fade-in-up">
               {chatInAlliance === null && <p className="text-xs text-zinc-600 text-center py-4">Loading…</p>}
               {chatInAlliance === false && (
                 <p className="text-sm text-zinc-500 text-center py-4">You are not in an alliance.</p>
@@ -417,7 +417,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
           )}
           {/* ── Alliance HQ tab ───────────────────────────────────────────── */}
           {tab === "alliance" && (
-            <div className="space-y-5">
+            <div className="space-y-5 animate-fade-in-up">
               {allianceLoading && <p className="text-xs text-zinc-600 text-center py-8 animate-pulse">Loading…</p>}
 
               {/* Not in alliance: create + join forms */}
@@ -496,7 +496,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
                                 <span>{timeAgo(goal.deadlineAt)}</span>
                               </div>
                               <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-                                <div className={`h-full rounded-full ${goal.pct >= 100 ? "bg-emerald-500" : goal.pct >= 50 ? "bg-indigo-500" : "bg-violet-600"}`} style={{ width: `${Math.min(100, goal.pct)}%` }} />
+                                <div className={`h-full rounded-full progress-fill ${goal.pct >= 100 ? "bg-emerald-500" : goal.pct >= 50 ? "bg-indigo-500" : "bg-violet-600"}`} style={{ width: `${Math.min(100, goal.pct)}%` }} />
                               </div>
                             </div>
                           </div>
@@ -534,7 +534,7 @@ export function MessagesMapPanel({ onClose }: MessagesMapPanelProps) {
                           <input type="number" min="1" placeholder="Qty" value={depositAmount} onChange={(e) => setDepositAmount(e.target.value)}
                             className="w-20 rounded border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-xs font-mono text-zinc-200 text-center focus:outline-none focus:border-zinc-500" />
                           <button onClick={handleDeposit} disabled={actionLoading || !depositResource || !depositAmount}
-                            className="shrink-0 rounded px-3 py-1.5 text-xs font-semibold border border-teal-700/50 bg-teal-950/20 text-teal-400 hover:bg-teal-900/30 disabled:opacity-50 transition-colors">
+                            className="shrink-0 rounded px-3 py-1.5 text-xs font-semibold border border-teal-700/50 bg-teal-950/20 text-teal-400 hover:bg-teal-900/30 disabled:opacity-50 transition-colors btn-glow-teal">
                             {actionLoading ? "…" : "Deposit"}
                           </button>
                         </div>

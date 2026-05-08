@@ -73,18 +73,36 @@ export async function resolveLaneJobs(
 
   if (!jobs || jobs.length === 0) return 0;
 
-  const laneIds = jobs.map((j: { lane_id: string }) => j.lane_id);
-  const jobIds  = jobs.map((j: { id: string }) => j.id);
+  const laneIds = (jobs as { id: string; lane_id: string }[]).map((j) => j.lane_id);
+  const jobIds  = (jobs as { id: string; lane_id: string }[]).map((j) => j.id);
 
-  await admin
+  // Fetch lane system IDs before marking complete so we can emit events.
+  const { data: laneRows } = await admin
     .from("hyperspace_lanes")
-    .update({ is_active: true, built_at: now.toISOString() })
+    .select("id, from_system_id, to_system_id")
     .in("id", laneIds);
 
-  await admin
-    .from("lane_construction_jobs")
-    .update({ status: "complete" })
-    .in("id", jobIds);
+  await Promise.all([
+    admin.from("hyperspace_lanes").update({ is_active: true, built_at: now.toISOString() }).in("id", laneIds),
+    admin.from("lane_construction_jobs").update({ status: "complete" }).in("id", jobIds),
+  ]);
+
+  // Emit world events for each completed lane.
+  if (laneRows && laneRows.length > 0) {
+    await admin.from("world_events").insert(
+      (laneRows as { id: string; from_system_id: string; to_system_id: string }[]).map((lane) => ({
+        event_type: "lane_built",
+        player_id:  playerId,
+        system_id:  lane.from_system_id,
+        body_id:    null,
+        metadata: {
+          lane_id:        lane.id,
+          from_system_id: lane.from_system_id,
+          to_system_id:   lane.to_system_id,
+        },
+      })),
+    );
+  }
 
   return jobs.length;
 }

@@ -6,6 +6,7 @@ export interface FeedEvent {
   id: string;
   eventType: string;
   label: string;
+  summary?: string;
   playerHandle: string | null;
   systemId: string | null;
   systemName: string | null;
@@ -31,6 +32,11 @@ const EVENT_COLOR: Record<string, string> = {
   stewardship_transferred: "text-teal-300",
   majority_control_gained: "text-rose-400",
   majority_control_lost:   "text-rose-300",
+  auction_started:         "text-yellow-400",
+  auction_resolved:        "text-yellow-300",
+  dispute_opened:          "text-orange-400",
+  dispute_resolved:        "text-rose-400",
+  dispute_expired:         "text-zinc-500",
 };
 
 const EVENT_ICON_BG: Record<string, string> = {
@@ -51,6 +57,11 @@ const EVENT_ICON_BG: Record<string, string> = {
   stewardship_transferred: "bg-teal-950/60 ring-teal-700/40",
   majority_control_gained: "bg-rose-950/60 ring-rose-800/40",
   majority_control_lost:   "bg-rose-950/60 ring-rose-700/40",
+  auction_started:         "bg-yellow-950/60 ring-yellow-800/40",
+  auction_resolved:        "bg-yellow-950/60 ring-yellow-700/40",
+  dispute_opened:          "bg-orange-950/60 ring-orange-800/40",
+  dispute_resolved:        "bg-rose-950/60 ring-rose-600/40",
+  dispute_expired:         "bg-zinc-800/60 ring-zinc-700/40",
 };
 
 function EventIcon({ eventType, colorClass }: { eventType: string; colorClass: string }) {
@@ -115,6 +126,19 @@ function getIconPath(eventType: string) {
     case "majority_control_lost":
       // Falling chart / down arrow
       return <path d="M2 4l4 4 3-2 5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />;
+    case "auction_started":
+    case "auction_resolved":
+      // Gavel / auction hammer
+      return <path d="M10 2L14 6l-1.5 1.5-4-4L10 2zM3 13l6-6 1.5 1.5-6 6L3 13zm-1 3h6v-1H2v1z" />;
+    case "dispute_opened":
+      // Crossed swords
+      return <path d="M2 2l5 5m0 0l2-2 5 5-5 5-2-2m0 0L2 14M11 5l2-2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" fill="none" />;
+    case "dispute_resolved":
+      // Trophy / medal
+      return <path d="M8 1l2 4h4l-3 2.5 1 4L8 9l-4 2.5 1-4L2 5h4L8 1zm0 13v2M5 15h6" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />;
+    case "dispute_expired":
+      // Hourglass empty
+      return <path d="M4 2h8M4 14h8M5 2v3l3 3-3 3v3M11 2v3L8 8l3 3v3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" fill="none" />;
     default:
       return <circle cx="8" cy="8" r="3" />;
   }
@@ -134,19 +158,13 @@ function timeAgo(iso: string): string {
 
 function EventRow({ event }: { event: FeedEvent }) {
   const color = EVENT_COLOR[event.eventType] ?? "text-zinc-400";
+  const text = event.summary
+    ?? `${event.playerHandle ? event.playerHandle + " — " : ""}${event.label}${event.systemName ? ` · ${event.systemName}` : ""}`;
   return (
     <div className="flex items-start gap-3 py-2.5 border-b border-zinc-800/40 last:border-0 hover:bg-zinc-800/20 transition-colors rounded px-1 -mx-1">
       <EventIcon eventType={event.eventType} colorClass={color} />
       <div className="flex-1 min-w-0">
-        <p className="text-sm text-zinc-300 leading-snug">
-          {event.playerHandle && (
-            <span className="font-semibold text-zinc-100">{event.playerHandle} </span>
-          )}
-          <span className={color}>{event.label}</span>
-        </p>
-        {event.systemName && (
-          <p className="text-xs text-zinc-600 mt-0.5">{event.systemName}</p>
-        )}
+        <p className={`text-sm leading-snug ${color}`}>{text}</p>
       </div>
       <span className="shrink-0 text-xs text-zinc-600 tabular-nums mt-0.5">{timeAgo(event.occurredAt)}</span>
     </div>

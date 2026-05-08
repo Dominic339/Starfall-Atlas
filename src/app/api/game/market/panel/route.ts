@@ -90,11 +90,35 @@ export async function GET() {
     quantity:     r.quantity,
   }));
 
+  // Per-resource market stats derived from active listings.
+  const statsByResource = new Map<string, { prices: number[]; supply: number }>();
+  for (const l of rawListings) {
+    const remaining = l.quantity - l.quantity_filled;
+    if (remaining <= 0) continue;
+    const entry = statsByResource.get(l.resource_type) ?? { prices: [], supply: 0 };
+    entry.prices.push(l.price_per_unit);
+    entry.supply += remaining;
+    statsByResource.set(l.resource_type, entry);
+  }
+  const marketStats = Array.from(statsByResource.entries()).map(([resourceType, { prices, supply }]) => {
+    const sorted = [...prices].sort((a, b) => a - b);
+    const avg = Math.round(sorted.reduce((s, p) => s + p, 0) / sorted.length);
+    return {
+      resourceType,
+      minPrice:      sorted[0],
+      maxPrice:      sorted[sorted.length - 1],
+      avgPrice:      avg,
+      totalSupply:   supply,
+      listingCount:  prices.length,
+    };
+  });
+
   return Response.json({
     ok: true,
     data: {
       listings,
       inventory,
+      marketStats,
       playerCredits:    player.credits,
       playerId:         player.id,
       listingFeePercent: BALANCE.market.listingFeePercent,

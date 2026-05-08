@@ -30,6 +30,7 @@ import { listResult, maybeSingleResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { fleetCommandSpeedBonus } from "@/lib/game/researchHelpers";
 import type { Fleet, FleetShip, Ship } from "@/lib/types/game";
 
 const DispatchFleetSchema = z.object({
@@ -52,10 +53,11 @@ export async function POST(request: NextRequest) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  // ── Fetch balance + fleet in parallel ─────────────────────────────────────
-  const [balance, fleetRes] = await Promise.all([
+  // ── Fetch balance + fleet + research in parallel ──────────────────────────
+  const [balance, fleetRes, researchRes] = await Promise.all([
     getBalanceWithOverrides(admin),
     admin.from("fleets").select("*").eq("id", fleetId).maybeSingle(),
+    admin.from("player_research").select("research_id").eq("player_id", player.id),
   ]);
 
   const { data: fleet } = maybeSingleResult<Fleet>(fleetRes);
@@ -154,8 +156,12 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // ── Fleet speed = slowest ship ────────────────────────────────────────────
-  const fleetSpeed = Math.min(...ships.map((s) => s.speed_ly_per_hr));
+  // ── Fleet speed = slowest ship + Fleet Command research bonus ────────────
+  const unlockedResearchIds = new Set(
+    ((researchRes?.data ?? []) as { research_id: string }[]).map((r) => r.research_id),
+  );
+  const speedBonus = fleetCommandSpeedBonus(unlockedResearchIds, balance);
+  const fleetSpeed = Math.min(...ships.map((s) => s.speed_ly_per_hr)) + speedBonus;
 
   const now = new Date();
   const arriveAt = computeArrivalTime(now, distanceLy, fleetSpeed);

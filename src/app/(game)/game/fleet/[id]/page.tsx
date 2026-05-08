@@ -269,7 +269,7 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
               </div>
               <Link
                 href={`/game/system/${encodeURIComponent(activeTravelJob.to_system_id)}`}
-                className="shrink-0 rounded bg-indigo-800 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-700 transition-colors"
+                className="shrink-0 rounded bg-indigo-800 px-3 py-1.5 text-xs font-semibold text-indigo-200 hover:bg-indigo-700 transition-colors btn-glow"
               >
                 View destination →
               </Link>

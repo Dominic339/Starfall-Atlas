@@ -21,42 +21,54 @@ async function fetchLeaderboard(): Promise<{
   byColonies:    RankEntry[];
   byCredits:     RankEntry[];
   byDiscoveries: RankEntry[];
+  byPopulation:  RankEntry[];
+  byMilitary:    RankEntry[];
 }> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  const [coloniesRes, creditsRes, discoveriesRes] = await Promise.all([
-    admin.rpc
-      ? admin
-          .from("colonies")
-          .select("owner_id")
-          .eq("status", "active")
-      : null,
+  const [coloniesRes, creditsRes, discoveriesRes, shipsRes] = await Promise.all([
+    admin.from("colonies").select("owner_id, population_tier").eq("status", "active"),
     admin.from("players").select("id, handle, credits").order("credits", { ascending: false }).limit(25),
     admin.from("system_discoveries").select("player_id").eq("is_first", true),
+    admin.from("ships").select("owner_id, turret_level"),
   ]);
 
-  // Colony counts by owner
-  type ColonyRow = { owner_id: string };
+  // Colony counts and population power by owner
+  type ColonyRow = { owner_id: string; population_tier: number };
   const allColonyRows = (coloniesRes?.data ?? []) as ColonyRow[];
-  const colonyCounts = new Map<string, number>();
+  const colonyCounts  = new Map<string, number>();
+  const popPower      = new Map<string, number>();
   for (const r of allColonyRows) {
     colonyCounts.set(r.owner_id, (colonyCounts.get(r.owner_id) ?? 0) + 1);
+    popPower.set(r.owner_id, (popPower.get(r.owner_id) ?? 0) + (r.population_tier ?? 1));
+  }
+
+  // Military strength (total turret levels) by owner
+  type ShipRow = { owner_id: string; turret_level: number };
+  const allShipRows = (shipsRes?.data ?? []) as ShipRow[];
+  const militaryStrength = new Map<string, number>();
+  for (const r of allShipRows) {
+    militaryStrength.set(r.owner_id, (militaryStrength.get(r.owner_id) ?? 0) + (r.turret_level ?? 0));
   }
 
   // Discovery counts by player
   type DiscRow = { player_id: string };
   const allDiscRows = (discoveriesRes?.data ?? []) as DiscRow[];
-  const discCounts = new Map<string, number>();
+  const discCounts  = new Map<string, number>();
   for (const r of allDiscRows) {
     discCounts.set(r.player_id, (discCounts.get(r.player_id) ?? 0) + 1);
   }
 
-  // Resolve handles for colony + discovery leaderboards
-  const colonyIds    = [...colonyCounts.keys()];
-  const discoveryIds = [...discCounts.keys()];
-  const allPlayerIds = [...new Set([...colonyIds, ...discoveryIds])];
-  const handleMap    = new Map<string, string>();
+  // Resolve handles for all player IDs that appear in any ranking
+  const allPlayerIds = [
+    ...new Set([
+      ...colonyCounts.keys(),
+      ...discCounts.keys(),
+      ...militaryStrength.keys(),
+    ]),
+  ];
+  const handleMap = new Map<string, string>();
 
   if (allPlayerIds.length > 0) {
     const { data: hRows } = await admin
@@ -81,7 +93,18 @@ async function fetchLeaderboard(): Promise<{
     .slice(0, 25)
     .map(([id, count], i) => ({ rank: i + 1, handle: handleMap.get(id) ?? "Unknown", value: count }));
 
-  return { byColonies, byCredits, byDiscoveries };
+  const byPopulation: RankEntry[] = [...popPower.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map(([id, power], i) => ({ rank: i + 1, handle: handleMap.get(id) ?? "Unknown", value: power }));
+
+  const byMilitary: RankEntry[] = [...militaryStrength.entries()]
+    .filter(([, v]) => v > 0)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 25)
+    .map(([id, power], i) => ({ rank: i + 1, handle: handleMap.get(id) ?? "Unknown", value: power }));
+
+  return { byColonies, byCredits, byDiscoveries, byPopulation, byMilitary };
 }
 
 // ---------------------------------------------------------------------------
@@ -131,6 +154,24 @@ function ExplorerIcon() {
   return (
     <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
       <path d="M8 1.5a.5.5 0 0 1 .5.5v1.586l1.121-1.121a.5.5 0 1 1 .707.707L9.207 4.293l.636.636a.5.5 0 1 1-.707.707L8.5 4.999V6.5a.5.5 0 0 1-1 0V5.009l-.629.629a.5.5 0 0 1-.707-.707L7.5 3.585V2a.5.5 0 0 1 .5-.5zm0 3.5A4.5 4.5 0 1 0 12.5 9 4.505 4.505 0 0 0 8 5zm0 1.5A3 3 0 1 1 5 9a3 3 0 0 1 3-3z" />
+    </svg>
+  );
+}
+
+function PopulationIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M7 14s-1 0-1-1 1-4 5-4 5 3 5 4-1 1-1 1H7zm4-6a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/>
+      <path fillRule="evenodd" d="M5.216 14A2.238 2.238 0 0 1 5 13c0-1.355.68-2.75 1.936-3.72A6.325 6.325 0 0 0 5 9c-4 0-5 3-5 4s1 1 1 1h4.216z"/>
+      <path d="M4.5 8a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/>
+    </svg>
+  );
+}
+
+function MilitaryIcon() {
+  return (
+    <svg className="w-3.5 h-3.5" viewBox="0 0 16 16" fill="currentColor" aria-hidden>
+      <path d="M3.612 15.443c-.386.198-.824-.149-.746-.592l.83-4.73L.173 6.765c-.329-.314-.158-.888.283-.95l4.898-.696L7.538.792c.197-.39.73-.39.927 0l2.184 4.327 4.898.696c.441.062.612.636.282.95l-3.522 3.356.83 4.73c.078.443-.36.79-.746.592L8 13.187l-4.389 2.256z"/>
     </svg>
   );
 }
@@ -231,12 +272,12 @@ export default async function LeaderboardPage() {
   const user = await getUser();
   if (!user) redirect("/login");
 
-  const { byColonies, byCredits, byDiscoveries } = await fetchLeaderboard();
+  const { byColonies, byCredits, byDiscoveries, byPopulation, byMilitary } = await fetchLeaderboard();
 
   return (
-    <div className="mx-auto max-w-5xl p-6 space-y-6">
+    <div className="mx-auto max-w-6xl p-6 space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 animate-fade-in-up">
         <Link
           href="/game/command"
           className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -250,14 +291,14 @@ export default async function LeaderboardPage() {
       </div>
 
       {/* Page title */}
-      <div>
+      <div className="animate-fade-in-up">
         <h1 className="text-lg font-bold tracking-tight text-zinc-100">Leaderboard</h1>
         <p className="mt-1 text-xs text-zinc-600">
           Rankings update on every page load · top 25 players per category
         </p>
       </div>
 
-      {/* Three panels side by side on md+ */}
+      {/* Row 1: Expansion & Economy */}
       <div className="flex flex-col md:flex-row gap-4 stagger-children">
         <RankPanel
           title="Most Colonies"
@@ -289,6 +330,32 @@ export default async function LeaderboardPage() {
           valueLabel="discoveries"
           valueFormat={(v) => String(v)}
         />
+      </div>
+
+      {/* Row 2: Civilisation & Military */}
+      <div className="flex flex-col md:flex-row gap-4 stagger-children">
+        <RankPanel
+          title="Population Power"
+          accentGradient="from-emerald-600/0 via-emerald-500/60 to-emerald-600/0"
+          iconBg="bg-emerald-950/60 border-emerald-800/40"
+          iconColor="text-emerald-400"
+          icon={<PopulationIcon />}
+          entries={byPopulation}
+          valueLabel="total tier"
+          valueFormat={(v) => String(v)}
+        />
+        <RankPanel
+          title="Military Strength"
+          accentGradient="from-red-600/0 via-red-500/60 to-red-600/0"
+          iconBg="bg-red-950/60 border-red-800/40"
+          iconColor="text-red-400"
+          icon={<MilitaryIcon />}
+          entries={byMilitary}
+          valueLabel="turret pts"
+          valueFormat={(v) => String(v)}
+        />
+        {/* Spacer to keep 3-column grid alignment */}
+        <div className="flex-1 hidden md:block" />
       </div>
     </div>
   );

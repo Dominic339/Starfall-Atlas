@@ -108,7 +108,7 @@ export function ProfileEditForm({ currentHandle, currentTitle, currentBio }: Pro
       <button
         type="submit"
         disabled={loading}
-        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors"
+        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white hover:bg-indigo-500 disabled:opacity-50 transition-colors btn-glow"
       >
         {loading ? "Saving…" : "Save changes"}
       </button>

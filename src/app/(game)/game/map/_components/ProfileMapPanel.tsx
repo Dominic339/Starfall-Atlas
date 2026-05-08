@@ -14,15 +14,16 @@ interface ProfileData {
     firstDiscoveries: number;
     activeColonies: number;
     totalShipUpgrades: number;
+    researchUnlocked?: number;
   };
-  alliance: { name: string | null; tag: string | null; role: string | null } | null;
+  alliance: { name: string | null; tag: string | null; role: string | null; allianceCredits?: number } | null;
 }
 
 interface ProfileMapPanelProps { onClose: () => void; }
 
 function StatTile({ label, value, color }: { label: string; value: string | number; color: string }) {
   return (
-    <div className="flex flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3">
+    <div className="flex flex-col gap-1 rounded-xl border border-zinc-800 bg-zinc-900/50 px-4 py-3 card-interactive animate-fade-in-up">
       <span className={`font-mono text-xl font-bold tabular-nums ${color}`}>{value}</span>
       <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-600">{label}</span>
     </div>
@@ -131,11 +132,17 @@ export function ProfileMapPanel({ onClose }: ProfileMapPanelProps) {
           {!loading && data && (
             <>
               {/* Stats grid */}
-              <div className="grid grid-cols-2 gap-2">
-                <StatTile label="Systems found"   value={data.stats.systemsDiscovered} color="text-indigo-400" />
-                <StatTile label="First contact"   value={data.stats.firstDiscoveries}  color="text-amber-400" />
-                <StatTile label="Colonies"        value={data.stats.activeColonies}    color="text-emerald-400" />
-                <StatTile label="Ship upgrades"   value={data.stats.totalShipUpgrades} color="text-rose-400" />
+              <div className="grid grid-cols-2 gap-2 stagger-children">
+                <StatTile label="Systems found"   value={data.stats.systemsDiscovered}    color="text-indigo-400" />
+                <StatTile label="First contact"   value={data.stats.firstDiscoveries}     color="text-amber-400" />
+                <StatTile label="Colonies"        value={data.stats.activeColonies}       color="text-emerald-400" />
+                <StatTile label="Ship upgrades"   value={data.stats.totalShipUpgrades}    color="text-rose-400" />
+                {data.stats.researchUnlocked !== undefined && (
+                  <StatTile label="Research"      value={data.stats.researchUnlocked}     color="text-sky-400" />
+                )}
+                {data.alliance?.allianceCredits !== undefined && (
+                  <StatTile label="Alliance ¢"    value={data.alliance.allianceCredits.toLocaleString()} color="text-violet-400" />
+                )}
               </div>
 
               {/* Joined */}

@@ -8,17 +8,14 @@
  * Like taxes, extraction is calculated lazily from timestamps:
  * - Colony.last_extract_at is the reference timestamp.
  * - Rate = BALANCE.extraction.baseUnitsPerHrPerTier × population_tier
- *   (applied per basic resource node revealed by survey).
+ *   (applied per resource node revealed by survey).
  * - Yield is capped at accumulationCapHours to prevent idle overflow.
- * - Only basic (non-rare) resource nodes are extracted in alpha.
- *   Rare node extraction requires Deep Survey Kit + Extractor structure (future).
+ * - Basic nodes are always extracted (requires any extractor or none).
+ * - Rare nodes (is_rare = true) require an Extractor structure at tier 2+.
+ *   Rare node rate = basic rate × rareExtractionRateFraction (25% by default).
  *
  * Resource flow in this phase:
  *   colony extraction → station inventory (direct, no ship transport yet)
- *
- * In later phases ships will haul resources colony → station, making
- * the transport chain explicit. The inventory model is already
- * station-aware so no breaking changes are required.
  */
 
 import { BALANCE } from "@/lib/config/balance";
@@ -50,18 +47,22 @@ export function extractionRatePerNode(populationTier: number, balance: BalanceCo
 // ---------------------------------------------------------------------------
 
 /**
- * Calculate how many units of each basic resource have accumulated
- * since last extraction.
+ * Calculate how many units of each resource have accumulated since last extraction.
  *
- * @param resourceNodes       - Resource nodes from the body's survey result
- * @param populationTier      - Current colony tier (1–10)
- * @param lastExtractAt       - ISO timestamp of last extraction (or colony founding)
- * @param now                 - Current server time (defaults to Date.now())
+ * Basic nodes are always included. Rare nodes (is_rare = true) are included only
+ * when extractorTier >= 2, at a reduced rate (rareExtractionRateFraction × basic rate).
+ *
+ * @param resourceNodes        - Resource nodes from the body's survey result
+ * @param populationTier       - Current colony tier (1–10)
+ * @param lastExtractAt        - ISO timestamp of last extraction (or colony founding)
+ * @param now                  - Current server time (defaults to Date.now())
  * @param extractionMultiplier - Bonus multiplier from structures/research (default 1.0).
  *                               Applied after the base rate. Health multiplier is applied
  *                               separately by the caller.
+ * @param balance              - Balance config override.
+ * @param extractorTier        - Active extractor tier (0 = no extractor). Rare nodes
+ *                               require tier ≥ 2.
  * @returns Array of { resource_type, quantity } for each node with >0 yield.
- *          Returns [] if nothing has accrued yet.
  */
 export function calculateAccumulatedExtraction(
   resourceNodes: ResourceNodeRecord[],
@@ -70,6 +71,7 @@ export function calculateAccumulatedExtraction(
   now: Date = new Date(),
   extractionMultiplier = 1.0,
   balance: BalanceConfig = BALANCE,
+  extractorTier = 0,
 ): ExtractionAmount[] {
   const lastMs = new Date(lastExtractAt).getTime();
   const elapsedMs = Math.max(0, now.getTime() - lastMs);
@@ -78,15 +80,25 @@ export function calculateAccumulatedExtraction(
   const capHours = balance.extraction.accumulationCapHours;
   const effectiveHours = Math.min(elapsedHours, capHours);
 
-  const ratePerHr = extractionRatePerNode(populationTier, balance);
+  const baseRatePerHr = extractionRatePerNode(populationTier, balance);
+  const rareRatePerHr = baseRatePerHr * balance.extraction.rareExtractionRateFraction;
+  const canExtractRare = extractorTier >= 2;
 
-  return resourceNodes
-    .filter((node) => !node.is_rare) // rare nodes require Extractor structure (future)
-    .map((node) => ({
-      resource_type: node.type,
-      quantity: Math.floor(effectiveHours * ratePerHr * extractionMultiplier),
-    }))
-    .filter((item) => item.quantity > 0);
+  // Accumulate yields per resource type (multiple nodes of the same type sum together).
+  const totals = new Map<string, number>();
+  for (const node of resourceNodes) {
+    if (node.is_rare && !canExtractRare) continue;
+    const rate = node.is_rare ? rareRatePerHr : baseRatePerHr;
+    const qty = Math.floor(effectiveHours * rate * extractionMultiplier);
+    if (qty > 0) {
+      totals.set(node.type, (totals.get(node.type) ?? 0) + qty);
+    }
+  }
+
+  return Array.from(totals.entries()).map(([resource_type, quantity]) => ({
+    resource_type,
+    quantity,
+  }));
 }
 
 // ---------------------------------------------------------------------------

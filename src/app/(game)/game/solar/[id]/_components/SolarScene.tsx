@@ -107,6 +107,18 @@ const PLANET_RINGS: Record<string, { color: string; opacity: number; inner: numb
   ice_giant: { color: "#70c8d8", opacity: 0.36, inner: 1.40, outer: 2.10, tilt: Math.PI / 5 },
 };
 
+// Cloud/haze layer — rotates independently of the planet body
+const PLANET_CLOUDS: Record<string, { color: string; opacity: number; speed: number }> = {
+  lush:      { color: "#e8f4e0", opacity: 0.11, speed: 0.09 },
+  habitable: { color: "#dde8d5", opacity: 0.09, speed: 0.08 },
+  ocean:     { color: "#d0e8f8", opacity: 0.13, speed: 0.07 },
+  toxic:     { color: "#c8e850", opacity: 0.15, speed: 0.12 },
+  volcanic:  { color: "#3a1510", opacity: 0.18, speed: 0.06 },
+  frozen:    { color: "#e8f4ff", opacity: 0.07, speed: 0.05 },
+  gas_giant: { color: "#e8c090", opacity: 0.10, speed: 0.18 },
+  ice_giant: { color: "#a8e0f0", opacity: 0.12, speed: 0.14 },
+};
+
 // Sidebar colour (for SystemHubClient to consume — keep in sync with PLANET_MAT)
 const PLANET_COLOR: Record<string, string> = {
   lush: "#2a6b35", habitable: "#46955a", ocean: "#1a4f9a",
@@ -136,13 +148,37 @@ function bodyDisplayLabel(type: string): string {
 // Stylized procedural planet — sphere + optional atmosphere + optional rings
 // ---------------------------------------------------------------------------
 
+const PLANET_SPIN_SPEED: Record<string, number> = {
+  gas_giant:    0.08,
+  ice_giant:    0.07,
+  lush:         0.15,
+  habitable:    0.14,
+  ocean:        0.16,
+  desert:       0.10,
+  rocky:        0.09,
+  barren:       0.07,
+  frozen:       0.11,
+  ice_planet:   0.10,
+  volcanic:     0.12,
+  toxic:        0.13,
+};
+
 function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: number }) {
-  const mat   = PLANET_MAT[bodyType]   ?? PLANET_MAT.rocky;
-  const atmo  = PLANET_ATMO[bodyType];
-  const rings = PLANET_RINGS[bodyType];
+  const mat    = PLANET_MAT[bodyType]    ?? PLANET_MAT.rocky;
+  const atmo   = PLANET_ATMO[bodyType];
+  const rings  = PLANET_RINGS[bodyType];
+  const clouds = PLANET_CLOUDS[bodyType];
+  const selfRef   = useRef<THREE.Group>(null!);
+  const cloudRef  = useRef<THREE.Group>(null!);
+  const spinSpeed = PLANET_SPIN_SPEED[bodyType] ?? 0.10;
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (selfRef.current)  selfRef.current.rotation.y  = t * spinSpeed;
+    if (cloudRef.current) cloudRef.current.rotation.y = t * (clouds?.speed ?? 0);
+  });
 
   return (
-    <group>
+    <group ref={selfRef}>
       {/* Core sphere */}
       <mesh>
         <sphereGeometry args={[radius, 48, 32]} />
@@ -155,12 +191,108 @@ function ProceduralPlanet({ bodyType, radius }: { bodyType: string; radius: numb
         />
       </mesh>
 
+      {/* Cloud / haze layer — independent rotation */}
+      {clouds && (
+        <group ref={cloudRef}>
+          <mesh>
+            <sphereGeometry args={[radius * 1.03, 32, 20]} />
+            <meshBasicMaterial color={clouds.color} transparent opacity={clouds.opacity} depthWrite={false} />
+          </mesh>
+        </group>
+      )}
+
       {/* Atmosphere glow — large backside shell */}
       {atmo && (
         <mesh>
           <sphereGeometry args={[radius * 1.12, 32, 16]} />
           <meshBasicMaterial color={atmo.color} transparent opacity={atmo.opacity} side={THREE.BackSide} depthWrite={false} />
         </mesh>
+      )}
+
+      {/* Ocean reflective shimmer — thin bright equatorial disc */}
+      {bodyType === "ocean" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.02, radius * 0.018, 6, 80]} />
+          <meshBasicMaterial color="#60a8e0" transparent opacity={0.20} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Volcanic heat glow ring */}
+      {bodyType === "volcanic" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.08, radius * 0.025, 6, 64]} />
+          <meshBasicMaterial color="#ff4400" transparent opacity={0.22} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Atmospheric band rings for gas/ice giants */}
+      {bodyType === "gas_giant" && (
+        <>
+          {([-0.32, -0.08, 0.10, 0.30] as number[]).map((frac, i) => {
+            const h = frac * radius;
+            const bandR = Math.sqrt(Math.max(0, radius * radius - h * h)) + radius * 0.003;
+            return (
+              <mesh key={i} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[bandR, radius * 0.011, 5, 60]} />
+                <meshBasicMaterial
+                  color={i % 2 === 0 ? "#7a420e" : "#c8781e"}
+                  transparent opacity={0.30 + i * 0.035}
+                  depthWrite={false}
+                />
+              </mesh>
+            );
+          })}
+        </>
+      )}
+      {bodyType === "ice_giant" && (
+        <>
+          {([-0.22, 0.06, 0.26] as number[]).map((frac, i) => {
+            const h = frac * radius;
+            const bandR = Math.sqrt(Math.max(0, radius * radius - h * h)) + radius * 0.003;
+            return (
+              <mesh key={i} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <torusGeometry args={[bandR, radius * 0.009, 5, 60]} />
+                <meshBasicMaterial
+                  color={i % 2 === 0 ? "#1a6878" : "#58c8d8"}
+                  transparent opacity={0.25}
+                  depthWrite={false}
+                />
+              </mesh>
+            );
+          })}
+        </>
+      )}
+
+      {/* Desert dust haze — thin equatorial disc */}
+      {bodyType === "desert" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <ringGeometry args={[radius * 1.04, radius * 1.22, 64]} />
+          <meshBasicMaterial color="#d0904a" transparent opacity={0.08} side={THREE.DoubleSide} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Toxic gas glow ring */}
+      {bodyType === "toxic" && (
+        <mesh rotation={[Math.PI / 2, 0, 0]}>
+          <torusGeometry args={[radius * 1.10, radius * 0.030, 6, 64]} />
+          <meshBasicMaterial color="#88dd00" transparent opacity={0.18} depthWrite={false} />
+        </mesh>
+      )}
+
+      {/* Frozen / ice — polar ice-cap rings at top and bottom */}
+      {(bodyType === "frozen" || bodyType === "ice_planet") && (
+        <>
+          {([1, -1] as number[]).map((sign) => {
+            const h = sign * radius * 0.72;
+            const capR = Math.sqrt(Math.max(0, radius * radius - h * h));
+            return (
+              <mesh key={sign} position={[0, h, 0]} rotation={[Math.PI / 2, 0, 0]}>
+                <ringGeometry args={[0, capR, 48]} />
+                <meshBasicMaterial color="#e8f4ff" transparent opacity={0.22} side={THREE.DoubleSide} depthWrite={false} />
+              </mesh>
+            );
+          })}
+        </>
       )}
 
       {/* Rings (gas/ice giants) */}
@@ -182,19 +314,54 @@ function Star({ spectralClass }: { spectralClass: string }) {
   const r = STAR_RADIUS[spectralClass] ?? 0.80;
   const color  = STAR_COLOR[spectralClass]    ?? "#fde68a";
   const emissv = STAR_EMISSIVE[spectralClass] ?? "#b45309";
+  const outerRef   = useRef<THREE.Mesh>(null!);
+  const innerRef   = useRef<THREE.Mesh>(null!);
+  const coronaRef  = useRef<THREE.Mesh>(null!);
+  const corona2Ref = useRef<THREE.Mesh>(null!);
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    if (outerRef.current) {
+      const mat = outerRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.04 + Math.sin(t * 0.7) * 0.016;
+    }
+    if (innerRef.current) {
+      const mat = innerRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.09 + Math.sin(t * 1.1 + 1.2) * 0.022;
+    }
+    if (coronaRef.current) {
+      coronaRef.current.rotation.z = t * 0.06;
+      const mat = coronaRef.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.12 + Math.sin(t * 0.5 + 0.8) * 0.04;
+    }
+    if (corona2Ref.current) {
+      corona2Ref.current.rotation.y = -t * 0.04;
+      const mat = corona2Ref.current.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.07 + Math.sin(t * 0.38 + 2.1) * 0.025;
+    }
+  });
   return (
     <group>
-      <mesh renderOrder={-2}>
+      <mesh ref={outerRef} renderOrder={-2}>
         <sphereGeometry args={[r * 3.8, 16, 16]} />
         <meshBasicMaterial color={emissv} transparent opacity={0.04} depthWrite={false} side={THREE.BackSide} />
       </mesh>
-      <mesh renderOrder={-1}>
+      <mesh ref={innerRef} renderOrder={-1}>
         <sphereGeometry args={[r * 2.2, 16, 16]} />
         <meshBasicMaterial color={color} transparent opacity={0.09} depthWrite={false} side={THREE.BackSide} />
       </mesh>
       <mesh>
         <sphereGeometry args={[r, 64, 32]} />
         <meshStandardMaterial color={color} emissive={emissv} emissiveIntensity={2.2} roughness={0.45} metalness={0.00} />
+      </mesh>
+      {/* Slow-rotating equatorial corona ring */}
+      <mesh ref={coronaRef} renderOrder={-1}>
+        <torusGeometry args={[r * 1.55, r * 0.055, 6, 80]} />
+        <meshBasicMaterial color={color} transparent opacity={0.12} depthWrite={false} />
+      </mesh>
+      {/* Second tilted corona ring — counter-rotating for depth */}
+      <mesh ref={corona2Ref} rotation={[Math.PI / 3, 0, 0]} renderOrder={-1}>
+        <torusGeometry args={[r * 1.70, r * 0.035, 6, 80]} />
+        <meshBasicMaterial color={emissv} transparent opacity={0.07} depthWrite={false} />
       </mesh>
       <pointLight color={color} intensity={5} distance={28} decay={1.8} />
     </group>
@@ -224,19 +391,23 @@ function OrbitalRing({ radius, dashed = false }: { radius: number; dashed?: bool
 
 function AsteroidBelt({ orbitRadius, period, index }: { orbitRadius: number; period: number; index: number }) {
   const groupRef = useRef<THREE.Group>(null!);
-  const rocks = useMemo(() => Array.from({ length: 30 }, (_, i) => {
-    const a = (i / 30) * Math.PI * 2;
-    const r = orbitRadius * (0.97 + (Math.sin(i * 7.31) * 0.5 + 0.5) * 0.06);
-    const y = (Math.sin(i * 2.17) * 0.5 - 0.25) * 0.08;
-    return { x: Math.cos(a) * r, y, z: Math.sin(a) * r };
+  const rocks = useMemo(() => Array.from({ length: 48 }, (_, i) => {
+    const a = (i / 48) * Math.PI * 2;
+    const spread = Math.sin(i * 7.31) * 0.5 + 0.5;
+    const r = orbitRadius * (0.95 + spread * 0.10);
+    const y = (Math.sin(i * 2.17) * 0.5 - 0.25) * 0.14;
+    const size = 0.025 + (Math.sin(i * 3.71 + 1.2) * 0.5 + 0.5) * 0.045;
+    const shade = Math.floor(80 + spread * 30);
+    const color = `rgb(${shade},${shade - 6},${shade - 10})`;
+    return { x: Math.cos(a) * r, y, z: Math.sin(a) * r, size, color };
   }), [orbitRadius]);
   useFrame(({ clock }) => { groupRef.current.rotation.y = (clock.elapsedTime / period) * Math.PI * 2; });
   return (
     <group ref={groupRef}>
       {rocks.map((p, i) => (
         <mesh key={i} position={[p.x, p.y, p.z]}>
-          <sphereGeometry args={[0.04, 4, 4]} />
-          <meshStandardMaterial color="#6b7280" roughness={1} metalness={0} />
+          <sphereGeometry args={[p.size, 4, 4]} />
+          <meshStandardMaterial color={p.color} roughness={1} metalness={0} />
         </mesh>
       ))}
       <Html position={[orbitRadius * 0.72, 0.15, orbitRadius * 0.72]} center style={{ pointerEvents: "none" }}>

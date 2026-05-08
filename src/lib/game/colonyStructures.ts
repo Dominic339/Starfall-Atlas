@@ -114,6 +114,16 @@ export function effectiveStorageCap(
 }
 
 /**
+ * Fractional speedup to the population growth timer from growth research.
+ *
+ * Each growth research level reduces the time-to-next-tier by 10%.
+ * At level 5: 1.5× → growth is 50% faster (timer divided by 1.5).
+ */
+export function growthSpeedMultiplier(growthResearchLevel: number): number {
+  return 1.0 + growthResearchLevel * BALANCE.structures.researchEffects.growthSpeedPerLevel;
+}
+
+/**
  * Resource cost to build or upgrade a structure to the given target tier.
  * Throws if the tier is out of range.
  */

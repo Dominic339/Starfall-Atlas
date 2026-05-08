@@ -10,6 +10,7 @@ interface FeedEvent {
   id: string;
   eventType: string;
   label: string;
+  summary: string;
   playerHandle: string | null;
   systemId: string | null;
   systemName: string | null;
@@ -41,6 +42,11 @@ const EVENT_COLOR: Record<string, string> = {
   stewardship_transferred: "text-teal-300",
   majority_control_gained: "text-rose-400",
   majority_control_lost:   "text-rose-300",
+  auction_started:         "text-yellow-400",
+  auction_resolved:        "text-yellow-300",
+  dispute_opened:          "text-orange-400",
+  dispute_resolved:        "text-rose-400",
+  dispute_expired:         "text-zinc-500",
 };
 
 function timeAgo(iso: string): string {
@@ -124,26 +130,21 @@ export function FeedMapPanel({ onClose }: FeedMapPanelProps) {
             <p className="text-xs text-zinc-600 text-center py-12">No events yet.</p>
           )}
 
+          <div className="stagger-children">
           {!loading && events.map((e) => {
             const color = EVENT_COLOR[e.eventType] ?? "text-zinc-400";
+            const text = e.summary ?? `${e.playerHandle ? e.playerHandle + " — " : ""}${e.label}${e.systemName ? ` · ${e.systemName}` : ""}`;
             return (
-              <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0">
-                <span className={`mt-1 w-1.5 h-1.5 shrink-0 rounded-full bg-current ${color}`} />
+              <div key={e.id} className="flex items-start gap-3 py-2.5 border-b border-zinc-800/50 last:border-0 animate-fade-in-up">
+                <span className={`mt-1.5 w-1.5 h-1.5 shrink-0 rounded-full bg-current ${color}`} />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm text-zinc-300">
-                    {e.playerHandle && (
-                      <span className="font-medium text-zinc-100">{e.playerHandle} </span>
-                    )}
-                    <span className={color}>{e.label}</span>
-                    {e.systemName && (
-                      <span className="text-zinc-500"> · {e.systemName}</span>
-                    )}
-                  </p>
+                  <p className={`text-sm leading-snug ${color}`}>{text}</p>
                 </div>
-                <span className="shrink-0 text-xs text-zinc-600">{timeAgo(e.occurredAt)}</span>
+                <span className="shrink-0 text-xs text-zinc-600 mt-0.5">{timeAgo(e.occurredAt)}</span>
               </div>
             );
           })}
+          </div>
 
           {hasMore && (
             <button

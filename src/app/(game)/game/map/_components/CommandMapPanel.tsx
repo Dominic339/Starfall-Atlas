@@ -358,7 +358,7 @@ function ShipCard({
           </p>
           <div className="w-20 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
+              className={`h-full rounded-full transition-all progress-fill ${
                 budgetPct >= 100 ? "bg-amber-600" :
                 budgetPct >= 70  ? "bg-indigo-500" : "bg-teal-600"
               }`}
@@ -497,16 +497,19 @@ export function CommandMapPanel({ onClose }: CommandMapPanelProps) {
               <p className="text-sm text-zinc-600">No ships found.</p>
             </div>
           )}
+          <div className="stagger-children space-y-4">
           {!loading && !error && data && data.ships.map((ship) => (
-            <ShipCard
-              key={ship.id}
-              ship={ship}
-              stationIron={data.stationIron}
-              upgradeLoading={upgradeLoading}
-              upgradeError={upgradeError}
-              onUpgrade={handleUpgrade}
-            />
+            <div key={ship.id} className="animate-fade-in-up">
+              <ShipCard
+                ship={ship}
+                stationIron={data.stationIron}
+                upgradeLoading={upgradeLoading}
+                upgradeError={upgradeError}
+                onUpgrade={handleUpgrade}
+              />
+            </div>
           ))}
+          </div>
 
           {!loading && !error && data && !data.hasStation && (
             <p className="text-xs text-zinc-700 text-center">No station found — upgrades require a station.</p>

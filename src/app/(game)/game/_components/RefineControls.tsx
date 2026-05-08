@@ -88,7 +88,7 @@ export function RefineForm() {
         <button
           onClick={handleRefine}
           disabled={loading}
-          className="rounded-lg border border-teal-700 bg-teal-950/70 px-4 py-2 text-sm font-semibold text-teal-300 hover:bg-teal-900/70 hover:border-teal-600 disabled:opacity-50 transition-colors"
+          className="rounded-lg border border-teal-700 bg-teal-950/70 px-4 py-2 text-sm font-semibold text-teal-300 hover:bg-teal-900/70 hover:border-teal-600 disabled:opacity-50 transition-colors btn-glow-teal"
         >
           {loading ? "Refining…" : "Refine"}
         </button>

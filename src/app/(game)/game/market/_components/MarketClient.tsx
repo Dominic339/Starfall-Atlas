@@ -343,7 +343,7 @@ function CreateListingForm({
         <button
           onClick={handleList}
           disabled={loading || available === 0}
-          className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors"
+          className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:cursor-not-allowed disabled:opacity-50 transition-colors btn-glow-amber"
         >
           {loading ? "Listing…" : "Create Listing"}
         </button>
@@ -387,7 +387,7 @@ export function MarketClient({
     <div className="space-y-8">
       {/* ── Create listing ───────────────────────────────────────────────── */}
       {myInventory.length > 0 && (
-        <section>
+        <section className="animate-fade-in-up">
           <div className="mb-4 flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-amber-700" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -400,7 +400,7 @@ export function MarketClient({
         </section>
       )}
       {myInventory.length === 0 && (
-        <section>
+        <section className="animate-fade-in-up">
           <p className="text-xs text-zinc-600">
             No resources at your station to list. Extract from colonies or unload ship cargo first.
           </p>
@@ -409,7 +409,7 @@ export function MarketClient({
 
       {/* ── Your active listings ─────────────────────────────────────────── */}
       {myListings.length > 0 && (
-        <section>
+        <section className="animate-fade-in-up">
           <div className="mb-4 flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-zinc-600" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -457,7 +457,7 @@ export function MarketClient({
       )}
 
       {/* ── Market listings ──────────────────────────────────────────────── */}
-      <section>
+      <section className="animate-fade-in-up">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-indigo-700" />
@@ -494,9 +494,9 @@ export function MarketClient({
         )}
 
         {grouped.size > 0 && (
-          <div className="space-y-4">
+          <div className="space-y-4 stagger-children">
             {[...grouped.entries()].map(([rt, group]) => (
-              <div key={rt}>
+              <div key={rt} className="animate-fade-in-up">
                 <div className="mb-1.5">{resourcePill(rt)}</div>
                 <div className="overflow-hidden rounded border border-zinc-800/60">
                   <table className="w-full text-xs">

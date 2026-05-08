@@ -147,7 +147,7 @@ const CATEGORY_DESCRIPTIONS: Record<ResearchCategory, string> = {
   ship_stat_caps:
     "Raise the maximum level cap for each individual ship stat.",
   fleet_tech:
-    "Multi-ship fleet coordination and formation capabilities. (Coming soon)",
+    "Coordinate multi-ship fleets, boost travel speed, and amplify asteroid harvest power.",
   colony_tech:
     "Boost extraction yield, reduce upkeep costs, and expand colony storage.",
 };
@@ -261,7 +261,7 @@ export default async function ResearchPage() {
   return (
     <div className="space-y-8 pb-8">
       {/* ── Header ──────────────────────────────────────────────────────────── */}
-      <div className="flex items-start justify-between gap-4">
+      <div className="flex items-start justify-between gap-4 animate-fade-in-up">
         <div>
           <h1 className="text-xl font-semibold text-zinc-100">Research Lab</h1>
           <p className="mt-1 text-sm text-zinc-500">
@@ -277,7 +277,7 @@ export default async function ResearchPage() {
       </div>
 
       {/* ── Progression Summary ─────────────────────────────────────────────── */}
-      <div className="rounded-lg border border-zinc-700 bg-zinc-900 overflow-hidden">
+      <div className="rounded-lg border border-zinc-700 bg-zinc-900 overflow-hidden animate-fade-in-up">
         <div className="border-b border-zinc-800 px-4 py-2.5 flex items-center justify-between">
           <p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
             Ship Progression Summary
@@ -304,7 +304,7 @@ export default async function ResearchPage() {
             </div>
             <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
               <div
-                className="h-full rounded-full bg-indigo-600 transition-all"
+                className="h-full rounded-full bg-indigo-600 transition-all progress-fill"
                 style={{
                   width: `${Math.round((totalUpgradeCap / MAX_TOTAL_UPGRADES) * 100)}%`,
                 }}

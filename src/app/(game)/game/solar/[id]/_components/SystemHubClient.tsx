@@ -347,7 +347,7 @@ function PlanetPanel({
                 "Survey complete!",
               )}
               disabled={survey.loading}
-              className="w-full rounded bg-teal-800/60 border border-teal-700/50 px-3 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-700/60 transition-colors disabled:opacity-50"
+              className="w-full rounded bg-teal-800/60 border border-teal-700/50 px-3 py-1.5 text-xs font-medium text-teal-300 hover:bg-teal-700/60 transition-colors disabled:opacity-50 btn-glow-teal"
             >
               {survey.loading ? "Surveying…" : "Survey this body"}
             </button>
@@ -375,7 +375,7 @@ function PlanetPanel({
                       found.run("/api/game/colony/found", { bodyId: body.bodyId }, "Colony founded!");
                     }}
                     disabled={found.loading}
-                    className="flex-1 rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50"
+                    className="flex-1 rounded bg-emerald-800/60 border border-emerald-700/50 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/60 transition-colors disabled:opacity-50 btn-glow-emerald"
                   >
                     Confirm →
                   </button>
@@ -427,7 +427,7 @@ function PlanetPanel({
                   "Taxes collected!",
                 )}
                 disabled={collect.loading}
-                className="w-full rounded bg-amber-800/50 border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-700/50 transition-colors disabled:opacity-50"
+                className="w-full rounded bg-amber-800/50 border border-amber-700/40 px-3 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-700/50 transition-colors disabled:opacity-50 btn-glow-amber"
               >
                 {collect.loading ? "Collecting…" : "Collect Taxes"}
               </button>
@@ -524,7 +524,7 @@ function ShipPanel({
             <>
               <button
                 onClick={onStartAssign}
-                className="w-full rounded bg-indigo-800/50 border border-indigo-700/40 px-3 py-1.5 font-medium text-indigo-300 hover:bg-indigo-700/50 transition-colors"
+                className="w-full rounded bg-indigo-800/50 border border-indigo-700/40 px-3 py-1.5 font-medium text-indigo-300 hover:bg-indigo-700/50 transition-colors btn-glow"
               >
                 Click planet to assign →
               </button>
@@ -614,7 +614,7 @@ function LaneBuildPanel({ systemId }: { systemId: string }) {
             "Lane construction started!",
           )}
           disabled={lane.loading || !toSystemId}
-          className="rounded bg-violet-800/50 border border-violet-700/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50"
+          className="rounded bg-violet-800/50 border border-violet-700/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-700/50 transition-colors disabled:opacity-50 btn-glow"
         >
           {lane.loading ? "…" : `(${LANE_BUILD_HOURS}h)`}
         </button>
@@ -706,7 +706,7 @@ function SystemOverviewPanel({
                 "System discovered!",
               )}
               disabled={discover.loading}
-              className="w-full rounded bg-emerald-800/50 border border-emerald-700/40 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/50 transition-colors disabled:opacity-50"
+              className="w-full rounded bg-emerald-800/50 border border-emerald-700/40 px-3 py-1.5 text-xs font-medium text-emerald-300 hover:bg-emerald-700/50 transition-colors disabled:opacity-50 btn-glow-emerald"
             >
               {discover.loading ? "Discovering…" : "Discover this system →"}
             </button>
@@ -836,7 +836,7 @@ function SystemOverviewPanel({
           <p className="mb-1.5 text-xs text-zinc-600 uppercase tracking-wider">
             Ships ({ships.length})
           </p>
-          <div className="space-y-1">
+          <div className="space-y-1 stagger-children">
             {ships.map((ship) => (
               <div
                 key={ship.id}
@@ -885,7 +885,7 @@ function SystemOverviewPanel({
       {/* Bodies list — click to select */}
       <div className="px-4 py-2 flex-1">
         <p className="mb-1.5 text-xs text-zinc-600 uppercase tracking-wider">Bodies</p>
-        <div className="space-y-1">
+        <div className="space-y-1 stagger-children">
           {bodies.map((body, i) => (
             <button
               key={i}
@@ -1025,7 +1025,7 @@ function SystemOverviewPanel({
               </div>
               <div className="h-1 w-full rounded-full bg-zinc-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-violet-600 transition-all"
+                  className="h-full rounded-full bg-violet-600 transition-all progress-fill"
                   style={{
                     width: `${Math.min(100, (governanceInfo.playerInfluence / governanceInfo.totalInfluence) * 100)}%`,
                   }}

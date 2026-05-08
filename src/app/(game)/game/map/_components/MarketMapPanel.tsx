@@ -22,9 +22,19 @@ interface Listing {
 
 interface InventoryEntry { resourceType: string; quantity: number; }
 
+interface MarketStat {
+  resourceType: string;
+  minPrice: number;
+  maxPrice: number;
+  avgPrice: number;
+  totalSupply: number;
+  listingCount: number;
+}
+
 interface PanelData {
   listings: Listing[];
   inventory: InventoryEntry[];
+  marketStats: MarketStat[];
   playerCredits: number;
   playerId: string;
   listingFeePercent: number;
@@ -264,7 +274,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(0,0,0,0.65)" }}
     >
-      <div className="relative w-full max-w-3xl max-h-[88vh] flex flex-col rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl overflow-hidden">
+      <div className="relative w-full max-w-3xl max-h-[88vh] flex flex-col rounded-lg border border-zinc-700 bg-zinc-950 shadow-2xl overflow-hidden animate-fade-in-up">
 
         {/* Header */}
         <div className="flex items-center justify-between gap-3 border-b border-zinc-800 px-5 py-3 shrink-0">
@@ -300,7 +310,36 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
           {/* ── Buy tab ─────────────────────────────────────────────────── */}
           {!loading && !fetchError && tab === "buy" && (
-            <div className="space-y-4">
+            <div className="space-y-4 animate-fade-in-up">
+
+              {/* Market overview strip */}
+              {data && data.marketStats.length > 0 && (
+                <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-4 py-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Market Overview</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
+                    {data.marketStats
+                      .sort((a, b) => a.resourceType.localeCompare(b.resourceType))
+                      .map((s) => (
+                        <div key={s.resourceType} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-zinc-500 truncate">{resLabel(s.resourceType)}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-mono text-amber-400/90">{s.minPrice.toLocaleString()}</span>
+                            {s.minPrice !== s.maxPrice && (
+                              <>
+                                <span className="text-xs text-zinc-700">–</span>
+                                <span className="text-xs font-mono text-amber-300/70">{s.maxPrice.toLocaleString()}</span>
+                              </>
+                            )}
+                            <span className="text-xs text-zinc-700">¢</span>
+                            <span className="text-xs text-zinc-600 font-mono">·{s.totalSupply.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-700">Price range (¢/unit) · supply (units)</p>
+                </div>
+              )}
+
               {/* Filter */}
               {allTypes.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -323,9 +362,20 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                 </p>
               )}
 
-              {[...grouped.entries()].map(([rt, group]) => (
-                <div key={rt}>
-                  <p className="mb-1.5 text-xs font-medium text-zinc-500">{resLabel(rt)}</p>
+              <div className="stagger-children space-y-4">
+              {[...grouped.entries()].map(([rt, group]) => {
+                const stat = data?.marketStats.find((s) => s.resourceType === rt);
+                return (
+                <div key={rt} className="animate-fade-in-up">
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-zinc-500">{resLabel(rt)}</p>
+                    {stat && (
+                      <span className="text-xs text-zinc-700 font-mono">
+                        floor <span className="text-amber-500/80">{stat.minPrice.toLocaleString()}¢</span>
+                        {" · "}avg <span className="text-amber-400/60">{stat.avgPrice.toLocaleString()}¢</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="overflow-hidden rounded border border-zinc-800/60">
                     <table className="w-full text-xs">
                       <thead>
@@ -375,13 +425,15 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                     </table>
                   </div>
                 </div>
-              ))}
+              );
+              })}
+              </div>
             </div>
           )}
 
           {/* ── Sell tab ─────────────────────────────────────────────────── */}
           {!loading && !fetchError && tab === "sell" && (
-            <div className="space-y-6">
+            <div className="space-y-6 animate-fade-in-up">
 
               {/* Create listing form */}
               {data && data.inventory.length > 0 ? (
@@ -432,7 +484,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                     <button
                       onClick={handleList}
                       disabled={listLoading || listAvailable === 0}
-                      className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:opacity-50 transition-colors"
+                      className="rounded border border-amber-800/60 bg-amber-950/40 px-4 py-1.5 text-xs font-medium text-amber-300 hover:bg-amber-900/50 disabled:opacity-50 transition-colors btn-glow-amber"
                     >
                       {listLoading ? "Listing…" : "Create Listing"}
                     </button>
@@ -492,7 +544,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
 
           {/* ── Auctions tab ──────────────────────────────────────────────── */}
           {tab === "auctions" && (
-            <div className="space-y-4">
+            <div className="space-y-4 animate-fade-in-up">
               {auctionLoading && <p className="text-xs text-zinc-600 text-center py-8 animate-pulse">Loading auctions…</p>}
 
               {auctionLoaded && auctionData && (
@@ -501,12 +553,12 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                   {auctionData.auctions.length === 0 ? (
                     <p className="text-sm text-zinc-600 text-center py-6">No active auctions.</p>
                   ) : (
-                    <div className="space-y-2">
+                    <div className="space-y-2 stagger-children">
                       {auctionData.auctions.map((a) => {
                         const minNext = Math.max(a.minBid, a.currentHighBid + 1);
                         const msg = bidMsg?.id === a.id ? bidMsg : null;
                         return (
-                          <div key={a.id} className={`rounded-xl border px-4 py-3 space-y-2 ${
+                          <div key={a.id} className={`rounded-xl border px-4 py-3 space-y-2 card-interactive animate-fade-in-up ${
                             a.isOwnAuction ? "border-amber-900/40 bg-amber-950/10" :
                             a.isHighBidder ? "border-emerald-900/40 bg-emerald-950/10" :
                             "border-zinc-800 bg-zinc-900/40"
@@ -539,7 +591,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                                 <button
                                   onClick={() => handleBid(a.id)}
                                   disabled={bidLoading === a.id}
-                                  className="rounded-lg px-3 py-1 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                                  className="rounded-lg px-3 py-1 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber"
                                 >
                                   {bidLoading === a.id ? "…" : "Bid"}
                                 </button>
@@ -586,7 +638,7 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                       </div>
                       <div className="flex items-center gap-3">
                         <button onClick={handleCreateAuction} disabled={createLoading || !createItemId}
-                          className="rounded-lg px-4 py-1.5 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors">
+                          className="rounded-lg px-4 py-1.5 text-xs font-bold border border-amber-800/50 bg-amber-950/30 text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber">
                           {createLoading ? "Creating…" : "List Auction"}
                         </button>
                         {createMsg && <span className={`text-xs ${createMsg.ok ? "text-emerald-400" : "text-red-400"}`}>{createMsg.text}</span>}

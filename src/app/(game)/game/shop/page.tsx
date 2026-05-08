@@ -66,7 +66,7 @@ export default async function ShopPage({
   return (
     <div className="mx-auto max-w-2xl p-6 space-y-6">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 animate-fade-in-up">
         <Link
           href="/game/command"
           className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
@@ -91,7 +91,7 @@ export default async function ShopPage({
         </div>
       )}
 
-      <div>
+      <div className="animate-fade-in-up">
         <h1 className="text-lg font-bold tracking-tight text-zinc-100">Premium Shop</h1>
         <p className="mt-1 text-xs text-zinc-500">
           All items are account-bound and cannot be traded. Cosmetics are permanent;

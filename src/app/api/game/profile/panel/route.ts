@@ -17,12 +17,13 @@ export async function GET() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = createAdminClient() as any;
 
-  const [discRes, coloniesRes, firstDiscRes, allianceRes, shipsRes] = await Promise.all([
+  const [discRes, coloniesRes, firstDiscRes, allianceRes, shipsRes, researchRes] = await Promise.all([
     admin.from("system_discoveries").select("id", { count: "exact", head: true }).eq("player_id", player.id),
     admin.from("colonies").select("id", { count: "exact", head: true }).eq("owner_id", player.id).eq("status", "active"),
     admin.from("system_discoveries").select("id", { count: "exact", head: true }).eq("player_id", player.id).eq("is_first", true),
-    admin.from("alliance_members").select("role, alliances(name, tag)").eq("player_id", player.id).maybeSingle(),
+    admin.from("alliance_members").select("role, alliance_credits, alliances(name, tag)").eq("player_id", player.id).maybeSingle(),
     admin.from("ships").select("hull_level, shield_level, cargo_level, engine_level, turret_level, utility_level").eq("owner_id", player.id),
+    admin.from("player_research").select("id", { count: "exact", head: true }).eq("player_id", player.id),
   ]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -46,11 +47,13 @@ export async function GET() {
         firstDiscoveries:  firstDiscRes.count ?? 0,
         activeColonies:    coloniesRes.count ?? 0,
         totalShipUpgrades: totalUpgrades,
+        researchUnlocked:  researchRes.count ?? 0,
       },
       alliance: allianceData ? {
-        name: allianceData.alliances?.name ?? null,
-        tag:  allianceData.alliances?.tag  ?? null,
-        role: allianceData.role ?? null,
+        name:            allianceData.alliances?.name    ?? null,
+        tag:             allianceData.alliances?.tag     ?? null,
+        role:            allianceData.role               ?? null,
+        allianceCredits: allianceData.alliance_credits   ?? 0,
       } : null,
     },
   });

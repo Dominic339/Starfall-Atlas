@@ -210,4 +210,32 @@ async function resolveSingleDispute(
       winner_alliance_id: newStatus === "resolved" ? winnerAllianceId : null,
     })
     .eq("id", dispute.id);
+
+  // 7. Emit world event so the resolution is visible in the global feed
+  const [beaconRes, alliancesRes] = await Promise.all([
+    admin.from("alliance_beacons").select("system_id").eq("id", dispute.beacon_id).maybeSingle(),
+    admin.from("alliances").select("id, tag").in("id", [dispute.defending_alliance_id, dispute.attacking_alliance_id]),
+  ]);
+  const beaconSystemId = (beaconRes.data as { system_id: string } | null)?.system_id ?? null;
+  const allianceTags = new Map<string, string>(
+    ((alliancesRes.data ?? []) as { id: string; tag: string }[]).map((a) => [a.id, a.tag]),
+  );
+  await admin.from("world_events").insert({
+    event_type: newStatus === "expired" ? "dispute_expired" : "dispute_resolved",
+    player_id:  null,
+    system_id:  beaconSystemId,
+    body_id:    null,
+    metadata: {
+      dispute_id:             dispute.id,
+      beacon_id:              dispute.beacon_id,
+      defending_alliance_id:  dispute.defending_alliance_id,
+      defending_alliance_tag: allianceTags.get(dispute.defending_alliance_id) ?? null,
+      attacking_alliance_id:  dispute.attacking_alliance_id,
+      attacking_alliance_tag: allianceTags.get(dispute.attacking_alliance_id) ?? null,
+      winner_alliance_id:     newStatus === "resolved" ? winnerAllianceId : null,
+      winner_tag:             newStatus === "resolved" ? (allianceTags.get(winnerAllianceId) ?? null) : null,
+      defender_score:         defenderScore,
+      attacker_score:         attackerScore,
+    },
+  });
 }

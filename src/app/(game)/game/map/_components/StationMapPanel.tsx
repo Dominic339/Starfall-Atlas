@@ -108,7 +108,7 @@ function CargoBar({ used, cap }: { used: number; cap: number }) {
   return (
     <div className="flex items-center gap-2">
       <div className="flex-1 h-1.5 rounded-full bg-zinc-800 overflow-hidden">
-        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+        <div className={`h-full rounded-full transition-all progress-fill ${color}`} style={{ width: `${pct}%` }} />
       </div>
       <span className={`text-xs font-mono tabular-nums shrink-0 ${used > 0 ? "text-teal-400" : "text-zinc-600"}`}>
         {used}/{cap}
@@ -157,10 +157,10 @@ function StoresTab({
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-fade-in-up">
 
       {/* Credits hero */}
-      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4 animate-fade-in-up">
+      <div className="rounded-lg border border-amber-900/40 bg-gradient-to-br from-amber-950/30 via-zinc-900/60 to-zinc-900 px-4 py-3 flex items-center justify-between gap-4">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-widest text-amber-700/80">Credits</p>
           <p className="mt-0.5 font-mono text-2xl font-bold text-amber-300 tabular-nums">
@@ -460,7 +460,7 @@ function FleetTab({ data, onRefresh }: { data: PanelData; onRefresh: () => void 
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 animate-fade-in-up">
       <ShipGroup label="At Station" ships={docked} dot="bg-emerald-500" />
       <ShipGroup label="In Transit" ships={traveling} dot="bg-sky-500" />
       <ShipGroup label="Away" ships={away} dot="bg-indigo-500" />
@@ -484,11 +484,11 @@ function ColoniesTab({ data }: { data: PanelData }) {
   const maxStock = Math.max(...data.colonies.map((c) => c.stockpileTotal), 1);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2 animate-fade-in-up stagger-children">
       {data.colonies.map((col) => {
         const fillPct = Math.round((col.stockpileTotal / maxStock) * 100);
         return (
-          <div key={col.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 space-y-2">
+          <div key={col.id} className="rounded-lg border border-zinc-800 bg-zinc-900/60 px-3 py-2.5 space-y-2 card-interactive animate-fade-in-up">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold text-amber-400 truncate">{col.systemName}</p>
@@ -518,7 +518,7 @@ function ColoniesTab({ data }: { data: PanelData }) {
               </div>
               <div className="h-1 rounded-full bg-zinc-800 overflow-hidden">
                 <div
-                  className="h-full rounded-full bg-teal-600/70"
+                  className="h-full rounded-full bg-teal-600/70 progress-fill"
                   style={{ width: `${fillPct}%` }}
                 />
               </div>
@@ -751,7 +751,8 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
       <div className="relative w-full max-w-xl max-h-[90vh] flex flex-col rounded-xl border border-zinc-700/80 bg-zinc-950 shadow-2xl shadow-black/60 overflow-hidden animate-fade-in-up">
 
         {/* Header */}
-        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5">
+        <div className="shrink-0 border-b border-zinc-800 bg-gradient-to-r from-zinc-900 to-zinc-950 px-5 py-3.5 relative overflow-hidden">
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-amber-600/40 to-transparent" />
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
@@ -797,15 +798,15 @@ export function StationMapPanel({ onClose }: StationMapPanelProps) {
         </div>
 
         {/* Tab bar */}
-        <div className="shrink-0 flex border-b border-zinc-800 px-4 pt-2 gap-1">
+        <div className="shrink-0 flex items-center gap-1 border-b border-zinc-800/60 px-4 py-2">
           {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-t transition-colors ${
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition-colors ${
                 tab === t.id
-                  ? "bg-zinc-800 text-zinc-200 border-b-2 border-indigo-600"
-                  : "text-zinc-600 hover:text-zinc-400"
+                  ? "bg-indigo-900/60 text-indigo-200 border border-indigo-800/50"
+                  : "text-zinc-600 hover:text-zinc-300 border border-transparent"
               }`}
             >
               {t.label}

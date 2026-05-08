@@ -72,7 +72,7 @@ function ItemCard({
     isReady ? "bg-indigo-900/60 text-indigo-300" : "bg-zinc-800 text-zinc-500";
 
   return (
-    <div className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[160px] flex-1 ${cardCls}`}>
+    <div className={`flex flex-col rounded-lg border px-3 py-2.5 gap-2 min-w-[160px] flex-1 card-interactive ${cardCls}`}>
       {/* Header */}
       <div className="flex items-start justify-between gap-2">
         <p className={`text-xs font-semibold leading-snug ${nameCls}`}>{item.name}</p>
@@ -123,7 +123,7 @@ function ItemCard({
               <button
                 onClick={() => onPurchase(item.id)}
                 disabled={!item.canAfford || purchaseLoading === item.id}
-                className={`mt-1 rounded px-3 py-1.5 text-xs font-semibold transition-colors ${
+                className={`mt-1 rounded px-3 py-1.5 text-xs font-semibold transition-colors btn-glow ${
                   !item.canAfford
                     ? "bg-zinc-700/60 text-zinc-500 cursor-not-allowed"
                     : purchaseLoading === item.id
@@ -217,7 +217,7 @@ export function ResearchMapPanel({ onClose }: ResearchMapPanelProps) {
                 <span className="text-xs text-zinc-700">/ {data.maxTotalUpgrades}</span>
                 <div className="flex-1 min-w-[60px] h-1 rounded-full bg-zinc-800 overflow-hidden">
                   <div
-                    className="h-full rounded-full bg-indigo-600"
+                    className="h-full rounded-full bg-indigo-600 progress-fill"
                     style={{ width: `${Math.round((data.totalUpgradeCap / data.maxTotalUpgrades) * 100)}%` }}
                   />
                 </div>
@@ -253,7 +253,7 @@ export function ResearchMapPanel({ onClose }: ResearchMapPanelProps) {
         )}
 
         {/* Body */}
-        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5">
+        <div className="overflow-y-auto flex-1 px-5 py-4 space-y-5 stagger-children">
           {loading && <p className="text-xs text-zinc-600 text-center py-12">Loading research…</p>}
           {fetchError && <p className="text-xs text-red-400 text-center py-12">{fetchError}</p>}
           {purchaseError && <p className="text-xs text-red-400 mb-2">{purchaseError}</p>}

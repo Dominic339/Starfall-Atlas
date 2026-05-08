@@ -124,8 +124,21 @@ export default async function MarketPage() {
     <div className="min-h-screen bg-zinc-950">
       {/* Page header */}
       <div className="border-b border-zinc-800/60 bg-zinc-950 px-6 py-4">
-        <div className="mx-auto max-w-4xl">
-          <div className="flex items-center justify-between">
+        <div className="mx-auto max-w-4xl space-y-1">
+          {/* Breadcrumb */}
+          <div className="flex items-center gap-2 mb-2">
+            <Link
+              href="/game/command"
+              className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors"
+            >
+              ← Command
+            </Link>
+            <span className="text-zinc-800 text-xs">/</span>
+            <span className="text-xs font-semibold uppercase tracking-widest text-zinc-500">
+              Resource Market
+            </span>
+          </div>
+          <div className="flex items-center justify-between animate-fade-in-up">
             <div>
               <h1 className="text-sm font-semibold text-zinc-200">Resource Market</h1>
               <p className="mt-0.5 text-xs text-zinc-600">
@@ -142,13 +155,10 @@ export default async function MarketPage() {
                 Balance:{" "}
                 <span className="font-mono text-amber-400">{player.credits.toLocaleString()} ¢</span>
               </span>
-              <Link href="/game/station" className="text-zinc-600 hover:text-zinc-400 transition-colors">
-                ← Station
-              </Link>
             </div>
           </div>
           {/* Info strip */}
-          <p className="mt-2 text-xs text-zinc-700">
+          <p className="text-xs text-zinc-700">
             {BALANCE.market.listingFeePercent}% listing fee · {BALANCE.market.defaultExpiryDays}-day expiry · Instant global delivery
           </p>
         </div>

@@ -10,7 +10,7 @@ export const metadata = { title: "Account Deactivated — Starfall Atlas" };
 export default function DeactivatedPage() {
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100 flex items-center justify-center p-6">
-      <div className="max-w-md w-full rounded-xl border border-zinc-800 bg-zinc-900 p-8 text-center space-y-4">
+      <div className="max-w-md w-full rounded-xl border border-zinc-800 bg-zinc-900 p-8 text-center space-y-4 animate-fade-in-up">
         <h1 className="text-xl font-semibold text-zinc-100">Account Deactivated</h1>
         <p className="text-sm text-zinc-400">
           Your account has been deactivated. Your data will be permanently removed

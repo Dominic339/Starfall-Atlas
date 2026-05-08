@@ -192,9 +192,16 @@ export async function GET(request: NextRequest) {
       const basicNodeCount = resourceNodes.filter(
         (n: { is_rare: boolean }) => !n.is_rare,
       ).length;
+      const rareNodeCount = resourceNodes.filter(
+        (n: { is_rare: boolean }) => n.is_rare,
+      ).length;
+      const baseRate = extractionRatePerNode(colony.population_tier);
+      const canExtractRare = extractorTier >= 2;
+      const rareRate = canExtractRare
+        ? baseRate * BALANCE.extraction.rareExtractionRateFraction
+        : 0;
       const totalRatePerHr = Math.floor(
-        extractionRatePerNode(colony.population_tier) *
-          basicNodeCount *
+        (baseRate * basicNodeCount + rareRate * rareNodeCount) *
           extBonusMult *
           healthMult,
       );

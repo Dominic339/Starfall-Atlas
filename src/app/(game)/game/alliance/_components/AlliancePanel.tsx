@@ -31,6 +31,10 @@ export interface DisputePanelEntry {
   isDefender: boolean;
   /** Milliseconds remaining until dispute resolves — precomputed server-side. */
   msLeft: number;
+  defenderScore: number;
+  attackerScore: number;
+  defenderFleetCount: number;
+  attackerFleetCount: number;
 }
 
 export interface GoalEntry {
@@ -375,7 +379,7 @@ export function AlliancePanel({
     return (
       <div className="space-y-5">
         {/* Atmospheric intro */}
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-6 py-8 text-center animate-fade-in-up">
           <div className="mb-3 font-mono text-3xl font-black tracking-widest text-zinc-800 select-none">
             ◉
           </div>
@@ -391,7 +395,7 @@ export function AlliancePanel({
         {actionSuccess && <p className="text-sm text-emerald-400 px-1">{actionSuccess}</p>}
 
         {/* Found */}
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 animate-fade-in-up" style={{ animationDelay: "60ms" }}>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-indigo-700" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -440,7 +444,7 @@ export function AlliancePanel({
         </section>
 
         {/* Join */}
-        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6">
+        <section className="rounded-xl border border-zinc-800 bg-zinc-900/60 p-6 animate-fade-in-up" style={{ animationDelay: "120ms" }}>
           <div className="flex items-center gap-2 mb-1">
             <span className="inline-block h-3.5 w-0.5 rounded-full bg-zinc-600" />
             <h2 className="text-[11px] font-bold uppercase tracking-widest text-zinc-500">
@@ -587,7 +591,7 @@ export function AlliancePanel({
 
       {/* ── Manage Roles (founder only) ───────────────────────────────────── */}
       {isFounder && otherMembers.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
           <SectionHeading title="Manage Roles" />
           {promoteError && <p className="mb-3 text-xs text-red-400">{promoteError}</p>}
           <div className="flex flex-wrap gap-2">
@@ -624,7 +628,7 @@ export function AlliancePanel({
       )}
 
       {/* ── Beacons ───────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Territory Beacons"
           meta={`${activeBeaconCount} / 20 active`}
@@ -696,7 +700,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Territory ─────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading title="Territory Control" />
 
         {activeBeaconCount < 3 ? (
@@ -770,7 +774,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Goals ─────────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Alliance Goals"
           meta={goals.length > 0 ? `${goals.length} active` : undefined}
@@ -845,7 +849,7 @@ export function AlliancePanel({
               const contribErr = goalContribError[g.id];
               const hoursLeft = Math.max(0, (new Date(g.deadlineAt).getTime() - Date.now()) / 3_600_000);
               return (
-                <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 space-y-2">
+                <div key={g.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-3 py-3 space-y-2 card-interactive">
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <p className="text-sm font-medium text-zinc-200">{g.title}</p>
@@ -859,7 +863,7 @@ export function AlliancePanel({
                   </div>
                   <div className="h-1.5 rounded-full bg-zinc-800 overflow-hidden">
                     <div
-                      className="h-full bg-indigo-600 transition-all"
+                      className="h-full bg-indigo-600 transition-all progress-fill"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -881,7 +885,7 @@ export function AlliancePanel({
                       <button
                         onClick={() => handleContribute(g.id, g.resourceType)}
                         disabled={goalContribLoading[g.id] || contrib < 1}
-                        className="rounded border border-teal-700/60 bg-teal-950/40 px-2.5 py-0.5 text-xs font-medium text-teal-300 hover:bg-teal-900/50 disabled:opacity-50 transition-colors"
+                        className="rounded border border-teal-700/60 bg-teal-950/40 px-2.5 py-0.5 text-xs font-medium text-teal-300 hover:bg-teal-900/50 disabled:opacity-50 transition-colors btn-glow-teal"
                       >
                         {goalContribLoading[g.id] ? "…" : "Contribute"}
                       </button>
@@ -902,7 +906,7 @@ export function AlliancePanel({
       </div>
 
       {/* ── Alliance Storage ───────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
         <SectionHeading
           title="Alliance Storage"
           meta={`${playerAllianceCredits} ✦ credits`}
@@ -992,7 +996,7 @@ export function AlliancePanel({
                 <button
                   onClick={handleWithdraw}
                   disabled={withdrawLoading || storage.length === 0 || playerAllianceCredits < withdrawQty}
-                  className="w-full rounded border border-amber-800/60 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors"
+                  className="w-full rounded border border-amber-800/60 bg-amber-950/30 px-3 py-1 text-xs font-medium text-amber-300 hover:bg-amber-900/40 disabled:opacity-50 transition-colors btn-glow-amber"
                 >
                   {withdrawLoading ? "Withdrawing…" : "Withdraw"}
                 </button>
@@ -1019,7 +1023,7 @@ export function AlliancePanel({
 
       {/* ── Disputes ──────────────────────────────────────────────────────── */}
       {disputes.length > 0 && (
-        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4">
+        <div className="rounded-xl border border-zinc-800 bg-zinc-900/70 px-5 py-4 animate-fade-in-up">
           <SectionHeading title="Disputes" meta={String(disputes.length)} />
           {disputeError && <p className="mb-3 text-xs text-red-400">{disputeError}</p>}
           <div className="space-y-3">
@@ -1081,6 +1085,40 @@ export function AlliancePanel({
                       Resolved {new Date(d.resolvedAt).toLocaleDateString()}
                     </div>
                   )}
+
+                  {/* Score bar */}
+                  {(() => {
+                    const total = d.defenderScore + d.attackerScore;
+                    const defPct = total > 0 ? (d.defenderScore / total) * 100 : 50;
+                    const atkPct = total > 0 ? (d.attackerScore / total) * 100 : 50;
+                    return (
+                      <div className="mt-3">
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="text-emerald-500/80">
+                            DEF {d.defenderScore.toLocaleString()}
+                            <span className="ml-1 text-zinc-600">({d.defenderFleetCount} fleets)</span>
+                          </span>
+                          <span className="text-red-400/80">
+                            <span className="mr-1 text-zinc-600">({d.attackerFleetCount} fleets)</span>
+                            {d.attackerScore.toLocaleString()} ATK
+                          </span>
+                        </div>
+                        <div className="flex h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                          {total > 0 ? (
+                            <>
+                              <div className="bg-emerald-600/70 transition-all" style={{ width: `${defPct}%` }} />
+                              <div className="bg-red-600/70 transition-all" style={{ width: `${atkPct}%` }} />
+                            </>
+                          ) : (
+                            <div className="w-full bg-zinc-700/40" />
+                          )}
+                        </div>
+                        {total === 0 && (
+                          <p className="mt-0.5 text-xs text-zinc-700">No fleets committed yet</p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {isOpen && (
                     <div className="mt-3">

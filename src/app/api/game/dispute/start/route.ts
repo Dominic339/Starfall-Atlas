@@ -85,13 +85,14 @@ export async function POST(request: NextRequest) {
   type AllBeaconRow     = { id: string; alliance_id: string; system_id: string };
   type AllianceRow      = { id: string; name: string; tag: string };
 
-  const [existingDisputeRes, cooldownRes, defendingBeaconsRes, defendingAllianceRes, attackerBeaconsRes] =
+  const [existingDisputeRes, cooldownRes, defendingBeaconsRes, defendingAllianceRes, attackerBeaconsRes, attackerAllianceRes] =
     await Promise.all([
       admin.from("disputes").select("id").eq("beacon_id", beaconId).eq("status", "open").maybeSingle(),
       admin.from("beacon_cooldowns").select("id, expires_at").eq("beacon_id", beaconId).gt("expires_at", now.toISOString()).maybeSingle(),
       admin.from("alliance_beacons").select("id, alliance_id, system_id").eq("alliance_id", beacon.alliance_id).eq("is_active", true),
       admin.from("alliances").select("id, name, tag").eq("id", beacon.alliance_id).maybeSingle(),
       admin.from("alliance_beacons").select("id, alliance_id, system_id").eq("alliance_id", callerAllianceId).eq("is_active", true),
+      admin.from("alliances").select("id, name, tag").eq("id", callerAllianceId).maybeSingle(),
     ]);
 
   const { data: existingDispute } = maybeSingleResult<DisputeExistsRow>(existingDisputeRes);
@@ -181,6 +182,25 @@ export async function POST(request: NextRequest) {
   if (!newDispute) {
     return toErrorResponse(fail("internal_error", "Failed to create dispute.").error);
   }
+
+  // ── World event ───────────────────────────────────────────────────────────
+  const { data: defAlliance } = maybeSingleResult<AllianceRow>(defendingAllianceRes);
+  const { data: atkAlliance } = maybeSingleResult<AllianceRow>(attackerAllianceRes);
+  await admin.from("world_events").insert({
+    event_type: "dispute_opened",
+    player_id:  player.id,
+    system_id:  beacon.system_id,
+    body_id:    null,
+    metadata: {
+      dispute_id:            newDispute.id,
+      beacon_id:             beaconId,
+      defending_alliance_id: beacon.alliance_id,
+      defending_alliance_tag: defAlliance?.tag ?? null,
+      attacking_alliance_id: callerAllianceId,
+      attacking_alliance_tag: atkAlliance?.tag ?? null,
+      resolves_at:           newDispute.resolves_at,
+    },
+  });
 
   return Response.json({
     ok: true,
