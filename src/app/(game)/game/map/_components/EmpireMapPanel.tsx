@@ -133,12 +133,24 @@ interface Category {
   unlockedCount: number; totalCount: number;
   subGroups: SubGroup[];
 }
+interface ActiveBonuses {
+  growthSpeedPct: number;
+  extractionBonusPct: number;
+  upkeepReductionPct: number;
+  storageCapBonus: number;
+  fleetSpeedBonus: number;
+  fleetHarvestBonusPct: number;
+  fleetSlots: number;
+  fleetMaxShips: number;
+}
+
 interface ResearchData {
   categories: Category[];
   stationIron: number;
   totalUpgradeCap: number;
   maxTotalUpgrades: number;
   statCaps: Record<string, number>;
+  activeBonuses: ActiveBonuses;
 }
 
 const STAT_KEYS = ["hull", "shield", "cargo", "engine", "turret", "utility"] as const;
@@ -256,6 +268,12 @@ function ResearchTab() {
 
   const cat = data.categories[activeCat] ?? null;
 
+  const b = data.activeBonuses;
+  const hasAnyBonus = b.growthSpeedPct > 0 || b.extractionBonusPct > 0 ||
+    b.upkeepReductionPct > 0 || b.storageCapBonus > 0 ||
+    b.fleetSpeedBonus > 0 || b.fleetHarvestBonusPct > 0 ||
+    b.fleetSlots > 0 || b.fleetMaxShips > 0;
+
   return (
     <div className="space-y-4 animate-fade-in-up">
       {/* Progression summary */}
@@ -283,6 +301,65 @@ function ResearchTab() {
             </span>
           ))}
         </div>
+      </div>
+
+      {/* Active research bonuses */}
+      <div className="rounded-xl border border-zinc-800 bg-zinc-900/40 px-4 py-3">
+        <p className="mb-2 text-[10px] font-bold uppercase tracking-widest text-zinc-600">Active Research Bonuses</p>
+        {!hasAnyBonus ? (
+          <p className="text-xs text-zinc-700">No research bonuses unlocked yet. Purchase research below to gain bonuses.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-4">
+            {b.growthSpeedPct > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Growth speed</span>
+                <span className="text-[10px] font-mono text-emerald-400">+{b.growthSpeedPct}%</span>
+              </div>
+            )}
+            {b.extractionBonusPct > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Extraction yield</span>
+                <span className="text-[10px] font-mono text-orange-400">+{b.extractionBonusPct}%</span>
+              </div>
+            )}
+            {b.upkeepReductionPct > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Upkeep saved</span>
+                <span className="text-[10px] font-mono text-teal-400">{b.upkeepReductionPct}%</span>
+              </div>
+            )}
+            {b.storageCapBonus > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Storage cap</span>
+                <span className="text-[10px] font-mono text-sky-400">+{b.storageCapBonus.toLocaleString()}</span>
+              </div>
+            )}
+            {b.fleetSpeedBonus > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Fleet speed</span>
+                <span className="text-[10px] font-mono text-indigo-400">+{b.fleetSpeedBonus} ly/hr</span>
+              </div>
+            )}
+            {b.fleetHarvestBonusPct > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Harvest power</span>
+                <span className="text-[10px] font-mono text-purple-400">+{b.fleetHarvestBonusPct}%</span>
+              </div>
+            )}
+            {b.fleetSlots > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Fleet slots</span>
+                <span className="text-[10px] font-mono text-zinc-300">{b.fleetSlots}</span>
+              </div>
+            )}
+            {b.fleetMaxShips > 0 && (
+              <div className="flex items-center justify-between gap-1">
+                <span className="text-[10px] text-zinc-600">Ships/fleet</span>
+                <span className="text-[10px] font-mono text-zinc-300">up to {b.fleetMaxShips}</span>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Category tabs */}

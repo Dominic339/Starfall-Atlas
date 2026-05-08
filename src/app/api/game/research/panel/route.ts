@@ -22,8 +22,19 @@ import {
   milestoneLabel,
   maxTotalShipUpgrades,
   allStatCaps,
+  fleetCommandSpeedBonus,
+  fleetFormationHarvestMultiplier,
+  fleetSlotsAllowed,
+  fleetSizeAllowed,
   type MilestoneData,
 } from "@/lib/game/researchHelpers";
+import {
+  researchLevel,
+  growthSpeedMultiplier,
+  extractionBonusMultiplier,
+  upkeepReductionFraction,
+} from "@/lib/game/colonyStructures";
+import { BALANCE } from "@/lib/config/balance";
 import type { PlayerResearch, PlayerStation, ResourceInventoryRow } from "@/lib/types/game";
 
 export const dynamic = "force-dynamic";
@@ -126,6 +137,23 @@ export async function GET() {
   const totalUpgradeCap = maxTotalShipUpgrades(unlockedIds);
   const statCaps = allStatCaps(unlockedIds);
 
+  // Compute active gameplay bonuses from all unlocked research.
+  const growthLvl         = researchLevel(unlockedIds, "growth");
+  const extractionLvl     = researchLevel(unlockedIds, "extraction");
+  const sustainabilityLvl = researchLevel(unlockedIds, "sustainability");
+  const storageLvl        = researchLevel(unlockedIds, "storage");
+
+  const activeBonuses = {
+    growthSpeedPct:       Math.round((growthSpeedMultiplier(growthLvl) - 1) * 100),
+    extractionBonusPct:   Math.round((extractionBonusMultiplier(0, extractionLvl) - 1.0) * 100),
+    upkeepReductionPct:   Math.round(upkeepReductionFraction(0, sustainabilityLvl) * 100),
+    storageCapBonus:      storageLvl * BALANCE.structures.researchEffects.storageCapPerLevel,
+    fleetSpeedBonus:      fleetCommandSpeedBonus(unlockedIds, BALANCE),
+    fleetHarvestBonusPct: Math.round((fleetFormationHarvestMultiplier(unlockedIds, BALANCE) - 1) * 100),
+    fleetSlots:           fleetSlotsAllowed(unlockedIds),
+    fleetMaxShips:        fleetSizeAllowed(unlockedIds),
+  };
+
   // Build denormalized category tree
   const orderedCategories = (
     Object.entries(RESEARCH_CATEGORY_META) as [ResearchCategory, { label: string; order: number }][]
@@ -199,6 +227,7 @@ export async function GET() {
       totalUpgradeCap,
       maxTotalUpgrades: 66,
       statCaps,
+      activeBonuses,
     },
   });
 }
