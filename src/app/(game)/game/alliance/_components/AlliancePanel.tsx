@@ -31,6 +31,10 @@ export interface DisputePanelEntry {
   isDefender: boolean;
   /** Milliseconds remaining until dispute resolves — precomputed server-side. */
   msLeft: number;
+  defenderScore: number;
+  attackerScore: number;
+  defenderFleetCount: number;
+  attackerFleetCount: number;
 }
 
 export interface GoalEntry {
@@ -1081,6 +1085,40 @@ export function AlliancePanel({
                       Resolved {new Date(d.resolvedAt).toLocaleDateString()}
                     </div>
                   )}
+
+                  {/* Score bar */}
+                  {(() => {
+                    const total = d.defenderScore + d.attackerScore;
+                    const defPct = total > 0 ? (d.defenderScore / total) * 100 : 50;
+                    const atkPct = total > 0 ? (d.attackerScore / total) * 100 : 50;
+                    return (
+                      <div className="mt-3">
+                        <div className="mb-1 flex items-center justify-between text-xs">
+                          <span className="text-emerald-500/80">
+                            DEF {d.defenderScore.toLocaleString()}
+                            <span className="ml-1 text-zinc-600">({d.defenderFleetCount} fleets)</span>
+                          </span>
+                          <span className="text-red-400/80">
+                            <span className="mr-1 text-zinc-600">({d.attackerFleetCount} fleets)</span>
+                            {d.attackerScore.toLocaleString()} ATK
+                          </span>
+                        </div>
+                        <div className="flex h-1.5 overflow-hidden rounded-full bg-zinc-800">
+                          {total > 0 ? (
+                            <>
+                              <div className="bg-emerald-600/70 transition-all" style={{ width: `${defPct}%` }} />
+                              <div className="bg-red-600/70 transition-all" style={{ width: `${atkPct}%` }} />
+                            </>
+                          ) : (
+                            <div className="w-full bg-zinc-700/40" />
+                          )}
+                        </div>
+                        {total === 0 && (
+                          <p className="mt-0.5 text-xs text-zinc-700">No fleets committed yet</p>
+                        )}
+                      </div>
+                    );
+                  })()}
 
                   {isOpen && (
                     <div className="mt-3">

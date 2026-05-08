@@ -192,6 +192,10 @@ export default async function AlliancePage() {
     winnerAllianceId: string | null;
     isDefender: boolean;
     msLeft: number;
+    defenderScore: number;
+    attackerScore: number;
+    defenderFleetCount: number;
+    attackerFleetCount: number;
   };
 
   let allianceDisputes: DisputePanelEntry[] = [];
@@ -250,19 +254,61 @@ export default async function AlliancePage() {
 
     // Enrich disputes with beacon system IDs
     const disputeBeaconIds = [...new Set(rawDisputes.map((d) => d.beacon_id))];
+    const disputeIds = rawDisputes.map((d) => d.id);
+
     type BeaconSysRow = { id: string; system_id: string };
+    type ReinfRow = { dispute_id: string; alliance_id: string; score_snapshot: number };
+
+    const [bRowsRes, reinforcementsRes] = await Promise.all([
+      disputeBeaconIds.length > 0
+        ? admin.from("alliance_beacons").select("id, system_id").in("id", disputeBeaconIds)
+        : Promise.resolve({ data: [] }),
+      disputeIds.length > 0
+        ? admin.from("dispute_reinforcements").select("dispute_id, alliance_id, score_snapshot").in("dispute_id", disputeIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
     const beaconSysMap = new Map<string, string>();
-    if (disputeBeaconIds.length > 0) {
-      const { data: bRows } = listResult<BeaconSysRow>(
-        await admin.from("alliance_beacons").select("id, system_id").in("id", disputeBeaconIds),
-      );
-      for (const b of bRows ?? []) beaconSysMap.set(b.id, b.system_id);
+    for (const b of (listResult<BeaconSysRow>(bRowsRes).data ?? [])) {
+      beaconSysMap.set(b.id, b.system_id);
+    }
+
+    // Aggregate reinforcement scores per dispute per side
+    type ScoreEntry = { score: number; fleetCount: number };
+    const reinforcementScores = new Map<string, { defending: ScoreEntry; attacking: ScoreEntry }>();
+    for (const r of ((reinforcementsRes.data ?? []) as ReinfRow[])) {
+      const existing = reinforcementScores.get(r.dispute_id) ?? {
+        defending: { score: 0, fleetCount: 0 },
+        attacking: { score: 0, fleetCount: 0 },
+      };
+      // We'll resolve which side is which when building the entry
+      const entry = reinforcementScores.get(r.dispute_id);
+      if (entry) {
+        if (r.alliance_id === rawDisputes.find((d) => d.id === r.dispute_id)?.defending_alliance_id) {
+          entry.defending.score += r.score_snapshot;
+          entry.defending.fleetCount += 1;
+        } else {
+          entry.attacking.score += r.score_snapshot;
+          entry.attacking.fleetCount += 1;
+        }
+      } else {
+        const d = rawDisputes.find((dd) => dd.id === r.dispute_id);
+        const isDefender = d?.defending_alliance_id === r.alliance_id;
+        reinforcementScores.set(r.dispute_id, {
+          defending: isDefender ? { score: r.score_snapshot, fleetCount: 1 } : { score: 0, fleetCount: 0 },
+          attacking: !isDefender ? { score: r.score_snapshot, fleetCount: 1 } : { score: 0, fleetCount: 0 },
+        });
+      }
     }
 
     const sysNameMapLocal = new Map(catalog.map((e) => [e.id, e.properName ?? e.id]));
 
     allianceDisputes = rawDisputes.map((d) => {
       const sysId = beaconSysMap.get(d.beacon_id) ?? "";
+      const scores = reinforcementScores.get(d.id) ?? {
+        defending: { score: 0, fleetCount: 0 },
+        attacking: { score: 0, fleetCount: 0 },
+      };
       return {
         id:                  d.id,
         beaconId:            d.beacon_id,
@@ -277,6 +323,10 @@ export default async function AlliancePage() {
         winnerAllianceId:    d.winner_alliance_id,
         isDefender:          d.defending_alliance_id === membership.alliance_id,
         msLeft:              Math.max(0, new Date(d.resolves_at).getTime() - pageNow.getTime()),
+        defenderScore:       scores.defending.score,
+        attackerScore:       scores.attacking.score,
+        defenderFleetCount:  scores.defending.fleetCount,
+        attackerFleetCount:  scores.attacking.fleetCount,
       };
     });
   }

@@ -22,9 +22,19 @@ interface Listing {
 
 interface InventoryEntry { resourceType: string; quantity: number; }
 
+interface MarketStat {
+  resourceType: string;
+  minPrice: number;
+  maxPrice: number;
+  avgPrice: number;
+  totalSupply: number;
+  listingCount: number;
+}
+
 interface PanelData {
   listings: Listing[];
   inventory: InventoryEntry[];
+  marketStats: MarketStat[];
   playerCredits: number;
   playerId: string;
   listingFeePercent: number;
@@ -301,6 +311,35 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
           {/* ── Buy tab ─────────────────────────────────────────────────── */}
           {!loading && !fetchError && tab === "buy" && (
             <div className="space-y-4 animate-fade-in-up">
+
+              {/* Market overview strip */}
+              {data && data.marketStats.length > 0 && (
+                <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/40 px-4 py-3">
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-zinc-500">Market Overview</p>
+                  <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 sm:grid-cols-3">
+                    {data.marketStats
+                      .sort((a, b) => a.resourceType.localeCompare(b.resourceType))
+                      .map((s) => (
+                        <div key={s.resourceType} className="flex items-center justify-between gap-2">
+                          <span className="text-xs text-zinc-500 truncate">{resLabel(s.resourceType)}</span>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <span className="text-xs font-mono text-amber-400/90">{s.minPrice.toLocaleString()}</span>
+                            {s.minPrice !== s.maxPrice && (
+                              <>
+                                <span className="text-xs text-zinc-700">–</span>
+                                <span className="text-xs font-mono text-amber-300/70">{s.maxPrice.toLocaleString()}</span>
+                              </>
+                            )}
+                            <span className="text-xs text-zinc-700">¢</span>
+                            <span className="text-xs text-zinc-600 font-mono">·{s.totalSupply.toLocaleString()}</span>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                  <p className="mt-2 text-xs text-zinc-700">Price range (¢/unit) · supply (units)</p>
+                </div>
+              )}
+
               {/* Filter */}
               {allTypes.length > 0 && (
                 <div className="flex items-center gap-2">
@@ -324,9 +363,19 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
               )}
 
               <div className="stagger-children space-y-4">
-              {[...grouped.entries()].map(([rt, group]) => (
+              {[...grouped.entries()].map(([rt, group]) => {
+                const stat = data?.marketStats.find((s) => s.resourceType === rt);
+                return (
                 <div key={rt} className="animate-fade-in-up">
-                  <p className="mb-1.5 text-xs font-medium text-zinc-500">{resLabel(rt)}</p>
+                  <div className="mb-1.5 flex items-center justify-between gap-3">
+                    <p className="text-xs font-medium text-zinc-500">{resLabel(rt)}</p>
+                    {stat && (
+                      <span className="text-xs text-zinc-700 font-mono">
+                        floor <span className="text-amber-500/80">{stat.minPrice.toLocaleString()}¢</span>
+                        {" · "}avg <span className="text-amber-400/60">{stat.avgPrice.toLocaleString()}¢</span>
+                      </span>
+                    )}
+                  </div>
                   <div className="overflow-hidden rounded border border-zinc-800/60">
                     <table className="w-full text-xs">
                       <thead>
@@ -376,7 +425,8 @@ export function MarketMapPanel({ onClose }: MarketMapPanelProps) {
                     </table>
                   </div>
                 </div>
-              ))}
+              );
+              })}
               </div>
             </div>
           )}

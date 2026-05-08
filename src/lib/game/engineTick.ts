@@ -311,6 +311,7 @@ export async function runEngineTick(
       requestTime,
       extBonusMult,
       balance,
+      extractorTier,
     );
 
     const eventDropMult = dropMultiplier(liveEvents);

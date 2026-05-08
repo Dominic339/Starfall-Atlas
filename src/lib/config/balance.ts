@@ -342,6 +342,14 @@ export const BALANCE = {
      * the timer is considered saturated. Prevents idle overflow.
      */
     accumulationCapHours: 12,
+
+    /**
+     * Fraction of the basic extraction rate applied to rare resource nodes.
+     * Rare nodes require an Extractor structure at tier 2 or higher.
+     * Lower rate reflects the exceptional value of rare materials.
+     * Example: tier 1 colony, extractor T2, basic rate 720 u/hr → rare rate 180 u/hr.
+     */
+    rareExtractionRateFraction: 0.25,
   },
 
   // -------------------------------------------------------------------------
