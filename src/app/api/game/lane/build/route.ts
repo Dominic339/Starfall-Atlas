@@ -10,7 +10,7 @@
  *   4. No existing active or pending lane between these two systems.
  *   5. Distance must be ≤ baseRangeLy + relay extensions at each endpoint.
  *
- * Construction takes balance.lanes.constructionHours (12h) and is resolved
+ * Construction takes balance.lanes.constructionHours (30 min) and is resolved
  * lazily via gateResolution.resolveLaneJobs on subsequent page loads.
  *
  * Body: { fromSystemId: string, toSystemId: string }

@@ -15,10 +15,9 @@ export const BALANCE = {
   travel: {
     /**
      * Base ship speed in light-years per hour.
-     * Phase 28: increased for ~30 min travel at medium distances (~5 ly).
-     * A 5 ly journey at 10 ly/hr = 30 minutes.
+     * RTS rebalance: 5 ly journey ≈ 5 min at 60 ly/hr.
      */
-    baseSpeedLyPerHr: 10.0,
+    baseSpeedLyPerHr: 60.0,
   },
 
   // -------------------------------------------------------------------------
@@ -63,25 +62,26 @@ export const BALANCE = {
 
     /**
      * Hours of tax yield that can accumulate before collection is capped.
-     * Prevents runaway idle income (GAME_RULES.md §7).
+     * Reduced to encourage frequent check-ins.
      */
-    taxAccumulationCapHours: 24,
+    taxAccumulationCapHours: 6,
 
     /**
      * Hours until a colony advances to the next tier.
      * Index = current tier. Index 0 is unused. null = max tier.
+     * RTS rebalance: compressed ~12× so T1→2 takes 2 hrs, T9→10 takes 30 days.
      */
     growthHoursByTier: [
       null,  // tier 0 (unused)
-      24,    // tier 1 → 2: 1 day
-      72,    // tier 2 → 3: 3 days
-      168,   // tier 3 → 4: 1 week
-      336,   // tier 4 → 5: 2 weeks
-      720,   // tier 5 → 6: 30 days
-      1440,  // tier 6 → 7: 60 days
-      2160,  // tier 7 → 8: 90 days
-      4320,  // tier 8 → 9: 180 days
-      8760,  // tier 9 → 10: 1 year
+      2,     // tier 1 → 2: 2 hours
+      6,     // tier 2 → 3: 6 hours
+      12,    // tier 3 → 4: 12 hours
+      24,    // tier 4 → 5: 1 day
+      48,    // tier 5 → 6: 2 days
+      96,    // tier 6 → 7: 4 days
+      168,   // tier 7 → 8: 1 week
+      336,   // tier 8 → 9: 2 weeks
+      720,   // tier 9 → 10: 30 days
       null,  // tier 10: max tier
     ] as (number | null)[],
 
@@ -122,13 +122,13 @@ export const BALANCE = {
     maxTransitTaxPercent: 5,
 
     /** Hours to build a standard lane (without Stabilized Wormhole) */
-    constructionHours: 12,
+    constructionHours: 0.5,
 
     /** Maximum number of active lanes a single player may own. */
     maxOwnedLanes: 20,
 
     /** Hours a warp tunnel lane remains active before expiring. */
-    warpTunnelExpiryHours: 48,
+    warpTunnelExpiryHours: 24,
   },
 
   // -------------------------------------------------------------------------
@@ -136,7 +136,7 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   claims: {
     /** Hours to complete a colony deployment after ship arrives */
-    deploymentHours: 4,
+    deploymentHours: 0.5,
 
     /**
      * Window in seconds within which two competing claims are considered
@@ -150,10 +150,10 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   surveying: {
     /** Hours to complete a basic survey */
-    basicSurveyHours: 6,
+    basicSurveyHours: 0.25,
 
     /** Hours to complete a deep survey (premium item) */
-    deepSurveyHours: 2,
+    deepSurveyHours: 0.083,
   },
 
   // -------------------------------------------------------------------------
@@ -247,7 +247,7 @@ export const BALANCE = {
      * Hours after majority control becomes contested before governance reverts
      * to the steward (if no new majority forms).
      */
-    contestedRevertHours: 48,
+    contestedRevertHours: 12,
   },
 
   // -------------------------------------------------------------------------
@@ -255,10 +255,10 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   gates: {
     /** Hours to build a new gate from scratch */
-    constructionHours: 24,
+    constructionHours: 2,
 
     /** Hours to reclaim a neutral gate (reduced cost compared to new construction) */
-    reclaimHours: 6,
+    reclaimHours: 0.5,
   },
 
   // -------------------------------------------------------------------------
@@ -266,13 +266,13 @@ export const BALANCE = {
   // -------------------------------------------------------------------------
   inactivity: {
     /** Days without login before colonies enter abandoned state */
-    thresholdDays: 30,
+    thresholdDays: 14,
 
     /**
      * Days in abandoned state before collapse (the resolution window).
      * Player must log in during this period to reactivate colonies.
      */
-    resolutionWindowDays: 7,
+    resolutionWindowDays: 3,
   },
 
   // -------------------------------------------------------------------------
@@ -341,7 +341,7 @@ export const BALANCE = {
      * Maximum hours of extraction yield that can accumulate before
      * the timer is considered saturated. Prevents idle overflow.
      */
-    accumulationCapHours: 12,
+    accumulationCapHours: 3,
 
     /**
      * Fraction of the basic extraction rate applied to rare resource nodes.
@@ -459,9 +459,9 @@ export const BALANCE = {
   fleet: {
     /**
      * Additional fleet travel speed (ly/hr) per Fleet Command research level.
-     * Fleet Command I–V → +2, +4, +6, +8, +10 ly/hr above ship speed.
+     * Fleet Command I–V → +12, +24, +36, +48, +60 ly/hr above ship speed.
      */
-    commandSpeedBonusPerLevelLyHr: 2.0,
+    commandSpeedBonusPerLevelLyHr: 12.0,
 
     /**
      * Fractional harvest power bonus per Fleet Formation research level (additive).
@@ -503,14 +503,13 @@ export const BALANCE = {
     cargoCapPerLevel: 50,
 
     /**
-     * Base ship speed at level 0 (ly/hr).
-     * Phase 28: must match travel.baseSpeedLyPerHr.
-     * Ships default to engine_level=1, giving effectiveSpeed = 11.0 ly/hr.
+     * Base ship speed at level 0 (ly/hr). Must match travel.baseSpeedLyPerHr.
+     * Ships default to engine_level=1, giving effectiveSpeed = 66.0 ly/hr.
      */
-    baseSpeedLyPerHr: 10.0,
+    baseSpeedLyPerHr: 60.0,
 
     /** Additional speed (ly/hr) per engine upgrade level. */
-    speedPerLevel: 1.0,
+    speedPerLevel: 6.0,
 
     /**
      * Ship tier thresholds — minimum total upgrades (inclusive) to reach each tier.
@@ -562,10 +561,10 @@ export const BALANCE = {
      * Speed of colony transport units in light-years per hour.
      * Used to compute minimum route intervals.
      */
-    speedLyPerHr: 2.0,
+    speedLyPerHr: 12.0,
 
     /** Minimum route interval regardless of distance. */
-    minIntervalMinutes: 30,
+    minIntervalMinutes: 10,
 
     /** Maximum periods to resolve per dashboard load (prevents runaway catch-up). */
     maxCatchupPeriods: 24,
@@ -627,7 +626,7 @@ export const BALANCE = {
      * Maximum hours of harvest accumulation that can be resolved in a single
      * page-load pass. Prevents enormous single-session catch-up yields.
      */
-    maxHarvestAccumulationHours: 24,
+    maxHarvestAccumulationHours: 6,
 
     /**
      * Starting total_amount (units) seeded per resource type.
@@ -691,7 +690,7 @@ export const BALANCE = {
      * Cooldown applied to a disputed beacon (and nearby linked beacons) after
      * a dispute resolves. During cooldown, the beacon cannot be challenged again.
      */
-    cooldownHours: 48,
+    cooldownHours: 8,
 
     /**
      * Maximum number of beacon-link hops from the disputed beacon to include
