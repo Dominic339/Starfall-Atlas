@@ -545,6 +545,13 @@ export function GalaxyMapClient({
     return () => clearInterval(id);
   }, []);
 
+  // Auto-refresh server data every 15 s so ship positions, travel lines, and
+  // dispute states stay current without a manual page reload.
+  useEffect(() => {
+    const id = setInterval(() => router.refresh(), 15_000);
+    return () => clearInterval(id);
+  }, [router]);
+
   // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
   // smoothly instead of jumping once per second.
   const [, setAnimTick] = useState(0);
