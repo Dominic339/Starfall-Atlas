@@ -44,6 +44,7 @@ import { BALANCE } from "@/lib/config/balance";
 import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { LiveEventRow } from "@/lib/game/liveEvents";
 import { dropMultiplier, creditBonusMultiplier } from "@/lib/game/liveEvents";
+import { resolveColonyRoutes } from "@/lib/game/colonyRoutes";
 import type { BodyType } from "@/lib/types/enums";
 import type { Colony, Structure, ResourceNodeRecord } from "@/lib/types/game";
 
@@ -427,7 +428,10 @@ export async function runEngineTick(
     admin, playerId, Math.floor(totalTaxCollected * eventCreditMult), requestTime, balance,
   );
 
-  // ── 11. Update last_active_at (after inactivity check, not before) ────────
+  // ── 11. Colony supply route execution (lazy, fire-and-forget on failure) ──
+  void resolveColonyRoutes(admin, playerId, requestTime).catch(() => undefined);
+
+  // ── 12. Update last_active_at (after inactivity check, not before) ────────
   void touchPlayerActivity(admin, playerId, requestTime).catch(() => undefined);
 
   return {
