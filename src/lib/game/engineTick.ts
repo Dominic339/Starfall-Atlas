@@ -45,6 +45,7 @@ import type { BalanceConfig } from "@/lib/config/balanceOverrides";
 import type { LiveEventRow } from "@/lib/game/liveEvents";
 import { dropMultiplier, creditBonusMultiplier } from "@/lib/game/liveEvents";
 import { resolveColonyRoutes } from "@/lib/game/colonyRoutes";
+import { getPlayerHeroBonuses, awardHeroXp, HERO_XP } from "@/lib/game/heroShip";
 import type { BodyType } from "@/lib/types/enums";
 import type { Colony, Structure, ResourceNodeRecord } from "@/lib/types/game";
 
@@ -102,6 +103,9 @@ export async function runEngineTick(
   // ── 3–5.6. Fetch station resources + structures + research + surveys + stewardship ──
   type StewardRow = { body_id: string; steward_id: string };
   type PermitRow  = { body_id: string; steward_id: string; tax_rate_pct: number };
+
+  const heroBonuses = await getPlayerHeroBonuses(admin, playerId).catch(() => null);
+  const heroExtractionBonus = heroBonuses?.extractionMultiplierBonus ?? 0;
 
   const [invRowsRes, structureRowsRes, researchRowsRes, surveyRowsRes, stewardshipRowsRes] = await Promise.all([
     stationId
@@ -301,7 +305,7 @@ export async function runEngineTick(
 
     const colonyStructures = (structuresByColonyId.get(colony.id) ?? []) as Structure[];
     const extractorTier  = getStructureTier(colonyStructures, "extractor");
-    const extBonusMult   = extractionBonusMultiplier(extractorTier, extractionResearchLvl);
+    const extBonusMult   = extractionBonusMultiplier(extractorTier, extractionResearchLvl) + heroExtractionBonus;
     const healthMult     = extractionMultiplier(colony.upkeep_missed_periods);
     const lastExtractAt  = colony.last_extract_at ?? colony.created_at;
 
@@ -385,6 +389,12 @@ export async function runEngineTick(
         })),
         { onConflict: "location_type,location_id,resource_type" },
       );
+
+    // Award hero XP proportional to units extracted (fire-and-forget)
+    const totalExtracted = finalAmounts.reduce((s, i) => s + i.quantity, 0);
+    if (totalExtracted >= 100) {
+      void awardHeroXp(admin, playerId, Math.floor(totalExtracted / 100) * HERO_XP.extractResources);
+    }
   }
 
   // ── 9. Auto-collect colony tax credits ────────────────────────────────────

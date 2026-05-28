@@ -26,6 +26,7 @@ import { EmpireMapPanel } from "./EmpireMapPanel";
 import { MessagesMapPanel } from "./MessagesMapPanel";
 import { StationMapPanel } from "./StationMapPanel";
 import { CommandMapPanel } from "./CommandMapPanel";
+import { HeroMapPanel } from "./HeroMapPanel";
 import { ShopMapPanel } from "./ShopMapPanel";
 import { ProfileMapPanel } from "./ProfileMapPanel";
 
@@ -623,6 +624,7 @@ export function GalaxyMapClient({
 
   // ── Command panel ──────────────────────────────────────────────────────────
   const [commandPanelOpen, setCommandPanelOpen] = useState(false);
+  const [heroPanelOpen,    setHeroPanelOpen]    = useState(false);
 
   // ── Shop panel ─────────────────────────────────────────────────────────────
   const [shopPanelOpen, setShopPanelOpen] = useState(false);
@@ -1159,11 +1161,11 @@ export function GalaxyMapClient({
       if (searchOpen) { setSearchOpen(false); setSearchQuery(""); return; }
       if (inInput) return;
       const anyOverlay = profilePanelOpen || marketPanelOpen || empirePanelOpen ||
-        messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen ||
+        messagesPanelOpen || stationPanelOpen || commandPanelOpen || shopPanelOpen || heroPanelOpen ||
         colonyPanelSystemId !== null || manifestOpen;
       if (anyOverlay) {
         setProfilePanelOpen(false); setMarketPanelOpen(false); setEmpirePanelOpen(false);
-        setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false);
+        setMessagesPanelOpen(false); setStationPanelOpen(false); setCommandPanelOpen(false); setHeroPanelOpen(false);
         setShopPanelOpen(false); setColonyPanelSystemId(null); setManifestOpen(false);
       } else {
         setSelectedId(null); setSelectedAsteroidId(null);
@@ -1172,7 +1174,7 @@ export function GalaxyMapClient({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [searchOpen, profilePanelOpen, marketPanelOpen, empirePanelOpen, messagesPanelOpen,
-      stationPanelOpen, commandPanelOpen, shopPanelOpen, colonyPanelSystemId, manifestOpen]);
+      stationPanelOpen, commandPanelOpen, shopPanelOpen, heroPanelOpen, colonyPanelSystemId, manifestOpen]);
 
   // ── Zoom button helpers ───────────────────────────────────────────────────
   function zoomBy(factor: number) {
@@ -3127,6 +3129,15 @@ export function GalaxyMapClient({
               </svg>,
             },
             {
+              label: "Commander", bg: "from-sky-900/70 to-sky-950/80", border: "border-sky-800/40", glow: "shadow-sky-900/40", iconBg: "bg-sky-950/60", onClick: () => setHeroPanelOpen(true),
+              icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
+                <polygon points="12,3 14.5,9 21,9.5 16.5,14 18.2,21 12,17.5 5.8,21 7.5,14 3,9.5 9.5,9" fill="#0c4a6e" opacity="0.6"/>
+                <polygon points="12,3 14.5,9 21,9.5 16.5,14 18.2,21 12,17.5 5.8,21 7.5,14 3,9.5 9.5,9" stroke="#38bdf8" strokeWidth="1.5"/>
+                <circle cx="12" cy="12" r="3" fill="#0ea5e9"/>
+                <circle cx="12" cy="12" r="1.2" fill="#e0f2fe"/>
+              </svg>,
+            },
+            {
               label: "Empire", bg: "from-indigo-900/70 to-indigo-950/80", border: "border-indigo-700/40", glow: "shadow-indigo-900/40", iconBg: "bg-indigo-950/60", onClick: () => setEmpirePanelOpen(true),
               icon: <svg viewBox="0 0 24 24" fill="none" className="w-6 h-6">
                 <path d="M4 18L4 9L8 13L12 5L16 13L20 9L20 18Z" fill="#1e1b4b" opacity="0.5" transform="translate(0.5,0.5)"/>
@@ -4389,6 +4400,7 @@ export function GalaxyMapClient({
 
       {/* HUD overlays */}
       {profilePanelOpen  && <ProfileMapPanel  onClose={() => setProfilePanelOpen(false)} />}
+      {heroPanelOpen     && <HeroMapPanel     onClose={() => setHeroPanelOpen(false)} />}
       {marketPanelOpen   && <MarketMapPanel   onClose={() => setMarketPanelOpen(false)} />}
       {empirePanelOpen   && <EmpireMapPanel   onClose={() => setEmpirePanelOpen(false)} />}
       {messagesPanelOpen && <MessagesMapPanel onClose={() => setMessagesPanelOpen(false)} />}

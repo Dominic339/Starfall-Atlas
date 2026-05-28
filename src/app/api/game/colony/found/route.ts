@@ -39,6 +39,7 @@ import { isHarshPlanetType } from "@/lib/game/habitability";
 import { nextGrowthAt } from "@/lib/game/taxes";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import { awardBattlePassXp } from "@/lib/game/battlePass";
+import { awardHeroXp, HERO_XP } from "@/lib/game/heroShip";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
 import type { Colony, Ship, SystemDiscovery, Player, PlayerStation } from "@/lib/types/game";
 
@@ -420,8 +421,9 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  // Award battle pass XP for founding a colony (fire-and-forget)
+  // Award battle pass + hero XP for founding a colony (fire-and-forget)
   void awardBattlePassXp(admin as any, player.id, { type: "found_colonies", count: 1 });
+  void awardHeroXp(admin as any, player.id, HERO_XP.colonyFounded);
 
   return Response.json({
     ok: true,

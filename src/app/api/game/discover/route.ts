@@ -42,6 +42,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { maybeSingleResult, listResult } from "@/lib/supabase/utils";
 import { getCatalogEntry } from "@/lib/catalog";
 import { SOL_SYSTEM_ID } from "@/lib/config/constants";
+import { awardHeroXp, HERO_XP } from "@/lib/game/heroShip";
 import type { Ship, SystemDiscovery, SystemStewardship, PlayerStation } from "@/lib/types/game";
 
 const DiscoverSchema = z.object({
@@ -218,9 +219,11 @@ export async function POST(request: NextRequest) {
     });
   }
 
-  // Fire-and-forget world events (no await needed for correctness).
+  // Fire-and-forget world events + hero XP (no await needed for correctness).
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   void (admin as any).from("world_events").insert(events);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  void awardHeroXp(admin as any, player.id, HERO_XP.systemDiscovered);
 
   // ── Fetch final stewardship for response ────────────────────────────────
   let finalStewardship: SystemStewardship | null = newStewardship;

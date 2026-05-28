@@ -154,7 +154,7 @@ async function reconcileStarterAssets(
   // Fetch ship IDs ordered by created_at so oldest are first (canonical).
   const { data: existingShips, error: shipsError } = await admin
     .from("ships")
-    .select("id, created_at")
+    .select("id, created_at, is_hero")
     .eq("owner_id", playerId)
     .order("created_at", { ascending: true });
 
@@ -163,17 +163,16 @@ async function reconcileStarterAssets(
     console.error(`[bootstrap] ships query failed for player ${playerId}:`, shipsError);
   } else if (!existingShips || existingShips.length === 0) {
     // No ships at all — create canonical starter ships.
-    // NOTE: stat-level columns (hull_level, engine_level, etc.) are intentionally
-    // omitted here. We rely on DB column defaults (set to 1 by migration 00038).
-    // This makes the insert resilient to DBs that have not yet run migration 00021.
     const { error: insertErr } = await admin.from("ships").insert(
-      STARTER_SHIPS.map((ship) => ({
+      STARTER_SHIPS.map((ship, idx) => ({
         owner_id: playerId,
         name: randomShipName(),
         speed_ly_per_hr: ship.speedLyPerHr,
         cargo_cap: ship.cargoCap,
         current_system_id: SOL_SYSTEM_ID,
         current_body_id: null,
+        is_hero: idx === 0,
+        hero_class: idx === 0 ? "pathfinder" : null,
       })) as any, // eslint-disable-line @typescript-eslint/no-explicit-any
     );
     if (insertErr) {
@@ -182,7 +181,22 @@ async function reconcileStarterAssets(
         JSON.stringify(insertErr),
       );
     }
-  } else if (existingShips.length > STARTER_SHIPS.length) {
+  } else {
+    // Ensure exactly one ship is the hero. If none is marked, promote the oldest.
+    const hasHero = (existingShips as { id: string; is_hero?: boolean }[]).some((s) => s.is_hero);
+    if (!hasHero) {
+      const firstShipId = (existingShips as { id: string }[])[0]?.id;
+      if (firstShipId) {
+        await admin.from("ships")
+          .update({ is_hero: true, hero_class: "pathfinder" })
+          .eq("id", firstShipId)
+          .catch(() => undefined);
+      }
+    }
+  }
+
+  // Keep this block separate — only runs when ships exist and we need to trim extras
+  if (existingShips && existingShips.length > STARTER_SHIPS.length) {
     // More ships than the canonical count — Phase 26 bootstrap bug produced duplicates.
     // Keep the oldest STARTER_SHIPS.length ships, delete the rest.
     // The oldest ships are most likely to have had upgrades applied.
@@ -242,13 +256,15 @@ async function createStarterAssets(playerId: string): Promise<void> {
   // omitted — we rely on DB column defaults (set to 1 by migration 00038).
   // This makes the insert resilient to DBs missing migration 00021.
   const { error: shipErr } = await admin.from("ships").insert(
-    STARTER_SHIPS.map((ship) => ({
+    STARTER_SHIPS.map((ship, idx) => ({
       owner_id: playerId,
       name: ship.name,
       speed_ly_per_hr: ship.speedLyPerHr,
       cargo_cap: ship.cargoCap,
       current_system_id: SOL_SYSTEM_ID,
       current_body_id: null,
+      is_hero: idx === 0,
+      hero_class: idx === 0 ? "pathfinder" : null,
     })),
   );
 

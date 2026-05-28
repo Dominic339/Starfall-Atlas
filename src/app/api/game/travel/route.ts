@@ -31,6 +31,7 @@ import { getCatalogEntry } from "@/lib/catalog";
 import { distanceBetween, computeArrivalTime } from "@/lib/game/travel";
 import { findActiveLane } from "@/lib/game/gateResolution";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
+import { getPlayerHeroBonuses, awardHeroXp, HERO_XP } from "@/lib/game/heroShip";
 import type { Ship, TravelJob } from "@/lib/types/game";
 
 const CreateTravelSchema = z.object({
@@ -188,9 +189,10 @@ export async function POST(request: NextRequest) {
   }
 
   // ── Create travel job ────────────────────────────────────────────────────
-  // fromSystemId is already defined above (guaranteed non-null from find())
   const now = new Date();
-  const arriveAt = computeArrivalTime(now, distanceLy, ship.speed_ly_per_hr);
+  const heroBonuses = await getPlayerHeroBonuses(admin as any, player.id); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const effectiveSpeed = Number(ship.speed_ly_per_hr) + heroBonuses.travelSpeedBonusLyHr;
+  const arriveAt = computeArrivalTime(now, distanceLy, effectiveSpeed);
 
   // Step 1: Mark ship as in transit by clearing its location.
   // Also write Phase 32 unified state fields:

@@ -20,6 +20,7 @@ import { rankColonyCandidates } from "@/lib/game/shipAutomation";
 import { resolveGateJobs, resolveLaneJobs } from "@/lib/game/gateResolution";
 import { BALANCE } from "@/lib/config/balance";
 import { awardBattlePassXp } from "@/lib/game/battlePass";
+import { awardHeroXp, HERO_XP } from "@/lib/game/heroShip";
 import type { Ship, TravelJob, Colony, PlayerStation } from "@/lib/types/game";
 import type { SystemId, ColonyId } from "@/lib/types/game";
 
@@ -139,8 +140,9 @@ export async function runTravelResolution(
           };
           travelJobByShipId.delete(ship.id);
           jobsResolved++;
-          // Award battle pass XP for travel jump (fire-and-forget)
+          // Award battle pass + hero XP for travel jump (fire-and-forget)
           void awardBattlePassXp(admin, playerId, { type: "travel_jumps", count: 1 });
+          void awardHeroXp(admin, playerId, HERO_XP.travelCompleted);
         } else {
           resolvedShips[si] = ship;
           continue;
