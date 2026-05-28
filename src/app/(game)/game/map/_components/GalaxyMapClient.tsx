@@ -538,6 +538,13 @@ export function GalaxyMapClient({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
+  // Ticks every second so all inline ETA/countdown calculations stay current.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   // Uses requestAnimationFrame (throttled to 33 ms) so ship position updates
   // smoothly instead of jumping once per second.
   const [, setAnimTick] = useState(0);

@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { Countdown } from "@/components/Countdown";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -76,14 +77,6 @@ function timeAgo(iso: string): string {
   return "just now";
 }
 
-function eta(iso: string): string {
-  const ms = new Date(iso).getTime() - Date.now();
-  if (ms <= 0) return "arriving";
-  const min = Math.ceil(ms / 60_000);
-  if (min < 60) return `${min}m`;
-  const h = Math.floor(min / 60), rem = min % 60;
-  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
-}
 
 // ---------------------------------------------------------------------------
 // Sub-components
@@ -353,7 +346,7 @@ function FleetTab({ data, onRefresh }: { data: PanelData; onRefresh: () => void 
                     )}
                     {ship.isTraveling && ship.arriveAt && (
                       <span className="rounded border border-sky-800/40 bg-sky-950/20 px-1.5 py-0.5 text-[10px] text-sky-400">
-                        ETA {eta(ship.arriveAt)}
+                        ETA <Countdown target={ship.arriveAt} doneLabel="arriving" />
                       </span>
                     )}
                   </div>
@@ -379,7 +372,7 @@ function FleetTab({ data, onRefresh }: { data: PanelData; onRefresh: () => void 
                     <span className="text-[10px] text-zinc-600">Traveling to</span>
                     <span className="text-[10px] font-semibold text-sky-400">{ship.destinationSystemName}</span>
                     {ship.arriveAt && (
-                      <span className="ml-auto text-[10px] text-zinc-600">{eta(ship.arriveAt)}</span>
+                      <Countdown target={ship.arriveAt} doneLabel="arriving" className="ml-auto text-[10px] text-zinc-600" />
                     )}
                   </div>
                 )}

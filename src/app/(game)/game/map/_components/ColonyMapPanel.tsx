@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { Countdown } from "@/components/Countdown";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -346,8 +347,6 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                   const abandonedAt = colony.abandonedAt ? new Date(colony.abandonedAt) : new Date();
                   const collapseAt = new Date(abandonedAt.getTime() + windowMs);
                   const msLeft = collapseAt.getTime() - Date.now();
-                  const daysLeft = Math.max(0, Math.floor(msLeft / 86_400_000));
-                  const hoursLeft = Math.max(0, Math.floor((msLeft % 86_400_000) / 3_600_000));
                   return (
                     <div className="rounded-lg border border-amber-800 bg-amber-950/30 px-4 py-3 space-y-2">
                       <p className="text-sm font-medium text-amber-400">Colony Abandoned</p>
@@ -355,7 +354,7 @@ export function ColonyMapPanel({ systemId, onClose }: ColonyMapPanelProps) {
                         <>
                           <p className="text-xs text-zinc-400">
                             Reactivate within{" "}
-                            <span className="font-semibold text-amber-300">{daysLeft}d {hoursLeft}h</span>{" "}
+                            <Countdown target={collapseAt.toISOString()} doneLabel="collapsed" className="font-semibold text-amber-300" />{" "}
                             or it collapses.
                           </p>
                           <button

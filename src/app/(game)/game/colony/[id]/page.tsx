@@ -45,6 +45,7 @@ import { BuildStructureButton } from "../../_components/ColonyStructures";
 import { runEngineTick } from "@/lib/game/engineTick";
 import { getBalanceWithOverrides } from "@/lib/config/balanceOverrides";
 import type { BodyType } from "@/lib/types/enums";
+import { Countdown } from "@/components/Countdown";
 
 export const dynamic = "force-dynamic";
 
@@ -338,17 +339,8 @@ export default async function ColonyPage({
   const systemName = systemDisplayName(colony.system_id);
   const bodyIndexStr = colony.body_id.slice(colony.body_id.lastIndexOf(":") + 1);
 
-  let growthLabel: string | null = null;
-  if (colony.status === "active") {
-    if (!colony.next_growth_at) {
-      growthLabel = "Max tier";
-    } else if (colony.upkeep_missed_periods >= 1) {
-      growthLabel = "Growth paused — send supplies";
-    } else {
-      const growthDate = new Date(colony.next_growth_at);
-      growthLabel = `Grows ${growthDate > now ? growthDate.toLocaleDateString() : "soon"}`;
-    }
-  }
+  const growthPaused = colony.status === "active" && colony.upkeep_missed_periods >= 1;
+  const showGrowthTimer = colony.status === "active" && !!colony.next_growth_at && !growthPaused;
 
   const inventoryTotal = colonyInventory.reduce((s, r) => s + r.quantity, 0);
 
@@ -406,9 +398,15 @@ export default async function ColonyPage({
         <p className="mt-1 text-sm text-zinc-400">
           Tier {colony.population_tier}{" "}
           <span className={`font-medium ${statusColor[colony.status]}`}>{colony.status}</span>
-          {growthLabel && (
-            <span className={`ml-2 text-xs ${colony.upkeep_missed_periods >= 1 ? "text-amber-500" : "text-zinc-600"}`}>
-              · {growthLabel}
+          {colony.status === "active" && !colony.next_growth_at && (
+            <span className="ml-2 text-xs text-zinc-600">· Max tier</span>
+          )}
+          {growthPaused && (
+            <span className="ml-2 text-xs text-amber-500">· Growth paused — send supplies</span>
+          )}
+          {showGrowthTimer && (
+            <span className="ml-2 text-xs text-zinc-600">
+              · Tier up in <Countdown target={colony.next_growth_at!} doneLabel="ready" className="text-emerald-400 font-mono" />
             </span>
           )}
         </p>

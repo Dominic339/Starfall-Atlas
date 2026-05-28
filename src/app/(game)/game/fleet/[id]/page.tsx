@@ -18,6 +18,7 @@ import { getNearbySystems } from "@/lib/catalog";
 import { BALANCE } from "@/lib/config/balance";
 import type { Player, Fleet, Ship, TravelJob } from "@/lib/types/game";
 import { DisbandFleetButton, DispatchFleetForm, RenameFleetButton } from "../../_components/FleetActions";
+import { Countdown } from "@/components/Countdown";
 
 export const dynamic = "force-dynamic";
 
@@ -69,22 +70,6 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
   const travelJobs = listResult<TravelJob>(travelRes).data ?? [];
   const activeTravelJob = travelJobs[0] ?? null;
 
-  // Compute ETA if traveling
-  let etaDisplay: string | null = null;
-  if (activeTravelJob?.arrive_at) {
-    const eta = new Date(activeTravelJob.arrive_at);
-    const now = new Date();
-    const msLeft = eta.getTime() - now.getTime();
-    if (msLeft > 0) {
-      const hoursLeft = msLeft / 3_600_000;
-      if (hoursLeft < 1 / 60) etaDisplay = "arriving soon";
-      else if (hoursLeft < 1) etaDisplay = `~${Math.ceil(hoursLeft * 60)} min`;
-      else etaDisplay = `~${hoursLeft.toFixed(1)} hr`;
-    } else {
-      etaDisplay = "arriving soon";
-    }
-  }
-
   const fleetSpeed = memberShips.length > 0
     ? Math.min(...memberShips.map((s) => Number(s.speed_ly_per_hr)))
     : 0;
@@ -118,8 +103,8 @@ export default async function FleetPage({ params }: { params: { id: string } }) 
                     >
                       {systemDisplayName(activeTravelJob.to_system_id)}
                     </Link>
-                    {etaDisplay && (
-                      <span className="ml-2 text-zinc-600">{etaDisplay}</span>
+                    {activeTravelJob?.arrive_at && (
+                      <Countdown target={activeTravelJob.arrive_at} doneLabel="arriving" className="ml-2 text-zinc-600" />
                     )}
                   </>
                 )}
